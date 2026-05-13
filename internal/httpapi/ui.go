@@ -5,7 +5,7 @@ import (
 	"io/fs"
 )
 
-//go:embed ui/dist/*
+//go:embed all:ui/dist
 var embeddedUI embed.FS
 
 func uiFS() fs.FS {

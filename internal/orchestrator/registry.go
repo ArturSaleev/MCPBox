@@ -50,19 +50,45 @@ func (r *Registry) Status(serverID uint) string {
 }
 
 func (r *Registry) RunnerForProject(ctx context.Context, project models.Project) (*ServerRunner, *models.MCPServer, error) {
+	if project.IsPaused {
+		return nil, nil, errors.New("project is paused")
+	}
+
 	if len(project.Servers) == 0 {
 		return nil, nil, errors.New("project has no configured MCP servers")
 	}
 
-	primary := project.Servers[0]
-	runner := r.getOrCreateRunner(primary)
+	if project.PrimaryServerID == nil {
+		return nil, nil, errors.New("project has no primary MCP server configured")
+	}
+
+	var primary *models.MCPServer
+	for i := range project.Servers {
+		if project.Servers[i].ID == *project.PrimaryServerID {
+			primary = &project.Servers[i]
+			break
+		}
+	}
+
+	if primary == nil {
+		return nil, nil, errors.New("project primary MCP server was not found")
+	}
+	if !primary.IsEnabled {
+		return nil, nil, errors.New("project primary MCP server is disabled")
+	}
+
+	if primary.Transport == models.ServerTransportHTTPStream {
+		return nil, primary, nil
+	}
+
+	runner := r.getOrCreateRunner(*primary)
 	if !runner.Running() {
 		if err := runner.Start(ctx); err != nil {
 			return nil, nil, fmt.Errorf("start project server: %w", err)
 		}
 	}
 
-	return runner, &primary, nil
+	return runner, primary, nil
 }
 
 func (r *Registry) Shutdown(ctx context.Context) error {

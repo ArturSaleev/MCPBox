@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 
 	"MCPBox/internal/models"
 	"github.com/glebarez/sqlite"
@@ -22,6 +23,9 @@ func NewStore(dsn string) (*Store, error) {
 	}
 
 	if err := db.AutoMigrate(&models.Project{}, &models.MCPServer{}); err != nil {
+		return nil, err
+	}
+	if err := db.AutoMigrate(&models.AuditLog{}); err != nil {
 		return nil, err
 	}
 
@@ -76,7 +80,15 @@ func (s *Store) GetProjectByToken(ctx context.Context, token string) (*models.Pr
 }
 
 func (s *Store) AddServer(ctx context.Context, server *models.MCPServer) error {
-	return s.db.WithContext(ctx).Create(server).Error
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(server).Error; err != nil {
+			return err
+		}
+
+		return tx.Model(&models.Project{}).
+			Where("id = ? AND primary_server_id IS NULL", server.ProjectID).
+			Update("primary_server_id", server.ID).Error
+	})
 }
 
 func (s *Store) GetServer(ctx context.Context, id uint) (*models.MCPServer, error) {
@@ -92,10 +104,35 @@ func (s *Store) GetServer(ctx context.Context, id uint) (*models.MCPServer, erro
 func (s *Store) ListAutoStartServers(ctx context.Context) ([]models.MCPServer, error) {
 	var servers []models.MCPServer
 	err := s.db.WithContext(ctx).
+		Joins("JOIN projects ON projects.id = mcp_servers.project_id").
 		Where("auto_start = ?", true).
-		Order("id asc").
+		Where("mcp_servers.is_enabled = ?", true).
+		Where("projects.is_paused = ?", false).
+		Order("mcp_servers.id asc").
 		Find(&servers).Error
 	return servers, err
+}
+
+func (s *Store) SetPrimaryServer(ctx context.Context, projectID, serverID uint) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var project models.Project
+		if err := tx.First(&project, projectID).Error; err != nil {
+			return err
+		}
+
+		var server models.MCPServer
+		err := tx.Where("id = ? AND project_id = ?", serverID, projectID).First(&server).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("server %d does not belong to project %d", serverID, projectID)
+		}
+		if err != nil {
+			return err
+		}
+
+		return tx.Model(&models.Project{}).
+			Where("id = ?", projectID).
+			Update("primary_server_id", serverID).Error
+	})
 }
 
 func newProjectToken() (string, error) {
@@ -105,4 +142,35 @@ func newProjectToken() (string, error) {
 	}
 
 	return hex.EncodeToString(raw), nil
+}
+
+func (s *Store) SetProjectPaused(ctx context.Context, projectID uint, paused bool) error {
+	return s.db.WithContext(ctx).Model(&models.Project{}).
+		Where("id = ?", projectID).
+		Update("is_paused", paused).Error
+}
+
+func (s *Store) SetServerEnabled(ctx context.Context, serverID uint, enabled bool) error {
+	return s.db.WithContext(ctx).Model(&models.MCPServer{}).
+		Where("id = ?", serverID).
+		Update("is_enabled", enabled).Error
+}
+
+func (s *Store) CreateAuditLog(ctx context.Context, entry *models.AuditLog) error {
+	return s.db.WithContext(ctx).Create(entry).Error
+}
+
+func (s *Store) ListAuditLogs(ctx context.Context, projectID *uint, limit int) ([]models.AuditLog, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+
+	var logs []models.AuditLog
+	query := s.db.WithContext(ctx).Order("id desc").Limit(limit)
+	if projectID != nil {
+		query = query.Where("project_id = ?", *projectID)
+	}
+
+	err := query.Find(&logs).Error
+	return logs, err
 }

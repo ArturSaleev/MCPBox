@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -57,7 +58,11 @@ func (r *ServerRunner) Start(parent context.Context) error {
 		return nil
 	}
 
-	executable, args, err := splitCommandLine(r.server.LaunchCommand)
+	if r.server.Transport == models.ServerTransportHTTPStream {
+		return errors.New("http streaming servers are managed externally and cannot be started")
+	}
+
+	executable, args, err := commandSpec(r.server)
 	if err != nil {
 		return err
 	}
@@ -66,6 +71,14 @@ func (r *ServerRunner) Start(parent context.Context) error {
 	cmd := exec.CommandContext(childCtx, executable, args...)
 	if r.server.WorkingDir != "" {
 		cmd.Dir = r.server.WorkingDir
+	}
+	env, err := commandEnv(r.server)
+	if err != nil {
+		cancel()
+		return err
+	}
+	if len(env) > 0 {
+		cmd.Env = env
 	}
 
 	stdin, err := cmd.StdinPipe()
@@ -291,4 +304,58 @@ func splitCommandLine(raw string) (string, []string, error) {
 	// Stage 1 keeps parsing intentionally simple. The command should be stored
 	// without shell metacharacters so it can be executed directly by os/exec.
 	return parts[0], parts[1:], nil
+}
+
+func commandSpec(server models.MCPServer) (string, []string, error) {
+	if strings.TrimSpace(server.Command) != "" {
+		var args []string
+		if strings.TrimSpace(server.ArgsJSON) != "" {
+			if err := json.Unmarshal([]byte(server.ArgsJSON), &args); err != nil {
+				return "", nil, fmt.Errorf("decode args: %w", err)
+			}
+		}
+
+		return server.Command, args, nil
+	}
+
+	return splitCommandLine(server.LaunchCommand)
+}
+
+func commandEnv(server models.MCPServer) ([]string, error) {
+	if strings.TrimSpace(server.EnvJSON) == "" {
+		return nil, nil
+	}
+
+	var pairs []struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	}
+	if err := json.Unmarshal([]byte(server.EnvJSON), &pairs); err != nil {
+		return nil, fmt.Errorf("decode env vars: %w", err)
+	}
+
+	baseEnv := os.Environ()
+	envMap := make(map[string]string, len(baseEnv)+len(pairs))
+	for _, item := range baseEnv {
+		key, value, found := strings.Cut(item, "=")
+		if found {
+			envMap[key] = value
+		}
+	}
+
+	for _, pair := range pairs {
+		key := strings.TrimSpace(pair.Key)
+		if key == "" {
+			continue
+		}
+
+		envMap[key] = pair.Value
+	}
+
+	env := make([]string, 0, len(envMap))
+	for key, value := range envMap {
+		env = append(env, key+"="+value)
+	}
+
+	return env, nil
 }

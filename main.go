@@ -5,9 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"syscall"
 	"time"
@@ -68,8 +71,20 @@ func main() {
 		}
 	}()
 
+	listener, err := net.Listen("tcp", httpServer.Addr)
+	if err != nil {
+		log.Fatalf("http listen failed: %v", err)
+	}
+
+	go func() {
+		url := fmt.Sprintf("http://127.0.0.1:%d/", port)
+		if err := openBrowser(url); err != nil {
+			log.Printf("open browser error: %v", err)
+		}
+	}()
+
 	log.Printf("MCPBox listening on %s", httpServer.Addr)
-	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("http server failed: %v", err)
 	}
 }
@@ -100,4 +115,19 @@ func mustBeValidPort(port int, source string) int {
 	}
 
 	return port
+}
+
+func openBrowser(target string) error {
+	var cmd *exec.Cmd
+
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", target)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", target)
+	default:
+		cmd = exec.Command("xdg-open", target)
+	}
+
+	return cmd.Start()
 }
