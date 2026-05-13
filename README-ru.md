@@ -198,6 +198,97 @@ mcpbox.db
 - `Projects`: создание проектов, добавление серверов, выбор primary server, start/stop локальных серверов, pause проекта, disable сервера, inspection локальных `STDIO` серверов.
 - `Logs`: компактная audit console, фильтр по текущему проекту и сводка по активности самых популярных проектов и серверов.
 
+## Подключение MCPBox К Codex, Claude И Похожим Клиентам
+
+Обычный сценарий подключения такой:
+
+1. Запустить MCPBox.
+2. Создать проект в UI.
+3. Добавить в проект хотя бы один MCP-сервер.
+4. Назначить primary server.
+5. Скопировать project connect URL из UI.
+
+Пример connect URL:
+
+```text
+http://127.0.0.1:38180/connect/<project_token>
+```
+
+Важно:
+- у проекта должен быть выбран primary server, иначе endpoint не готов;
+- если проект поставлен на паузу, доступ клиента будет заблокирован;
+- если primary server отключён, connect path не сработает;
+- совместимость зависит от того, умеет ли конкретный клиент работать с MCP через remote HTTP/SSE-подобный endpoint.
+
+### Codex
+
+Codex умеет подключаться к MCP-серверам через свою MCP-конфигурацию.
+
+Пример через CLI:
+
+```bash
+codex mcp add mcpbox --url http://127.0.0.1:38180/connect/<project_token>
+```
+
+Пример прямой конфигурации:
+
+```toml
+[mcp_servers.mcpbox]
+url = "http://127.0.0.1:38180/connect/<project_token>"
+```
+
+### Claude Code
+
+Claude Code поддерживает MCP-серверы через CLI и `.mcp.json`.
+
+Пример через CLI:
+
+```bash
+claude mcp add --transport sse mcpbox http://127.0.0.1:38180/connect/<project_token>
+```
+
+Пример project config:
+
+```json
+{
+  "mcpServers": {
+    "mcpbox": {
+      "type": "sse",
+      "url": "http://127.0.0.1:38180/connect/<project_token>"
+    }
+  }
+}
+```
+
+### Универсальные MCP-Клиенты
+
+Для клиентов, которые принимают JSON-конфигурацию, типичный шаблон такой:
+
+```json
+{
+  "mcpServers": {
+    "mcpbox": {
+      "type": "sse",
+      "url": "http://127.0.0.1:38180/connect/<project_token>"
+    }
+  }
+}
+```
+
+Сюда обычно попадают Cursor, VS Code agent setups и другие инструменты с поддержкой MCP JSON-конфига.
+
+### Какой URL Давать Другим
+
+Если кто-то ещё должен подключаться, ему нужно дать:
+- host и port MCPBox;
+- конкретный project connect URL;
+- сетевой доступ до машины, где работает MCPBox.
+
+Не нужно отдавать:
+- внутренние SQLite-файлы;
+- локальные working directories без необходимости;
+- сырые `STDIO` launch details, если потребителю нужен только project endpoint.
+
 ## HTTP API
 
 ### Health

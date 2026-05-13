@@ -198,6 +198,97 @@ The embedded UI is organized around two primary views:
 - `Projects`: create projects, add servers, choose a primary server, start/stop local servers, pause a project, disable a server, inspect local `STDIO` servers.
 - `Logs`: compact audit console, current-project filter, and activity summary for most active projects and servers.
 
+## Connecting MCPBox To Codex, Claude, And Similar Clients
+
+The normal connection flow is:
+
+1. Start MCPBox.
+2. Create a project in the UI.
+3. Add at least one MCP server to the project.
+4. Select a primary server.
+5. Copy the project's connect URL from the UI.
+
+Example connect URL:
+
+```text
+http://127.0.0.1:38180/connect/<project_token>
+```
+
+Important:
+- the project must have a primary server before the endpoint is ready;
+- if the project is paused, client access is blocked;
+- if the primary server is disabled, the connect path will fail;
+- MCP client compatibility depends on whether the client supports MCP over remote HTTP/SSE-style endpoints.
+
+### Codex
+
+Codex can connect to MCP servers through its MCP configuration.
+
+CLI example:
+
+```bash
+codex mcp add mcpbox --url http://127.0.0.1:38180/connect/<project_token>
+```
+
+Direct config example:
+
+```toml
+[mcp_servers.mcpbox]
+url = "http://127.0.0.1:38180/connect/<project_token>"
+```
+
+### Claude Code
+
+Claude Code supports MCP servers through CLI commands and `.mcp.json`.
+
+CLI example:
+
+```bash
+claude mcp add --transport sse mcpbox http://127.0.0.1:38180/connect/<project_token>
+```
+
+Project config example:
+
+```json
+{
+  "mcpServers": {
+    "mcpbox": {
+      "type": "sse",
+      "url": "http://127.0.0.1:38180/connect/<project_token>"
+    }
+  }
+}
+```
+
+### Generic MCP Clients
+
+For clients that accept JSON config, the typical pattern is:
+
+```json
+{
+  "mcpServers": {
+    "mcpbox": {
+      "type": "sse",
+      "url": "http://127.0.0.1:38180/connect/<project_token>"
+    }
+  }
+}
+```
+
+Examples of clients that often support similar MCP JSON configuration include Cursor, VS Code agent setups, and other MCP-capable coding tools.
+
+### Which URL To Share
+
+When other people need access, give them:
+- the MCPBox host and port;
+- the specific project connect URL;
+- any network-level access they need to reach that machine.
+
+Do not share:
+- internal SQLite files;
+- local working directories unless needed;
+- raw `STDIO` launch details if the consumer only needs the project endpoint.
+
 ## HTTP API
 
 ### Health
