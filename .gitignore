@@ -1,0 +1,12 @@
+.idea/
+.gocache/
+dist/
+node_modules/
+
+*.db
+*.db-shm
+*.db-wal
+*.exe
+*.dll
+*.so
+*.dylib
