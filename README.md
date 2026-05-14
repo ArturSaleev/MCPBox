@@ -2,7 +2,7 @@
 
 **MCPBox** is a powerful, Go-based gateway and control plane for managing Model Context Protocol (MCP) servers. It provides a central "brain" to connect your databases, local scripts, and APIs to AI clients like Claude, Cursor, and Codex.
 
-
+![img.png](img.png)
 
 ## 🚀 Why MCPBox?
 
