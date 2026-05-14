@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"MCPBox/internal/models"
@@ -22,12 +25,27 @@ import (
 )
 
 type Server struct {
-	store    *storage.Store
-	registry *orchestrator.Registry
-	mux      *http.ServeMux
+	store     *storage.Store
+	registry  *orchestrator.Registry
+	mux       *http.ServeMux
+	sessionMu sync.RWMutex
+	sessions  map[string]connectSession
+}
+
+type connectSession struct {
+	ID           string
+	ProjectToken string
+	ProjectID    uint
+	ServerID     uint
+	CreatedAt    time.Time
 }
 
 type createProjectRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type updateProjectRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 }
@@ -115,6 +133,7 @@ func NewServer(store *storage.Store, registry *orchestrator.Registry) *Server {
 		store:    store,
 		registry: registry,
 		mux:      http.NewServeMux(),
+		sessions: make(map[string]connectSession),
 	}
 
 	s.registerRoutes()
@@ -132,8 +151,13 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/projects", s.handleCreateProject)
 	s.mux.HandleFunc("GET /api/projects/", s.handleProjectStatus)
 	s.mux.HandleFunc("POST /api/projects/", s.handleProjectAction)
+	s.mux.HandleFunc("PUT /api/projects/", s.handleProjectUpdate)
+	s.mux.HandleFunc("DELETE /api/projects/", s.handleProjectDelete)
 	s.mux.HandleFunc("GET /api/servers/", s.handleServerInspect)
 	s.mux.HandleFunc("POST /api/servers/", s.handleServerAction)
+	s.mux.HandleFunc("PUT /api/servers/", s.handleServerUpdate)
+	s.mux.HandleFunc("DELETE /api/servers/", s.handleServerDelete)
+	s.mux.HandleFunc("/mcp/", s.handleConnect)
 	s.mux.HandleFunc("/connect/", s.handleConnect)
 	s.mux.Handle("/", s.handleUI())
 }
@@ -275,6 +299,84 @@ func (s *Server) handleProjectAction(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := parseSingleID(r.URL.Path, "/api/projects/")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	project, err := s.store.GetProject(r.Context(), projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if project == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	var req updateProjectRequest
+	if err := decodeJSON(r.Body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, errors.New("name is required"))
+		return
+	}
+
+	if err := s.store.UpdateProject(r.Context(), projectID, name, strings.TrimSpace(req.Description)); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	updatedProject, err := s.store.GetProject(r.Context(), projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	s.logAudit(r.Context(), &projectID, nil, "project_updated", clientActor(r), name)
+	writeJSON(w, http.StatusOK, s.projectStatus(r, *updatedProject))
+}
+
+func (s *Server) handleProjectDelete(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := parseSingleID(r.URL.Path, "/api/projects/")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	project, err := s.store.GetProject(r.Context(), projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if project == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	for _, server := range project.Servers {
+		if server.Transport == models.ServerTransportSTDIO {
+			stopCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			_ = s.registry.StopServer(stopCtx, server.ID)
+			cancel()
+		}
+	}
+
+	if err := s.store.DeleteProject(r.Context(), projectID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	s.logAudit(r.Context(), nil, nil, "project_deleted", clientActor(r), project.Name)
+	writeJSON(w, http.StatusOK, map[string]any{"project_id": projectID, "deleted": true})
 }
 
 func (s *Server) handleAddServer(w http.ResponseWriter, r *http.Request, projectID uint) {
@@ -429,6 +531,103 @@ func (s *Server) handleServerAction(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleServerUpdate(w http.ResponseWriter, r *http.Request) {
+	serverID, ok := parseSingleID(r.URL.Path, "/api/servers/")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	existing, err := s.store.GetServer(r.Context(), serverID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if existing == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	var req addServerRequest
+	if err := decodeJSON(r.Body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	server, err := buildServerModel(existing.ProjectID, req)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	server.ID = existing.ID
+	server.IsEnabled = existing.IsEnabled
+
+	if err := s.store.UpdateServer(r.Context(), server); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	if existing.Transport == models.ServerTransportSTDIO {
+		stopCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		_ = s.registry.StopServer(stopCtx, existing.ID)
+		cancel()
+	}
+
+	updatedProject, err := s.store.GetProject(r.Context(), existing.ProjectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	s.logAudit(r.Context(), &existing.ProjectID, &existing.ID, "server_updated", clientActor(r), server.Name)
+	writeJSON(w, http.StatusOK, s.projectStatus(r, *updatedProject))
+}
+
+func (s *Server) handleServerDelete(w http.ResponseWriter, r *http.Request) {
+	serverID, ok := parseSingleID(r.URL.Path, "/api/servers/")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	server, err := s.store.GetServer(r.Context(), serverID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if server == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	if server.Transport == models.ServerTransportSTDIO {
+		stopCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		_ = s.registry.StopServer(stopCtx, server.ID)
+		cancel()
+	}
+
+	projectID := server.ProjectID
+	serverName := server.Name
+	if err := s.store.DeleteServer(r.Context(), server.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	updatedProject, err := s.store.GetProject(r.Context(), projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	s.logAudit(r.Context(), &projectID, nil, "server_deleted", clientActor(r), serverName)
+	if updatedProject == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"server_id": serverID, "deleted": true})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, s.projectStatus(r, *updatedProject))
+}
+
 func (s *Server) handleServerInspect(w http.ResponseWriter, r *http.Request) {
 	serverID, tail, ok := parseIDTail(r.URL.Path, "/api/servers/")
 	if !ok || r.Method != http.MethodGet || tail != "inspect" {
@@ -475,7 +674,7 @@ func (s *Server) handleServerInspect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
-	token := strings.Trim(strings.TrimPrefix(path.Clean(r.URL.Path), "/connect/"), "/")
+	token := extractProjectToken(r.URL.Path)
 	if token == "" || token == "." {
 		http.NotFound(w, r)
 		return
@@ -516,16 +715,25 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		if server != nil {
 			s.logAudit(r.Context(), &project.ID, &server.ID, "connect_stream_open", clientActor(r), "")
 		}
-		s.serveSSE(w, r, runner)
+		s.serveSSE(w, r, project.Token, project.ID, server.ID, runner)
 	case http.MethodPost:
-		s.forwardJSONRPC(w, r, runner)
+		if s.isSSESessionRequest(r) {
+			if err := s.validateConnectSession(r, project.Token, server); err != nil {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+			s.forwardJSONRPC(w, r, runner)
+			return
+		}
+
+		s.forwardJSONRPCSync(w, r, runner)
 	default:
 		w.Header().Set("Allow", "GET, POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-func (s *Server) serveSSE(w http.ResponseWriter, r *http.Request, runner *orchestrator.ServerRunner) {
+func (s *Server) serveSSE(w http.ResponseWriter, r *http.Request, projectToken string, projectID, serverID uint, runner *orchestrator.ServerRunner) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -537,10 +745,26 @@ func (s *Server) serveSSE(w http.ResponseWriter, r *http.Request, runner *orches
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
+	sessionID, err := newConnectSessionID()
+	if err != nil {
+		http.Error(w, "failed to create connect session", http.StatusInternalServerError)
+		return
+	}
+
+	s.registerConnectSession(connectSession{
+		ID:           sessionID,
+		ProjectToken: projectToken,
+		ProjectID:    projectID,
+		ServerID:     serverID,
+		CreatedAt:    time.Now().UTC(),
+	})
+	defer s.unregisterConnectSession(sessionID)
+
 	stream, unsubscribe := runner.Subscribe()
 	defer unsubscribe()
 
-	fmt.Fprint(w, "event: ready\ndata: {\"status\":\"connected\"}\n\n")
+	endpointURL := s.connectMessageURL(r, projectToken, sessionID)
+	fmt.Fprintf(w, "event: endpoint\ndata: %s\n\n", endpointURL)
 	flusher.Flush()
 
 	ticker := time.NewTicker(25 * time.Second)
@@ -555,7 +779,7 @@ func (s *Server) serveSSE(w http.ResponseWriter, r *http.Request, runner *orches
 				return
 			}
 
-			fmt.Fprintf(w, "data: %s\n\n", line)
+			fmt.Fprintf(w, "event: message\ndata: %s\n\n", line)
 			flusher.Flush()
 		case <-ticker.C:
 			fmt.Fprint(w, ": keep-alive\n\n")
@@ -592,10 +816,41 @@ func (s *Server) forwardJSONRPC(w http.ResponseWriter, r *http.Request, runner *
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "forwarded"})
 }
 
+func (s *Server) forwardJSONRPCSync(w http.ResponseWriter, r *http.Request, runner *orchestrator.ServerRunner) {
+	payload, err := io.ReadAll(io.LimitReader(r.Body, 1024*1024))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	var raw json.RawMessage
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		writeError(w, http.StatusBadRequest, errors.New("body must be valid JSON-RPC payload"))
+		return
+	}
+
+	server := runner.Server()
+	projectID := server.ProjectID
+	s.logAudit(r.Context(), &projectID, &server.ID, "jsonrpc_forward_sync", clientActor(r), truncateDetail(string(payload)))
+
+	sendCtx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	response, err := runner.SendAndWait(sendCtx, payload)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(response)
+}
+
 func (s *Server) handleUI() http.Handler {
 	fileServer := http.FileServer(http.FS(uiFS()))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/connect/") {
+		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/mcp/") || strings.HasPrefix(r.URL.Path, "/connect/") {
 			http.NotFound(w, r)
 			return
 		}
@@ -654,6 +909,14 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 }
 
 func (s *Server) connectURL(r *http.Request, token string) string {
+	return s.absoluteURL(r, "/mcp/"+token)
+}
+
+func (s *Server) connectMessageURL(r *http.Request, token, sessionID string) string {
+	return s.absoluteURL(r, fmt.Sprintf("/mcp/%s?sessionId=%s", token, sessionID))
+}
+
+func (s *Server) absoluteURL(r *http.Request, requestPath string) string {
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
@@ -668,10 +931,10 @@ func (s *Server) connectURL(r *http.Request, token string) string {
 	}
 
 	if host == "" {
-		return "/connect/" + token
+		return requestPath
 	}
 
-	return fmt.Sprintf("%s://%s/connect/%s", scheme, host, token)
+	return fmt.Sprintf("%s://%s%s", scheme, host, requestPath)
 }
 
 func (s *Server) serverStatus(server models.MCPServer) string {
@@ -970,6 +1233,20 @@ func parseIDTail(rawPath, prefix string) (uint, string, bool) {
 	return uint(id), parts[1], true
 }
 
+func parseSingleID(rawPath, prefix string) (uint, bool) {
+	trimmed := strings.Trim(strings.TrimPrefix(rawPath, prefix), "/")
+	if trimmed == "" || strings.Contains(trimmed, "/") {
+		return 0, false
+	}
+
+	id, err := strconv.ParseUint(trimmed, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+
+	return uint(id), true
+}
+
 func decodeJSON(body io.ReadCloser, target any) error {
 	defer body.Close()
 	decoder := json.NewDecoder(io.LimitReader(body, 1024*1024))
@@ -985,4 +1262,66 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 
 func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": err.Error()})
+}
+
+func (s *Server) registerConnectSession(session connectSession) {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+
+	s.sessions[session.ID] = session
+}
+
+func (s *Server) unregisterConnectSession(sessionID string) {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+
+	delete(s.sessions, sessionID)
+}
+
+func (s *Server) validateConnectSession(r *http.Request, projectToken string, server *models.MCPServer) error {
+	sessionID := strings.TrimSpace(r.URL.Query().Get("sessionId"))
+	if sessionID == "" {
+		// Backward compatibility for clients that POST directly to the connect URL
+		// without a legacy SSE session handshake.
+		return nil
+	}
+
+	s.sessionMu.RLock()
+	session, ok := s.sessions[sessionID]
+	s.sessionMu.RUnlock()
+	if !ok {
+		return errors.New("invalid or expired connect session")
+	}
+	if session.ProjectToken != projectToken {
+		return errors.New("connect session does not match project token")
+	}
+	if server != nil && session.ServerID != 0 && session.ServerID != server.ID {
+		return errors.New("connect session does not match active server")
+	}
+
+	return nil
+}
+
+func newConnectSessionID() (string, error) {
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(raw), nil
+}
+
+func (s *Server) isSSESessionRequest(r *http.Request) bool {
+	return strings.TrimSpace(r.URL.Query().Get("sessionId")) != ""
+}
+
+func extractProjectToken(requestPath string) string {
+	cleaned := path.Clean(requestPath)
+	for _, prefix := range []string{"/mcp/", "/connect/"} {
+		if strings.HasPrefix(cleaned, prefix) {
+			return strings.Trim(strings.TrimPrefix(cleaned, prefix), "/")
+		}
+	}
+
+	return ""
 }

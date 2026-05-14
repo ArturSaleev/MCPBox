@@ -231,7 +231,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       overviewFallbackDescription: 'Workspace group for MCP clients and tools.',
       connectionDescription: 'All clients in this workspace connect through the project token and the primary server.',
       connectionWarning: (token: string) =>
-        `To use /connect/${token}, assign a primary server first.`,
+        `To use /mcp/${token}, assign a primary server first.`,
       addServerDescription:
         'The first server becomes primary automatically. Additional servers stay in the same workspace.',
       serverNamePlaceholder: 'Filesystem Server',
@@ -243,7 +243,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       bearerTokenPlaceholder: 'MCP_BEARER_TOKEN',
       envPassthroughPlaceholder: 'OPENAI_API_KEY',
       serverControlDescription:
-        'Manage processes and choose the primary server for the connect endpoint.',
+        'Manage processes and choose the primary server for the MCP endpoint.',
       noServers: 'No servers have been added to this project yet.',
       workspaceGroupFallback: 'Workspace group for MCP clients',
       serverCount: (count: number) => `${count} servers`,
@@ -364,7 +364,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       overviewFallbackDescription: 'Логическая группа для MCP-клиентов и инструментов.',
       connectionDescription: 'Все клиенты этого workspace подключаются через project token и primary server.',
       connectionWarning: (token: string) =>
-        `Чтобы использовать /connect/${token}, сначала назначь primary server.`,
+        `Чтобы использовать /mcp/${token}, сначала назначь primary server.`,
       addServerDescription:
         'Первый сервер автоматически становится primary. Остальные остаются в том же workspace.',
       serverNamePlaceholder: 'Filesystem Server',
@@ -376,7 +376,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       bearerTokenPlaceholder: 'MCP_BEARER_TOKEN',
       envPassthroughPlaceholder: 'OPENAI_API_KEY',
       serverControlDescription:
-        'Управляй процессами и выбирай primary server для connect endpoint.',
+        'Управляй процессами и выбирай primary server для MCP endpoint.',
       noServers: 'В этом проекте пока нет серверов.',
       workspaceGroupFallback: 'Логическая группа для MCP-клиентов',
       serverCount: (count: number) => `${count} серверов`,

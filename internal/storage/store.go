@@ -10,6 +10,7 @@ import (
 	"MCPBox/internal/models"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 type Store struct {
@@ -17,7 +18,9 @@ type Store struct {
 }
 
 func NewStore(dsn string) (*Store, error) {
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -43,6 +46,15 @@ func (s *Store) CreateProject(ctx context.Context, project *models.Project) erro
 	}
 
 	return s.db.WithContext(ctx).Create(project).Error
+}
+
+func (s *Store) UpdateProject(ctx context.Context, projectID uint, name, description string) error {
+	return s.db.WithContext(ctx).Model(&models.Project{}).
+		Where("id = ?", projectID).
+		Updates(map[string]any{
+			"name":        name,
+			"description": description,
+		}).Error
 }
 
 func (s *Store) ListProjects(ctx context.Context) ([]models.Project, error) {
@@ -91,6 +103,26 @@ func (s *Store) AddServer(ctx context.Context, server *models.MCPServer) error {
 	})
 }
 
+func (s *Store) UpdateServer(ctx context.Context, server *models.MCPServer) error {
+	return s.db.WithContext(ctx).Model(&models.MCPServer{}).
+		Where("id = ?", server.ID).
+		Updates(map[string]any{
+			"name":                 server.Name,
+			"transport":            server.Transport,
+			"launch_command":       server.LaunchCommand,
+			"command":              server.Command,
+			"args_json":            server.ArgsJSON,
+			"env_json":             server.EnvJSON,
+			"env_passthrough_json": server.EnvPassthroughJSON,
+			"working_dir":          server.WorkingDir,
+			"url":                  server.URL,
+			"bearer_token_env_var": server.BearerTokenEnvVar,
+			"headers_json":         server.HeadersJSON,
+			"header_env_json":      server.HeaderEnvJSON,
+			"auto_start":           server.AutoStart,
+		}).Error
+}
+
 func (s *Store) GetServer(ctx context.Context, id uint) (*models.MCPServer, error) {
 	var server models.MCPServer
 	err := s.db.WithContext(ctx).First(&server, id).Error
@@ -135,6 +167,50 @@ func (s *Store) SetPrimaryServer(ctx context.Context, projectID, serverID uint) 
 	})
 }
 
+func (s *Store) DeleteProject(ctx context.Context, projectID uint) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("project_id = ?", projectID).Delete(&models.AuditLog{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("project_id = ?", projectID).Delete(&models.MCPServer{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&models.Project{}, projectID).Error
+	})
+}
+
+func (s *Store) DeleteServer(ctx context.Context, serverID uint) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var server models.MCPServer
+		if err := tx.First(&server, serverID).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Where("server_id = ?", serverID).Delete(&models.AuditLog{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&models.MCPServer{}, serverID).Error; err != nil {
+			return err
+		}
+
+		var replacement models.MCPServer
+		replacementErr := tx.Where("project_id = ? AND is_enabled = ?", server.ProjectID, true).
+			Order("id asc").
+			First(&replacement).Error
+
+		updates := map[string]any{"primary_server_id": nil}
+		if replacementErr == nil {
+			updates["primary_server_id"] = replacement.ID
+		} else if !errors.Is(replacementErr, gorm.ErrRecordNotFound) {
+			return replacementErr
+		}
+
+		return tx.Model(&models.Project{}).
+			Where("id = ? AND primary_server_id = ?", server.ProjectID, serverID).
+			Updates(updates).Error
+	})
+}
+
 func newProjectToken() (string, error) {
 	raw := make([]byte, 16)
 	if _, err := rand.Read(raw); err != nil {
@@ -166,11 +242,15 @@ func (s *Store) ListAuditLogs(ctx context.Context, projectID *uint, limit int) (
 	}
 
 	var logs []models.AuditLog
-	query := s.db.WithContext(ctx).Order("id desc").Limit(limit)
+	query := s.db.WithContext(ctx).Model(&models.AuditLog{})
 	if projectID != nil {
 		query = query.Where("project_id = ?", *projectID)
 	}
 
-	err := query.Find(&logs).Error
+	subQuery := query.Order("id desc").Limit(limit)
+	err := s.db.WithContext(ctx).
+		Table("(?) as audit_logs", subQuery).
+		Order("id asc").
+		Find(&logs).Error
 	return logs, err
 }

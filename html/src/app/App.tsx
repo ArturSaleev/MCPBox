@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   CheckCircle2,
@@ -6,6 +6,7 @@ import {
   Info,
   LoaderCircle,
   Pause,
+  Pencil,
   Play,
   Plus,
   Radio,
@@ -238,8 +239,10 @@ export default function App() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [creatingProject, setCreatingProject] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [editingProjectId, setEditingProjectId] = useState<number | null>(null);
   const [addingServer, setAddingServer] = useState(false);
   const [addServerOpen, setAddServerOpen] = useState(false);
+  const [editingServerId, setEditingServerId] = useState<number | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
   const [busyProjectId, setBusyProjectId] = useState<number | null>(null);
   const [busyServerId, setBusyServerId] = useState<number | null>(null);
@@ -250,6 +253,7 @@ export default function App() {
   const [inspectionServerName, setInspectionServerName] = useState('');
   const [inspectionError, setInspectionError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const logsViewportRef = useRef<HTMLDivElement | null>(null);
   const dictionary = dictionaries[language];
   const { labels, messages } = dictionary;
 
@@ -281,6 +285,26 @@ export default function App() {
       void loadLogs();
     }
   }, [view, logsCurrentProjectOnly, selectedProjectId]);
+
+  useEffect(() => {
+    if (view !== 'logs') {
+      return;
+    }
+
+    const intervalID = window.setInterval(() => {
+      void loadLogs({ silent: true });
+    }, 5000);
+
+    return () => window.clearInterval(intervalID);
+  }, [view, logsCurrentProjectOnly, selectedProjectId]);
+
+  useEffect(() => {
+    if (view !== 'logs' || !logsViewportRef.current) {
+      return;
+    }
+
+    logsViewportRef.current.scrollTop = logsViewportRef.current.scrollHeight
+  }, [logs, view]);
 
   useEffect(() => {
     if (projects.length === 0) {
@@ -318,8 +342,10 @@ export default function App() {
     }
   }
 
-  async function loadLogs() {
-    setLogsLoading(true);
+  async function loadLogs(options?: { silent?: boolean }) {
+    if (!options?.silent) {
+      setLogsLoading(true);
+    }
     try {
       const query =
         logsCurrentProjectOnly && selectedProjectId ? `?project_id=${selectedProjectId}` : '';
@@ -331,7 +357,9 @@ export default function App() {
     } catch (loadError) {
       setActionError(loadError instanceof Error ? loadError.message : messages.loadProjectsError);
     } finally {
-      setLogsLoading(false);
+      if (!options?.silent) {
+        setLogsLoading(false);
+      }
     }
   }
 
@@ -392,14 +420,32 @@ export default function App() {
     setActionError(null);
 
     try {
-      await apiRequest('/api/projects', messages.requestFailed, {
-        method: 'POST',
-        body: JSON.stringify(projectForm),
-      });
+      if (editingProjectId) {
+        const updatedProject = await apiRequest<ProjectStatus>(
+          `/api/projects/${editingProjectId}`,
+          messages.requestFailed,
+          {
+            method: 'PUT',
+            body: JSON.stringify(projectForm),
+          },
+        );
+
+        setProjects((current) =>
+          current.map((project) =>
+            project.project_id === updatedProject.project_id ? updatedProject : project,
+          ),
+        );
+      } else {
+        await apiRequest('/api/projects', messages.requestFailed, {
+          method: 'POST',
+          body: JSON.stringify(projectForm),
+        });
+        await loadProjects();
+      }
 
       setProjectForm(emptyProjectForm);
+      setEditingProjectId(null);
       setCreateProjectOpen(false);
-      await loadProjects();
     } catch (submitError) {
       setActionError(
         submitError instanceof Error ? submitError.message : messages.createProjectError,
@@ -434,14 +480,23 @@ export default function App() {
         auto_start: serverForm.transport === 'stdio' ? serverForm.auto_start : false,
       };
 
-      const updatedProject = await apiRequest<ProjectStatus>(
-        `/api/projects/${selectedProject.project_id}/servers`,
-        messages.requestFailed,
-        {
-          method: 'POST',
-          body: JSON.stringify(payload),
-        },
-      );
+      const updatedProject = editingServerId
+        ? await apiRequest<ProjectStatus>(
+            `/api/servers/${editingServerId}`,
+            messages.requestFailed,
+            {
+              method: 'PUT',
+              body: JSON.stringify(payload),
+            },
+          )
+        : await apiRequest<ProjectStatus>(
+            `/api/projects/${selectedProject.project_id}/servers`,
+            messages.requestFailed,
+            {
+              method: 'POST',
+              body: JSON.stringify(payload),
+            },
+          );
 
       setProjects((current) =>
         current.map((project) =>
@@ -449,6 +504,7 @@ export default function App() {
         ),
       );
       setServerForm(emptyServerForm);
+      setEditingServerId(null);
       setAddServerOpen(false);
     } catch (submitError) {
       setActionError(submitError instanceof Error ? submitError.message : messages.addServerError);
@@ -600,6 +656,107 @@ export default function App() {
     setServerForm((current) => ({ ...current, [key]: value }));
   }
 
+  function startEditProject() {
+    if (!selectedProject) {
+      return;
+    }
+
+    setProjectForm({
+      name: selectedProject.name,
+      description: selectedProject.description,
+    });
+    setEditingProjectId(selectedProject.project_id);
+    setCreateProjectOpen(true);
+  }
+
+  async function deleteProject(projectId: number) {
+    const confirmed = window.confirm('Delete this project and all its servers?');
+    if (!confirmed) {
+      return;
+    }
+
+    setBusyProjectId(projectId);
+    setActionError(null);
+
+    try {
+      await apiRequest<{ deleted: boolean }>(`/api/projects/${projectId}`, messages.requestFailed, {
+        method: 'DELETE',
+      });
+      if (selectedProjectId === projectId) {
+        setSelectedProjectId(null);
+      }
+      await loadProjects();
+      await loadLogs();
+    } catch (submitError) {
+      setActionError(submitError instanceof Error ? submitError.message : messages.updatePrimaryError);
+    } finally {
+      setBusyProjectId(null);
+    }
+  }
+
+  function startEditServer(server: ServerStatus) {
+    const args = Array.isArray(server.args) && server.args.length > 0 ? server.args : [''];
+    const envVars =
+      Array.isArray(server.env_vars) && server.env_vars.length > 0
+        ? server.env_vars
+        : [{ key: '', value: '' }];
+    const envPassthrough =
+      Array.isArray(server.env_passthrough) && server.env_passthrough.length > 0
+        ? server.env_passthrough
+        : [''];
+    const headers =
+      Array.isArray(server.headers) && server.headers.length > 0
+        ? server.headers
+        : [{ key: '', value: '' }];
+    const headerEnvVars =
+      Array.isArray(server.header_env_vars) && server.header_env_vars.length > 0
+        ? server.header_env_vars
+        : [{ key: '', value: '' }];
+
+    setServerForm({
+      name: server.name,
+      transport: server.transport === 'http_stream' ? 'http_stream' : 'stdio',
+      command: server.command,
+      args,
+      env_vars: envVars,
+      env_passthrough: envPassthrough,
+      working_dir: server.working_dir,
+      url: server.url,
+      bearer_token_env_var: server.bearer_token_env_var,
+      headers,
+      header_env_vars: headerEnvVars,
+      auto_start: server.auto_start,
+    });
+    setEditingServerId(server.id);
+    setAddServerOpen(true);
+  }
+
+  async function deleteServer(serverId: number) {
+    const confirmed = window.confirm('Delete this MCP server?');
+    if (!confirmed) {
+      return;
+    }
+
+    setBusyServerId(serverId);
+    setActionError(null);
+
+    try {
+      const updatedProject = await apiRequest<ProjectStatus>(`/api/servers/${serverId}`, messages.requestFailed, {
+        method: 'DELETE',
+      });
+      setProjects((current) =>
+        current.map((project) =>
+          project.project_id === updatedProject.project_id ? updatedProject : project,
+        ),
+      );
+      await loadLogs();
+    } catch (submitError) {
+      setActionError(submitError instanceof Error ? submitError.message : messages.updatePrimaryError);
+    } finally {
+      setBusyServerId(null);
+    }
+  }
+
   function updateStringListField(
     field: 'args' | 'env_passthrough',
     index: number,
@@ -737,7 +894,16 @@ export default function App() {
                   <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
                     {projects.length}
                   </span>
-                  <Dialog open={createProjectOpen} onOpenChange={setCreateProjectOpen}>
+                  <Dialog
+                    open={createProjectOpen}
+                    onOpenChange={(open) => {
+                      setCreateProjectOpen(open);
+                      if (!open) {
+                        setEditingProjectId(null);
+                        setProjectForm(emptyProjectForm);
+                      }
+                    }}
+                  >
                     <DialogTrigger asChild>
                       <button className="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-electric-blue px-3 text-xs font-medium text-white transition-colors hover:bg-electric-blue/90">
                         <Plus className="h-3.5 w-3.5" />
@@ -746,7 +912,7 @@ export default function App() {
                     </DialogTrigger>
                     <DialogContent className="sm:max-w-xl">
                       <DialogHeader>
-                        <DialogTitle>{labels.createProject}</DialogTitle>
+                          <DialogTitle>{editingProjectId ? 'Edit Project' : labels.createProject}</DialogTitle>
                         <DialogDescription>{messages.projectHelper}</DialogDescription>
                       </DialogHeader>
 
@@ -785,15 +951,15 @@ export default function App() {
                           disabled={creatingProject}
                           className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
                         >
-                          {creatingProject ? (
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Plus className="h-4 w-4" />
-                          )}
-                          {labels.createProject}
-                        </button>
-                      </form>
-                    </DialogContent>
+                              {creatingProject ? (
+                                <LoaderCircle className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Plus className="h-4 w-4" />
+                              )}
+                              {editingProjectId ? 'Save Project' : labels.createProject}
+                            </button>
+                          </form>
+                        </DialogContent>
                   </Dialog>
                 </div>
               </div>
@@ -921,7 +1087,7 @@ export default function App() {
                   </div>
                 ) : (
                   <div className="overflow-hidden rounded-xl border border-border bg-[#0b0f14]">
-                    <div className="max-h-[70vh] overflow-y-auto">
+                    <div ref={logsViewportRef} className="max-h-[70vh] overflow-y-auto">
                       {logs.map((entry) => (
                         <div
                           key={entry.id}
@@ -1104,6 +1270,21 @@ export default function App() {
                       )}
                       {selectedProject.is_paused ? labels.resumeProject : labels.pauseProject}
                     </button>
+                    <button
+                      onClick={startEditProject}
+                      className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-border px-4 text-sm font-medium transition-colors hover:bg-accent"
+                    >
+                      <Pencil className="h-4 w-4" />
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => void deleteProject(selectedProject.project_id)}
+                      disabled={busyProjectId === selectedProject.project_id}
+                      className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-destructive/30 px-4 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Delete
+                    </button>
                   </div>
                 </div>
               </section>
@@ -1162,7 +1343,16 @@ export default function App() {
                       {messages.serverControlDescription}
                     </p>
                   </div>
-                  <Dialog open={addServerOpen} onOpenChange={setAddServerOpen}>
+                  <Dialog
+                    open={addServerOpen}
+                    onOpenChange={(open) => {
+                      setAddServerOpen(open);
+                      if (!open) {
+                        setEditingServerId(null);
+                        setServerForm(emptyServerForm);
+                      }
+                    }}
+                  >
                     <DialogTrigger asChild>
                       <button className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90">
                         <Plus className="h-4 w-4" />
@@ -1171,7 +1361,7 @@ export default function App() {
                     </DialogTrigger>
                     <DialogContent className="sm:max-w-xl">
                       <DialogHeader>
-                        <DialogTitle>{labels.addServer}</DialogTitle>
+                          <DialogTitle>{editingServerId ? 'Edit MCP Server' : labels.addServer}</DialogTitle>
                         <DialogDescription>{messages.addServerDescription}</DialogDescription>
                       </DialogHeader>
 
@@ -1473,7 +1663,7 @@ export default function App() {
                           ) : (
                             <Plus className="h-4 w-4" />
                           )}
-                          {labels.addServer}
+                          {editingServerId ? 'Save Server' : labels.addServer}
                         </button>
                       </form>
                     </DialogContent>
@@ -1609,6 +1799,14 @@ export default function App() {
                             ) : null}
 
                             <button
+                              onClick={() => startEditServer(server)}
+                              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent"
+                            >
+                              <Pencil className="h-4 w-4" />
+                              Edit
+                            </button>
+
+                            <button
                               onClick={() => void setServerEnabled(server.id, !server.is_enabled)}
                               disabled={busy}
                               className={`inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
@@ -1638,6 +1836,15 @@ export default function App() {
                                 <Star className="h-4 w-4" />
                               )}
                               {server.is_primary ? labels.primaryServer : labels.setAsPrimary}
+                            </button>
+
+                            <button
+                              onClick={() => void deleteServer(server.id)}
+                              disabled={busy}
+                              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-destructive/30 px-4 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-70"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Delete
                             </button>
                           </div>
                         </div>

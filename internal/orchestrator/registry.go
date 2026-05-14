@@ -10,19 +10,25 @@ import (
 )
 
 type Registry struct {
+	baseCtx context.Context
 	mu      sync.RWMutex
 	runners map[uint]*ServerRunner
 }
 
-func NewRegistry() *Registry {
+func NewRegistry(baseCtx context.Context) *Registry {
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+
 	return &Registry{
+		baseCtx: baseCtx,
 		runners: make(map[uint]*ServerRunner),
 	}
 }
 
 func (r *Registry) StartServer(ctx context.Context, server models.MCPServer) error {
 	runner := r.getOrCreateRunner(server)
-	return runner.Start(ctx)
+	return runner.Start(r.baseCtx)
 }
 
 func (r *Registry) StopServer(ctx context.Context, serverID uint) error {
@@ -83,7 +89,7 @@ func (r *Registry) RunnerForProject(ctx context.Context, project models.Project)
 
 	runner := r.getOrCreateRunner(*primary)
 	if !runner.Running() {
-		if err := runner.Start(ctx); err != nil {
+		if err := runner.Start(r.baseCtx); err != nil {
 			return nil, nil, fmt.Errorf("start project server: %w", err)
 		}
 	}

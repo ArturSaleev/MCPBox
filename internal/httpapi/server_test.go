@@ -47,7 +47,7 @@ func TestProjectEndpointsExposePrimaryServerAndConnectURL(t *testing.T) {
 		t.Fatalf("AddServer(second) error = %v", err)
 	}
 
-	api := NewServer(store, orchestrator.NewRegistry())
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
 
 	setPrimaryBody := bytes.NewBufferString(`{"server_id":` + jsonNumber(secondServer.ID) + `}`)
 	setPrimaryRequest := httptest.NewRequest(
@@ -84,7 +84,7 @@ func TestProjectEndpointsExposePrimaryServerAndConnectURL(t *testing.T) {
 	if got.PrimaryServerID == nil || *got.PrimaryServerID != secondServer.ID {
 		t.Fatalf("PrimaryServerID = %#v, want %d", got.PrimaryServerID, secondServer.ID)
 	}
-	if got.ConnectURL != "http://mcpbox.local:38180/connect/"+project.Token {
+	if got.ConnectURL != "http://mcpbox.local:38180/mcp/"+project.Token {
 		t.Fatalf("ConnectURL = %q", got.ConnectURL)
 	}
 	if !got.ConnectionReady {

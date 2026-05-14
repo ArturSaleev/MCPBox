@@ -11,7 +11,9 @@ import (
 	"os/exec"
 	"os/signal"
 	"runtime"
+	"slices"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -32,7 +34,7 @@ func main() {
 		log.Fatalf("init storage: %v", err)
 	}
 
-	registry := orchestrator.NewRegistry()
+	registry := orchestrator.NewRegistry(rootCtx)
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -83,7 +85,10 @@ func main() {
 		}
 	}()
 
-	log.Printf("MCPBox listening on %s", httpServer.Addr)
+	for _, address := range listenAddresses(port) {
+		log.Printf("MCPBox UI: %s", address)
+	}
+
 	if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("http server failed: %v", err)
 	}
@@ -130,4 +135,50 @@ func openBrowser(target string) error {
 	}
 
 	return cmd.Start()
+}
+
+func listenAddresses(port int) []string {
+	addresses := []string{
+		fmt.Sprintf("http://127.0.0.1:%d/", port),
+	}
+
+	ifaces, err := net.InterfaceAddrs()
+	if err != nil {
+		return addresses
+	}
+
+	seen := map[string]struct{}{
+		addresses[0]: {},
+	}
+
+	for _, iface := range ifaces {
+		ipNet, ok := iface.(*net.IPNet)
+		if !ok || ipNet == nil {
+			continue
+		}
+
+		ip := ipNet.IP
+		if ip == nil || ip.IsLoopback() {
+			continue
+		}
+
+		ip = ip.To4()
+		if ip == nil {
+			continue
+		}
+
+		address := fmt.Sprintf("http://%s:%d/", ip.String(), port)
+		if _, ok := seen[address]; ok {
+			continue
+		}
+
+		seen[address] = struct{}{}
+		addresses = append(addresses, address)
+	}
+
+	slices.SortFunc(addresses[1:], func(a, b string) int {
+		return strings.Compare(a, b)
+	})
+
+	return addresses
 }

@@ -10,7 +10,7 @@ import (
 func TestRunnerForProjectRequiresPrimaryServer(t *testing.T) {
 	t.Parallel()
 
-	registry := NewRegistry()
+	registry := NewRegistry(context.Background())
 	project := models.Project{
 		ID:   1,
 		Name: "Workspace",

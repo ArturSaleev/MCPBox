@@ -30,6 +30,7 @@ type ServerRunner struct {
 	done        chan error
 	running     bool
 	subscribers map[int]chan []byte
+	pending     map[string]chan []byte
 	nextSubID   int
 }
 
@@ -37,6 +38,7 @@ func NewServerRunner(server models.MCPServer) *ServerRunner {
 	return &ServerRunner{
 		server:      server,
 		subscribers: make(map[int]chan []byte),
+		pending:     make(map[string]chan []byte),
 	}
 }
 
@@ -121,6 +123,53 @@ func (r *ServerRunner) Start(parent context.Context) error {
 }
 
 func (r *ServerRunner) Send(ctx context.Context, payload []byte) error {
+	return r.send(ctx, payload)
+}
+
+func (r *ServerRunner) SendAndWait(ctx context.Context, payload []byte) ([]byte, error) {
+	requestID, ok, err := jsonRPCID(payload)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		if err := r.send(ctx, payload); err != nil {
+			return nil, err
+		}
+		return nil, errors.New("json-rpc request id is required for synchronous transport")
+	}
+
+	responseCh := make(chan []byte, 1)
+
+	r.mu.Lock()
+	if _, exists := r.pending[requestID]; exists {
+		r.mu.Unlock()
+		return nil, fmt.Errorf("request with id %s is already in flight", requestID)
+	}
+	r.pending[requestID] = responseCh
+	r.mu.Unlock()
+
+	defer func() {
+		r.mu.Lock()
+		delete(r.pending, requestID)
+		r.mu.Unlock()
+	}()
+
+	if err := r.send(ctx, payload); err != nil {
+		return nil, err
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case response, ok := <-responseCh:
+		if !ok {
+			return nil, errors.New("server stopped before responding")
+		}
+		return response, nil
+	}
+}
+
+func (r *ServerRunner) send(ctx context.Context, payload []byte) error {
 	r.mu.RLock()
 	stdin := r.stdin
 	running := r.running
@@ -251,6 +300,7 @@ func (r *ServerRunner) consumeStdout(stdout io.Reader) {
 	// before fan-out so SSE clients never race with the scanner's internal buffer.
 	for scanner.Scan() {
 		line := append([]byte(nil), scanner.Bytes()...)
+		r.routePending(line)
 		r.broadcast(line)
 	}
 
@@ -292,6 +342,30 @@ func (r *ServerRunner) closeSubscribers() {
 	for id, ch := range r.subscribers {
 		delete(r.subscribers, id)
 		close(ch)
+	}
+
+	for id, ch := range r.pending {
+		delete(r.pending, id)
+		close(ch)
+	}
+}
+
+func (r *ServerRunner) routePending(line []byte) {
+	responseID, ok, err := jsonRPCID(line)
+	if err != nil || !ok {
+		return
+	}
+
+	r.mu.RLock()
+	responseCh := r.pending[responseID]
+	r.mu.RUnlock()
+	if responseCh == nil {
+		return
+	}
+
+	select {
+	case responseCh <- line:
+	default:
 	}
 }
 
@@ -358,4 +432,21 @@ func commandEnv(server models.MCPServer) ([]string, error) {
 	}
 
 	return env, nil
+}
+
+func jsonRPCID(payload []byte) (string, bool, error) {
+	var envelope struct {
+		ID json.RawMessage `json:"id"`
+	}
+
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		return "", false, fmt.Errorf("decode json-rpc envelope: %w", err)
+	}
+
+	id := bytes.TrimSpace(envelope.ID)
+	if len(id) == 0 || bytes.Equal(id, []byte("null")) {
+		return "", false, nil
+	}
+
+	return string(id), true, nil
 }
