@@ -55,6 +55,13 @@ func (r *Registry) Status(serverID uint) string {
 	return "Stopped"
 }
 
+func (r *Registry) Runner(serverID uint) *ServerRunner {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.runners[serverID]
+}
+
 func (r *Registry) RunnerForProject(ctx context.Context, project models.Project) (*ServerRunner, *models.MCPServer, error) {
 	if project.IsPaused {
 		return nil, nil, errors.New("project is paused")

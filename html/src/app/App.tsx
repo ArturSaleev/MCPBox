@@ -46,8 +46,22 @@ type ServerStatus = {
   bearer_token_env_var: string;
   headers: KeyValuePair[];
   header_env_vars: KeyValuePair[];
+  auth_type: 'none' | 'oauth2' | string;
+  oauth_provider: string;
+  oauth_authorize_url: string;
+  oauth_token_url: string;
+  oauth_refresh_url: string;
+  oauth_client_id: string;
+  oauth_client_secret: string;
+  oauth_scopes: string[];
+  oauth_connected: boolean;
+  oauth_connected_at: string;
+  oauth_last_error: string;
   auto_start: boolean;
   status: 'Running' | 'Stopped' | 'Remote' | string;
+  health_status: 'healthy' | 'failed' | 'unknown' | string;
+  health_error: string;
+  health_checked_at: string;
   is_primary: boolean;
   is_enabled: boolean;
 };
@@ -62,6 +76,62 @@ type ProjectStatus = {
   connect_url: string;
   connection_ready: boolean;
   servers: ServerStatus[];
+  installed_integrations: InstalledIntegration[];
+};
+
+type InstalledIntegration = {
+  id: number;
+  project_id: number;
+  catalog_item_id: string;
+  server_id: number | null;
+  name: string;
+  transport: string;
+  status: string;
+  enabled: boolean;
+  version: string;
+  config: Record<string, unknown>;
+  last_synced_at: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type CatalogSettings = {
+  catalog_source_url: string;
+  last_sync_at: string;
+  last_sync_status: string;
+  last_sync_error: string;
+  last_manifest_url: string;
+  last_schema_version: string;
+};
+
+type CatalogItem = {
+  id: string;
+  name: string;
+  category: string;
+  description: string;
+  icon: string;
+  transport: string;
+  mcp_url: string;
+  auth_type: string;
+  auth_provider: string;
+  oauth_authorize_url?: string;
+  oauth_token_url?: string;
+  oauth_refresh_url?: string;
+  config_schema: Record<string, unknown>;
+  capabilities: string[];
+  tags: string[];
+  website: string;
+  docs_url: string;
+  enabled: boolean;
+  version: string;
+  manifest_source_url: string;
+  schema_version: string;
+  last_synced_at: string;
+};
+
+type CatalogResponse = {
+  settings: CatalogSettings;
+  items: CatalogItem[];
 };
 
 type AuditLog = {
@@ -132,6 +202,14 @@ type ServerFormState = {
   bearer_token_env_var: string;
   headers: KeyValuePair[];
   header_env_vars: KeyValuePair[];
+  auth_type: 'none' | 'oauth2';
+  oauth_provider: string;
+  oauth_authorize_url: string;
+  oauth_token_url: string;
+  oauth_refresh_url: string;
+  oauth_client_id: string;
+  oauth_client_secret: string;
+  oauth_scopes: string[];
   auto_start: boolean;
 };
 
@@ -157,6 +235,14 @@ const emptyServerForm: ServerFormState = {
   bearer_token_env_var: '',
   headers: [{ key: '', value: '' }],
   header_env_vars: [{ key: '', value: '' }],
+  auth_type: 'none',
+  oauth_provider: '',
+  oauth_authorize_url: '',
+  oauth_token_url: '',
+  oauth_refresh_url: '',
+  oauth_client_id: '',
+  oauth_client_secret: '',
+  oauth_scopes: [''],
   auto_start: false,
 };
 
@@ -212,6 +298,25 @@ function statusIcon(status: string) {
   );
 }
 
+function healthTone(status: string) {
+  return status === 'healthy'
+    ? 'bg-status-running/15 text-status-running border-status-running/30'
+    : status === 'failed'
+      ? 'bg-destructive/10 text-destructive border-destructive/30'
+      : 'bg-muted text-muted-foreground border-border';
+}
+
+function healthLabel(status: string, labels: typeof dictionaries.en.labels) {
+  if (status === 'healthy') {
+    return labels.healthy;
+  }
+  if (status === 'failed') {
+    return labels.failed;
+  }
+
+  return labels.unknown;
+}
+
 function formatSchema(schema: unknown) {
   if (!schema) {
     return '';
@@ -225,7 +330,7 @@ function formatSchema(schema: unknown) {
 }
 
 export default function App() {
-  const [view, setView] = useState<'projects' | 'logs'>('projects');
+  const [view, setView] = useState<'projects' | 'market' | 'logs'>('projects');
   const [language, setLanguage] = useState<Language>(detectInitialLanguage);
   const [projects, setProjects] = useState<ProjectStatus[]>([]);
   const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -242,8 +347,15 @@ export default function App() {
   const [editingProjectId, setEditingProjectId] = useState<number | null>(null);
   const [addingServer, setAddingServer] = useState(false);
   const [addServerOpen, setAddServerOpen] = useState(false);
+  const [, setOAuthAdvancedOpen] = useState(false);
   const [editingServerId, setEditingServerId] = useState<number | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
+  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
+  const [catalogSettings, setCatalogSettings] = useState<CatalogSettings | null>(null);
+  const [catalogURL, setCatalogURL] = useState('https://webeasy.kz/mcpbox/catalog.json');
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogSyncing, setCatalogSyncing] = useState(false);
+  const [installingCatalogItemId, setInstallingCatalogItemId] = useState<string | null>(null);
   const [busyProjectId, setBusyProjectId] = useState<number | null>(null);
   const [busyServerId, setBusyServerId] = useState<number | null>(null);
   const [busyPrimaryId, setBusyPrimaryId] = useState<number | null>(null);
@@ -252,6 +364,8 @@ export default function App() {
   const [inspection, setInspection] = useState<ServerInspection | null>(null);
   const [inspectionServerName, setInspectionServerName] = useState('');
   const [inspectionError, setInspectionError] = useState<string | null>(null);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authServerId, setAuthServerId] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
   const logsViewportRef = useRef<HTMLDivElement | null>(null);
   const dictionary = dictionaries[language];
@@ -266,6 +380,21 @@ export default function App() {
       project.servers.map((server) => [server.id, server.name] as const),
     ),
   );
+  const selectedProjectHealthyCount = selectedProject
+    ? selectedProject.servers.filter((server) => server.health_status === 'healthy').length
+    : 0;
+  const selectedProjectOAuthConnectedCount = selectedProject
+    ? selectedProject.servers.filter(
+        (server) => server.transport === 'http_stream' && server.auth_type === 'oauth2' && server.oauth_connected,
+      ).length
+    : 0;
+  const selectedProjectPrimaryServer =
+    selectedProject?.servers.find((server) => server.is_primary) ?? null;
+  const authServer =
+    selectedProject?.servers.find((server) => server.id === authServerId) ?? null;
+  const installedCatalogIDs = new Set(
+    (selectedProject?.installed_integrations ?? []).map((integration) => integration.catalog_item_id),
+  );
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -277,7 +406,28 @@ export default function App() {
   }, [language]);
 
   useEffect(() => {
-    void loadProjects(true);
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) {
+        return;
+      }
+      if (event.data?.type !== 'mcpbox-oauth-complete') {
+        return;
+      }
+
+      void loadProjects();
+      void loadLogs({ silent: true });
+    };
+
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [logsCurrentProjectOnly, selectedProjectId]);
+
+  useEffect(() => {
+    void Promise.all([loadProjects(true), loadCatalog(true)]);
   }, []);
 
   useEffect(() => {
@@ -360,6 +510,92 @@ export default function App() {
       if (!options?.silent) {
         setLogsLoading(false);
       }
+    }
+  }
+
+  async function loadCatalog(initial = false) {
+    if (initial) {
+      setCatalogLoading(true);
+    }
+
+    try {
+      const response = await apiRequest<CatalogResponse>(
+        '/api/catalog/items',
+        messages.requestFailed,
+      );
+      setCatalogItems(response.items);
+      setCatalogSettings(response.settings);
+      if (response.settings.catalog_source_url) {
+        setCatalogURL(response.settings.catalog_source_url);
+      }
+    } catch (loadError) {
+      setActionError(loadError instanceof Error ? loadError.message : 'Failed to load catalog');
+    } finally {
+      if (initial) {
+        setCatalogLoading(false);
+      }
+    }
+  }
+
+  async function syncCatalog() {
+    setCatalogSyncing(true);
+    setActionError(null);
+
+    try {
+      const response = await apiRequest<CatalogResponse>(
+        '/api/catalog/sync',
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({ url: catalogURL }),
+        },
+      );
+      setCatalogItems(response.items);
+      setCatalogSettings(response.settings);
+      await loadLogs({ silent: true });
+    } catch (syncError) {
+      setActionError(syncError instanceof Error ? syncError.message : 'Failed to sync catalog');
+    } finally {
+      setCatalogSyncing(false);
+    }
+  }
+
+  async function installCatalogItem(item: CatalogItem) {
+    if (!selectedProject) {
+      setActionError('Select a project before installing an integration.');
+      return;
+    }
+
+    setInstallingCatalogItemId(item.id);
+    setActionError(null);
+
+    try {
+      const updatedProject = await apiRequest<ProjectStatus>(
+        `/api/projects/${selectedProject.project_id}/integrations`,
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            catalog_item_id: item.id,
+            name: item.name,
+            make_primary: !selectedProject.primary_server_id,
+            config: {},
+          }),
+        },
+      );
+
+      setProjects((current) =>
+        current.map((project) =>
+          project.project_id === updatedProject.project_id ? updatedProject : project,
+        ),
+      );
+      await loadLogs({ silent: true });
+    } catch (installError) {
+      setActionError(
+        installError instanceof Error ? installError.message : 'Failed to install integration',
+      );
+    } finally {
+      setInstallingCatalogItemId(null);
     }
   }
 
@@ -477,8 +713,23 @@ export default function App() {
         bearer_token_env_var: serverForm.bearer_token_env_var,
         headers: serverForm.headers,
         header_env_vars: serverForm.header_env_vars,
+        auth_type: serverForm.transport === 'http_stream' ? serverForm.auth_type : 'none',
+        oauth_provider: serverForm.transport === 'http_stream' ? serverForm.oauth_provider : '',
+        oauth_authorize_url:
+          serverForm.transport === 'http_stream' ? serverForm.oauth_authorize_url : '',
+        oauth_token_url: serverForm.transport === 'http_stream' ? serverForm.oauth_token_url : '',
+        oauth_refresh_url:
+          serverForm.transport === 'http_stream' ? serverForm.oauth_refresh_url : '',
+        oauth_client_id: serverForm.transport === 'http_stream' ? serverForm.oauth_client_id : '',
+        oauth_client_secret:
+          serverForm.transport === 'http_stream' ? serverForm.oauth_client_secret : '',
+        oauth_scopes: serverForm.transport === 'http_stream' ? serverForm.oauth_scopes : [],
         auto_start: serverForm.transport === 'stdio' ? serverForm.auto_start : false,
       };
+
+      const targetServerIdBeforeReset = editingServerId;
+      const shouldStartOAuth =
+        payload.transport === 'http_stream' && payload.auth_type === 'oauth2';
 
       const updatedProject = editingServerId
         ? await apiRequest<ProjectStatus>(
@@ -503,9 +754,25 @@ export default function App() {
           project.project_id === updatedProject.project_id ? updatedProject : project,
         ),
       );
+
+      let oauthServerId: number | null = null;
+      if (shouldStartOAuth) {
+        oauthServerId = resolveOAuthServerId(
+          updatedProject,
+          targetServerIdBeforeReset,
+          payload.name,
+          payload.url,
+        );
+      }
+
       setServerForm(emptyServerForm);
       setEditingServerId(null);
       setAddServerOpen(false);
+      setOAuthAdvancedOpen(false);
+
+      if (oauthServerId) {
+        await connectOAuth(oauthServerId);
+      }
     } catch (submitError) {
       setActionError(submitError instanceof Error ? submitError.message : messages.addServerError);
     } finally {
@@ -536,6 +803,8 @@ export default function App() {
             ? messages.startServerError
             : messages.stopServerError,
       );
+      await loadProjects();
+      await loadLogs();
     } finally {
       setBusyServerId(null);
     }
@@ -694,6 +963,102 @@ export default function App() {
     }
   }
 
+  async function checkServerHealth(serverId: number) {
+    setBusyServerId(serverId);
+    setActionError(null);
+
+    try {
+      await apiRequest<{ server_id: number; status: string }>(
+        `/api/servers/${serverId}/check`,
+        messages.requestFailed,
+        {
+          method: 'POST',
+        },
+      );
+
+      await loadProjects();
+      await loadLogs();
+    } catch (submitError) {
+      setActionError(
+        submitError instanceof Error ? submitError.message : messages.checkServerError,
+      );
+      await loadProjects();
+      await loadLogs();
+    } finally {
+      setBusyServerId(null);
+    }
+  }
+
+  async function connectOAuth(serverId: number) {
+    setBusyServerId(serverId);
+    setActionError(null);
+
+    try {
+      const payload = await apiRequest<{ auth_url: string }>(
+        `/api/servers/${serverId}/oauth-start`,
+        messages.requestFailed,
+        { method: 'POST' },
+      );
+
+      window.open(payload.auth_url, '_blank', 'noopener,noreferrer');
+    } catch (submitError) {
+      setActionError(
+        submitError instanceof Error ? submitError.message : messages.checkServerError,
+      );
+    } finally {
+      setBusyServerId(null);
+    }
+  }
+
+  async function disconnectOAuth(serverId: number) {
+    setBusyServerId(serverId);
+    setActionError(null);
+
+    try {
+      await apiRequest<{ server_id: number; status: string }>(
+        `/api/servers/${serverId}/oauth-disconnect`,
+        messages.requestFailed,
+        { method: 'POST' },
+      );
+      await loadProjects();
+      await loadLogs();
+    } catch (submitError) {
+      setActionError(
+        submitError instanceof Error ? submitError.message : messages.checkServerError,
+      );
+    } finally {
+      setBusyServerId(null);
+    }
+  }
+
+  function openAuthModal(serverId: number) {
+    setAuthServerId(serverId);
+    setAuthOpen(true);
+  }
+
+  function resolveOAuthServerId(
+    project: ProjectStatus,
+    existingServerId: number | null,
+    name: string,
+    url: string,
+  ) {
+    if (existingServerId) {
+      return existingServerId;
+    }
+
+    const matches = project.servers.filter(
+      (server) =>
+        server.transport === 'http_stream' &&
+        server.name === name &&
+        server.url === url,
+    );
+    if (matches.length === 0) {
+      return null;
+    }
+
+    return matches.reduce((latest, server) => (server.id > latest ? server.id : latest), matches[0].id);
+  }
+
   function startEditServer(server: ServerStatus) {
     const args = Array.isArray(server.args) && server.args.length > 0 ? server.args : [''];
     const envVars =
@@ -708,6 +1073,10 @@ export default function App() {
       Array.isArray(server.headers) && server.headers.length > 0
         ? server.headers
         : [{ key: '', value: '' }];
+    const oauthScopes =
+      Array.isArray(server.oauth_scopes) && server.oauth_scopes.length > 0
+        ? server.oauth_scopes
+        : [''];
     const headerEnvVars =
       Array.isArray(server.header_env_vars) && server.header_env_vars.length > 0
         ? server.header_env_vars
@@ -725,8 +1094,17 @@ export default function App() {
       bearer_token_env_var: server.bearer_token_env_var,
       headers,
       header_env_vars: headerEnvVars,
+      auth_type: server.auth_type === 'oauth2' ? 'oauth2' : 'none',
+      oauth_provider: server.oauth_provider,
+      oauth_authorize_url: server.oauth_authorize_url,
+      oauth_token_url: server.oauth_token_url,
+      oauth_refresh_url: server.oauth_refresh_url,
+      oauth_client_id: server.oauth_client_id,
+      oauth_client_secret: server.oauth_client_secret,
+      oauth_scopes: oauthScopes,
       auto_start: server.auto_start,
     });
+    setOAuthAdvancedOpen(true);
     setEditingServerId(server.id);
     setAddServerOpen(true);
   }
@@ -864,7 +1242,7 @@ export default function App() {
           </div>
 
           <div className="space-y-6 p-6">
-            <div className="grid grid-cols-2 gap-2 rounded-xl border border-border bg-card p-1">
+            <div className="grid grid-cols-3 gap-2 rounded-xl border border-border bg-card p-1">
               <button
                 onClick={() => setView('projects')}
                 className={`h-10 rounded-lg text-sm font-medium transition-colors ${
@@ -874,6 +1252,16 @@ export default function App() {
                 }`}
               >
                 {labels.projects}
+              </button>
+              <button
+                onClick={() => setView('market')}
+                className={`h-10 rounded-lg text-sm font-medium transition-colors ${
+                  view === 'market'
+                    ? 'bg-electric-blue text-white'
+                    : 'text-muted-foreground hover:bg-accent'
+                }`}
+              >
+                Market
               </button>
               <button
                 onClick={() => setView('logs')}
@@ -1193,6 +1581,171 @@ export default function App() {
                 </div>
               </aside>
             </section>
+          ) : view === 'market' ? (
+            <section className="space-y-6">
+              <div className="rounded-2xl border border-border bg-card p-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                  <div>
+                    <p className="text-sm uppercase tracking-[0.24em] text-electric-blue">
+                      Integrations
+                    </p>
+                    <h2 className="mt-2 text-3xl font-semibold">Market / Catalog</h2>
+                    <p className="mt-2 max-w-3xl text-muted-foreground">
+                      Sync the external integration manifest into SQLite and install selected items into the current project as linked MCP servers.
+                    </p>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-xl border border-border bg-background px-4 py-3">
+                      <div className="text-sm text-muted-foreground">Catalog items</div>
+                      <div className="mt-1 text-2xl font-semibold">{catalogItems.length}</div>
+                    </div>
+                    <div className="rounded-xl border border-border bg-background px-4 py-3">
+                      <div className="text-sm text-muted-foreground">Installed</div>
+                      <div className="mt-1 text-2xl font-semibold">
+                        {selectedProject?.installed_integrations.length ?? 0}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-border bg-background px-4 py-3">
+                      <div className="text-sm text-muted-foreground">Last sync</div>
+                      <div className="mt-1 text-sm font-medium">
+                        {catalogSettings?.last_sync_at
+                          ? new Date(catalogSettings.last_sync_at).toLocaleString()
+                          : 'Not synced'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
+                  <label className="block space-y-2">
+                    <span className="text-sm text-muted-foreground">External manifest URL</span>
+                    <input
+                      value={catalogURL}
+                      onChange={(event) => setCatalogURL(event.target.value)}
+                      className="h-11 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
+                      placeholder="https://webeasy.kz/mcpbox/catalog.json"
+                    />
+                  </label>
+                  <button
+                    onClick={() => void syncCatalog()}
+                    disabled={catalogSyncing}
+                    className="inline-flex h-11 items-center justify-center gap-2 self-end rounded-md bg-electric-blue px-5 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {catalogSyncing ? (
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4" />
+                    )}
+                    Sync catalog
+                  </button>
+                </div>
+
+                {catalogSettings?.last_sync_status === 'failed' && catalogSettings.last_sync_error ? (
+                  <div className="mt-4 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+                    {catalogSettings.last_sync_error}
+                  </div>
+                ) : null}
+              </div>
+
+              {!selectedProject ? (
+                <div className="rounded-2xl border border-dashed border-border bg-card/50 px-6 py-10 text-center text-muted-foreground">
+                  Select a project in the sidebar before installing integrations.
+                </div>
+              ) : null}
+
+              <div className="grid gap-4 xl:grid-cols-2">
+                {catalogItems.map((item) => {
+                  const installing = installingCatalogItemId === item.id;
+                  const installed = installedCatalogIDs.has(item.id);
+
+                  return (
+                    <div key={item.id} className="rounded-2xl border border-border bg-card p-5">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-lg font-semibold">{item.name}</h3>
+                            <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
+                              {item.transport}
+                            </span>
+                            <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
+                              {item.auth_type}
+                            </span>
+                          </div>
+                          <div className="mt-1 text-sm text-electric-blue">{item.category || 'general'}</div>
+                        </div>
+
+                        <button
+                          onClick={() => void installCatalogItem(item)}
+                          disabled={!selectedProject || installing || installed || !item.enabled}
+                          className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {installing ? (
+                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Plus className="h-4 w-4" />
+                          )}
+                          {installed ? 'Installed' : 'Install'}
+                        </button>
+                      </div>
+
+                      <p className="mt-4 text-sm text-muted-foreground">
+                        {item.description || 'No description provided.'}
+                      </p>
+
+                      <div className="mt-4 rounded-xl border border-border bg-background p-3">
+                        <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Endpoint</div>
+                        <code className="mt-2 block overflow-x-auto text-xs text-electric-blue">
+                          {item.mcp_url || 'n/a'}
+                        </code>
+                      </div>
+
+                      {(item.tags?.length ?? 0) > 0 ? (
+                        <div className="mt-4 flex flex-wrap gap-2">
+                          {item.tags.map((tag) => (
+                            <span
+                              key={`${item.id}-${tag}`}
+                              className="rounded-full border border-electric-blue/30 bg-electric-blue/12 px-2 py-1 text-xs font-medium text-electric-blue"
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      <div className="mt-4 flex flex-wrap gap-3 text-sm">
+                        {item.docs_url ? (
+                          <a
+                            className="text-electric-blue underline-offset-4 hover:underline"
+                            href={item.docs_url}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Docs
+                          </a>
+                        ) : null}
+                        {item.website ? (
+                          <a
+                            className="text-electric-blue underline-offset-4 hover:underline"
+                            href={item.website}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Website
+                          </a>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {!catalogLoading && catalogItems.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-border bg-card/50 px-6 py-10 text-center text-muted-foreground">
+                  Sync the external manifest to populate the catalog.
+                </div>
+              ) : null}
+            </section>
           ) : !selectedProject ? (
             <div className="flex min-h-[60vh] items-center justify-center rounded-2xl border border-dashed border-border bg-card/50">
               <div className="max-w-md text-center">
@@ -1218,7 +1771,7 @@ export default function App() {
                       </p>
                     </div>
 
-                    <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="grid gap-3 sm:grid-cols-5">
                       <div className="rounded-xl border border-border bg-background px-4 py-3">
                         <div className="text-sm text-muted-foreground">{labels.servers}</div>
                         <div className="mt-1 text-2xl font-semibold">
@@ -1235,16 +1788,36 @@ export default function App() {
                         </div>
                       </div>
                       <div className="rounded-xl border border-border bg-background px-4 py-3">
+                        <div className="text-sm text-muted-foreground">{labels.healthy}</div>
+                        <div className="mt-1 text-2xl font-semibold">
+                          {selectedProjectHealthyCount}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-border bg-background px-4 py-3">
+                        <div className="text-sm text-muted-foreground">{labels.oauthConnected}</div>
+                        <div className="mt-1 text-2xl font-semibold">
+                          {selectedProjectOAuthConnectedCount}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-border bg-background px-4 py-3">
                         <div className="text-sm text-muted-foreground">{labels.primary}</div>
                         <div className="mt-1 flex items-center gap-2 text-sm font-medium">
-                          {selectedProject.servers.find((server) => server.is_primary)?.name ??
-                            labels.notSelected}
+                          {selectedProjectPrimaryServer?.name ?? labels.notSelected}
                           {selectedProject.is_paused ? (
                             <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600">
                               {labels.paused}
                             </span>
                           ) : null}
                         </div>
+                        {selectedProjectPrimaryServer?.transport === 'http_stream' &&
+                        selectedProjectPrimaryServer.auth_type === 'oauth2' ? (
+                          <div className="mt-2 text-xs text-muted-foreground">
+                            {labels.oauth}:{' '}
+                            {selectedProjectPrimaryServer.oauth_connected
+                              ? labels.connected
+                              : labels.notConnected}
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -1350,6 +1923,7 @@ export default function App() {
                       if (!open) {
                         setEditingServerId(null);
                         setServerForm(emptyServerForm);
+                        setOAuthAdvancedOpen(false);
                       }
                     }}
                   >
@@ -1569,6 +2143,18 @@ export default function App() {
                               />
                             </label>
 
+                            <div className="space-y-3 rounded-xl border border-border bg-background p-4">
+                              <div className="text-sm text-muted-foreground">Authentication</div>
+                              <div className="rounded-lg border border-electric-blue/20 bg-electric-blue/8 px-3 py-3 text-sm text-muted-foreground">
+                                Custom remote servers now default to direct URL, bearer env, and headers. OAuth-based remote integrations should be added from the Market tab.
+                              </div>
+                              {serverForm.auth_type === 'oauth2' ? (
+                                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-sm text-amber-700">
+                                  This server already uses OAuth. Save to keep the existing OAuth settings, then manage connection state from the server OAuth panel.
+                                </div>
+                              ) : null}
+                            </div>
+
                             <div className="space-y-2 rounded-xl border border-border bg-background p-4">
                               <div className="text-sm text-muted-foreground">{labels.headers}</div>
                               <div className="space-y-2">
@@ -1713,6 +2299,14 @@ export default function App() {
                                   {statusIcon(server.status)}
                                   {server.status}
                                 </span>
+                                <span
+                                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-medium ${healthTone(
+                                    server.health_status,
+                                  )}`}
+                                >
+                                  <CheckCircle2 className="h-3.5 w-3.5" />
+                                  {labels.health}: {healthLabel(server.health_status, labels)}
+                                </span>
 
                                 {server.transport === 'stdio' && server.auto_start ? (
                                   <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
@@ -1722,6 +2316,17 @@ export default function App() {
                                 {!server.is_enabled ? (
                                   <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600">
                                     {labels.disabled}
+                                  </span>
+                                ) : null}
+                                {server.transport === 'http_stream' && server.auth_type === 'oauth2' ? (
+                                  <span
+                                    className={`rounded-full border px-2 py-1 text-xs font-medium ${
+                                      server.oauth_connected
+                                        ? 'border-status-running/30 bg-status-running/12 text-status-running'
+                                        : 'border-amber-500/30 bg-amber-500/10 text-amber-700'
+                                    }`}
+                                  >
+                                    {labels.oauth}: {server.oauth_connected ? labels.connected : labels.notConnected}
                                   </span>
                                 ) : null}
                               </div>
@@ -1754,6 +2359,35 @@ export default function App() {
                                 <div className="mt-1 text-sm">{server.bearer_token_env_var}</div>
                               </div>
                             ) : null}
+                            {server.transport === 'http_stream' && server.auth_type === 'oauth2' ? (
+                              <div>
+                                <div className="text-muted-foreground">OAuth</div>
+                                <div className="mt-1 text-sm">
+                                  {server.oauth_provider || 'custom'}
+                                  {server.oauth_connected_at
+                                    ? ` · connected ${new Date(server.oauth_connected_at).toLocaleString()}`
+                                    : ''}
+                                </div>
+                                {server.oauth_last_error ? (
+                                  <div className="mt-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                                    {server.oauth_last_error}
+                                  </div>
+                                ) : null}
+                              </div>
+                            ) : null}
+                            <div>
+                              <div className="text-muted-foreground">{labels.lastCheck}</div>
+                              <div className="mt-1 text-sm">
+                                {server.health_checked_at
+                                  ? new Date(server.health_checked_at).toLocaleString()
+                                  : labels.notSpecified}
+                              </div>
+                              {server.health_error ? (
+                                <div className="mt-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                                  {server.health_error}
+                                </div>
+                              ) : null}
+                            </div>
                           </div>
 
                           <div className="mt-5 flex flex-wrap gap-2">
@@ -1780,6 +2414,34 @@ export default function App() {
                                   <Play className="h-4 w-4" />
                                 )}
                                 {server.status === 'Running' ? labels.stop : labels.start}
+                              </button>
+                            ) : null}
+
+                            <button
+                              onClick={() => void checkServerHealth(server.id)}
+                              disabled={busy}
+                              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
+                            >
+                              {busy ? (
+                                <LoaderCircle className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="h-4 w-4" />
+                              )}
+                              {labels.check}
+                            </button>
+
+                            {server.transport === 'http_stream' && server.auth_type === 'oauth2' ? (
+                              <button
+                                onClick={() => openAuthModal(server.id)}
+                                disabled={busy}
+                                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
+                              >
+                                {busy ? (
+                                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Info className="h-4 w-4" />
+                                )}
+                                {labels.oauth}
                               </button>
                             ) : null}
 
@@ -2031,6 +2693,127 @@ export default function App() {
                         ) : (
                           <div className="mt-3 text-sm text-muted-foreground">{labels.noReadme}</div>
                         )}
+                      </section>
+                    </div>
+                  ) : null}
+                </DialogContent>
+              </Dialog>
+
+              <Dialog
+                open={authOpen}
+                onOpenChange={(open) => {
+                  setAuthOpen(open);
+                  if (!open) {
+                    setAuthServerId(null);
+                  }
+                }}
+              >
+                <DialogContent className="sm:max-w-3xl">
+                  <DialogHeader>
+                    <DialogTitle>
+                      {labels.oauth}
+                      {authServer ? ` · ${authServer.name}` : ''}
+                    </DialogTitle>
+                    <DialogDescription>
+                      Manage OAuth connection settings and current authorization state for this remote MCP server.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  {authServer ? (
+                    <div className="space-y-5">
+                      <section className="grid gap-4 sm:grid-cols-3">
+                        <div className="rounded-xl border border-border bg-background p-4">
+                          <div className="text-sm text-muted-foreground">Provider</div>
+                          <div className="mt-1 font-medium">{authServer.oauth_provider || 'custom'}</div>
+                        </div>
+                        <div className="rounded-xl border border-border bg-background p-4">
+                          <div className="text-sm text-muted-foreground">{labels.oauth}</div>
+                          <div className="mt-1 font-medium">
+                            {authServer.oauth_connected ? labels.connected : labels.notConnected}
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-border bg-background p-4">
+                          <div className="text-sm text-muted-foreground">{labels.lastCheck}</div>
+                          <div className="mt-1 font-medium">
+                            {authServer.oauth_connected_at
+                              ? new Date(authServer.oauth_connected_at).toLocaleString()
+                              : labels.notSpecified}
+                          </div>
+                        </div>
+                      </section>
+
+                      <section className="rounded-xl border border-border bg-background p-4">
+                        <div className="text-sm text-muted-foreground">Callback URL</div>
+                        <code className="mt-2 block overflow-x-auto rounded-lg bg-card px-3 py-3 text-xs text-electric-blue">
+                          {window.location.origin}/oauth/callback
+                        </code>
+                      </section>
+
+                      <section className="grid gap-5 lg:grid-cols-2">
+                        <div className="rounded-xl border border-border bg-background p-4">
+                          <div className="text-sm text-muted-foreground">Authorize URL</div>
+                          <code className="mt-2 block overflow-x-auto rounded-lg bg-card px-3 py-3 text-xs text-electric-blue">
+                            {authServer.oauth_authorize_url || labels.notSpecified}
+                          </code>
+                        </div>
+                        <div className="rounded-xl border border-border bg-background p-4">
+                          <div className="text-sm text-muted-foreground">Token URL</div>
+                          <code className="mt-2 block overflow-x-auto rounded-lg bg-card px-3 py-3 text-xs text-electric-blue">
+                            {authServer.oauth_token_url || labels.notSpecified}
+                          </code>
+                        </div>
+                      </section>
+
+                      <section className="rounded-xl border border-border bg-background p-4">
+                        <div className="text-sm text-muted-foreground">Scopes</div>
+                        {(authServer.oauth_scopes ?? []).length > 0 ? (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {(authServer.oauth_scopes ?? []).map((scope) => (
+                              <span
+                                key={scope}
+                                className="rounded-full border border-electric-blue/30 bg-electric-blue/12 px-2 py-1 text-xs font-medium text-electric-blue"
+                              >
+                                {scope}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="mt-3 text-sm text-muted-foreground">{labels.notSpecified}</div>
+                        )}
+                      </section>
+
+                      {authServer.oauth_last_error ? (
+                        <section className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+                          {authServer.oauth_last_error}
+                        </section>
+                      ) : null}
+
+                      <section className="flex flex-wrap gap-3">
+                        <button
+                          onClick={() => void connectOAuth(authServer.id)}
+                          disabled={busyServerId === authServer.id}
+                          className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          {busyServerId === authServer.id ? (
+                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Play className="h-4 w-4" />
+                          )}
+                          {authServer.oauth_connected ? `Reconnect ${labels.oauth}` : `Connect ${labels.oauth}`}
+                        </button>
+
+                        <button
+                          onClick={() => void disconnectOAuth(authServer.id)}
+                          disabled={busyServerId === authServer.id || !authServer.oauth_connected}
+                          className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          {busyServerId === authServer.id ? (
+                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Pause className="h-4 w-4" />
+                          )}
+                          {`Disconnect ${labels.oauth}`}
+                        </button>
                       </section>
                     </div>
                   ) : null}

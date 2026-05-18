@@ -24,6 +24,8 @@ At the current stage MCPBox is not:
 - `Project`: a logical workspace group of MCP servers for one client, team, or environment.
 - `MCP Server`: either a local `STDIO` server launched by MCPBox or a remote `HTTP streaming` server.
 - `Primary Server`: the server inside a project that backs the project's MCP endpoint.
+- `Catalog Item`: an integration definition synchronized from an external JSON manifest and stored in SQLite.
+- `Installed Integration`: a project-level record that links a catalog item to a concrete `MCPServer`.
 
 Important behavior:
 - each project has exactly one MCP URL;
@@ -48,6 +50,9 @@ Important behavior:
 - project pause/resume
 - server enable/disable
 - `STDIO` server inspection
+- server health verification on create, update, start, and manual check
+- catalog sync from external JSON manifests
+- installed integrations persisted alongside regular MCP servers
 
 ### Frontend
 
@@ -55,9 +60,11 @@ Important behavior:
 - project list and project overview
 - modal create-project flow
 - modal add-server flow for `STDIO` and `HTTP streaming`
+- Market tab for catalog sync and integration install
 - project MCP URL display
 - start/stop controls for local servers
 - primary server selection
+- OAuth connect/disconnect flow remains available on server cards, but is no longer the main add-remote path
 - audit log console with project filtering
 - auto-refreshing log view
 - `Info` modal for `STDIO` servers
@@ -104,6 +111,65 @@ The `Info` action in the UI is available only for `STDIO` servers. It can show:
 - nearby `README.md` if MCPBox finds one next to the configured local path.
 
 Remote `HTTP streaming` servers intentionally do not expose this UI action.
+
+## Server Health Checks
+
+MCPBox now verifies MCP server operability before the user discovers problems through an AI client.
+
+Current behavior:
+- when a server is created, MCPBox runs a health check and stores the result;
+- when a server is edited, MCPBox re-checks the updated configuration;
+- when a local `STDIO` server is started manually, start is treated as successful only if MCP health verification passes;
+- the UI exposes a manual `Check` action for both local and remote servers.
+
+Current verification strategy:
+- local `STDIO` servers are checked through a real MCP handshake: `initialize`, `notifications/initialized`, and capability discovery calls such as `tools/list`, `resources/list`, and `prompts/list` when supported;
+- remote `HTTP streaming` servers are checked through an HTTP `initialize` request to the configured MCP URL;
+- the last health state, error text, and timestamp are persisted in SQLite and shown in the admin UI.
+
+## OAuth for Remote MCP Servers
+
+OAuth is still supported, but it is no longer the primary UX for adding remote integrations.
+
+Current migration direction:
+- everyday remote integrations should come from `Market / Catalog`;
+- the external manifest is synced into SQLite and shown in the UI;
+- installing a catalog item creates an `Installed Integration` and a linked `MCPServer`;
+- the existing custom remote server flow remains available for manual endpoints;
+- `/mcp/{project_token}` is unchanged because installed integrations still resolve to regular project servers.
+
+MCPBox now includes a built-in OAuth 2 flow for remote `HTTP streaming` MCP servers.
+
+Current behavior:
+- OAuth is configured per remote MCP server;
+- MCPBox opens the system browser for user login and consent;
+- the OAuth callback is handled by MCPBox itself;
+- access tokens and refresh tokens are stored locally in SQLite;
+- proxied upstream MCP requests automatically receive the bearer token;
+- access tokens are refreshed on demand when the server has a refresh token and the token is near expiry.
+
+Why browser-based and not WebView:
+- Figma explicitly requires a real browser for OAuth and does not support embedded WebView flows;
+- browser-based auth also works better with MFA, SSO, passkeys, and enterprise login policies.
+
+Important notes:
+- MCPBox is acting as the OAuth client for the remote MCP provider;
+- for providers like Figma, you still need to create and configure your own OAuth app;
+- the callback URL must point back to MCPBox, for example `http://127.0.0.1:38180/oauth/callback`;
+- changing OAuth configuration on a server clears previously stored tokens for safety.
+
+### Figma Example
+
+Typical Figma remote MCP configuration inside MCPBox:
+- MCP URL: `https://mcp.figma.com/mcp`
+- Auth type: `oauth2`
+- Provider preset: `figma`
+- Redirect URL in your Figma OAuth app: `http://127.0.0.1:38180/oauth/callback`
+
+After the server is saved:
+1. Click `Connect OAuth` in the server card.
+2. Complete the login in your browser.
+3. Return to MCPBox after the popup confirms the connection.
 
 ## Logging and Control
 
@@ -363,6 +429,73 @@ Resume project:
 POST /api/projects/{id}/resume
 ```
 
+Install integration into a project:
+
+```http
+POST /api/projects/{id}/integrations
+Content-Type: application/json
+```
+
+```json
+{
+  "catalog_item_id": "notion",
+  "name": "Notion MCP",
+  "make_primary": false,
+  "config": {}
+}
+```
+
+### Catalog / Market
+
+List catalog items stored in SQLite:
+
+```http
+GET /api/catalog/items
+GET /api/catalog/items?enabled_only=1
+```
+
+Manually sync catalog from external manifest URL:
+
+```http
+POST /api/catalog/sync
+Content-Type: application/json
+```
+
+```json
+{
+  "url": "https://webeasy.kz/mcpbox/catalog.json"
+}
+```
+
+Current manifest shape:
+
+```json
+{
+  "schema_version": "2026-05-18",
+  "generated_at": "2026-05-18T10:00:00Z",
+  "items": [
+    {
+      "id": "notion",
+      "name": "Notion MCP",
+      "category": "productivity",
+      "description": "Remote Notion integration",
+      "icon": "https://example.com/notion.svg",
+      "transport": "http_stream",
+      "mcp_url": "https://api.example.com/mcp/notion",
+      "auth_type": "none",
+      "auth_provider": "",
+      "config_schema": {},
+      "capabilities": ["tools", "resources"],
+      "tags": ["docs", "notes"],
+      "website": "https://example.com",
+      "docs_url": "https://example.com/docs",
+      "enabled": true,
+      "version": "1.0.0"
+    }
+  ]
+}
+```
+
 ### MCP Servers
 
 Add `STDIO` server:
@@ -422,10 +555,34 @@ Enable server:
 POST /api/servers/{id}/enable
 ```
 
+Manual server health check:
+
+```http
+POST /api/servers/{id}/check
+```
+
+Start OAuth authorization for a remote server:
+
+```http
+POST /api/servers/{id}/oauth-start
+```
+
+Disconnect OAuth for a remote server:
+
+```http
+POST /api/servers/{id}/oauth-disconnect
+```
+
 Inspect local `STDIO` server:
 
 ```http
 GET /api/servers/{id}/inspect
+```
+
+OAuth callback handled by MCPBox:
+
+```http
+GET /oauth/callback
 ```
 
 ### Logs

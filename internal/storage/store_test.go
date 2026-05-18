@@ -15,6 +15,7 @@ func TestAddServerAssignsPrimaryServerOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore() error = %v", err)
 	}
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	project := &models.Project{Name: "Workspace"}

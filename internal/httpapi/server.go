@@ -3,6 +3,8 @@ package httpapi
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -30,6 +32,8 @@ type Server struct {
 	mux       *http.ServeMux
 	sessionMu sync.RWMutex
 	sessions  map[string]connectSession
+	oauthMu   sync.RWMutex
+	oauth     map[string]oauthSession
 }
 
 type connectSession struct {
@@ -38,6 +42,14 @@ type connectSession struct {
 	ProjectID    uint
 	ServerID     uint
 	CreatedAt    time.Time
+}
+
+type oauthSession struct {
+	ID          string
+	ServerID    uint
+	RedirectURI string
+	Verifier    string
+	CreatedAt   time.Time
 }
 
 type createProjectRequest struct {
@@ -62,6 +74,14 @@ type addServerRequest struct {
 	BearerTokenEnvVar string         `json:"bearer_token_env_var"`
 	Headers           []keyValuePair `json:"headers"`
 	HeaderEnvVars     []keyValuePair `json:"header_env_vars"`
+	AuthType          string         `json:"auth_type"`
+	OAuthProvider     string         `json:"oauth_provider"`
+	OAuthAuthorizeURL string         `json:"oauth_authorize_url"`
+	OAuthTokenURL     string         `json:"oauth_token_url"`
+	OAuthRefreshURL   string         `json:"oauth_refresh_url"`
+	OAuthClientID     string         `json:"oauth_client_id"`
+	OAuthClientSecret string         `json:"oauth_client_secret"`
+	OAuthScopes       []string       `json:"oauth_scopes"`
 	AutoStart         bool           `json:"auto_start"`
 }
 
@@ -80,15 +100,16 @@ type auditLogResponse struct {
 }
 
 type projectStatusResponse struct {
-	ProjectID       uint                 `json:"project_id"`
-	Name            string               `json:"name"`
-	Description     string               `json:"description"`
-	Token           string               `json:"token"`
-	PrimaryServerID *uint                `json:"primary_server_id"`
-	IsPaused        bool                 `json:"is_paused"`
-	ConnectURL      string               `json:"connect_url"`
-	ConnectionReady bool                 `json:"connection_ready"`
-	Servers         []serverStatusRecord `json:"servers"`
+	ProjectID             uint                           `json:"project_id"`
+	Name                  string                         `json:"name"`
+	Description           string                         `json:"description"`
+	Token                 string                         `json:"token"`
+	PrimaryServerID       *uint                          `json:"primary_server_id"`
+	IsPaused              bool                           `json:"is_paused"`
+	ConnectURL            string                         `json:"connect_url"`
+	ConnectionReady       bool                           `json:"connection_ready"`
+	Servers               []serverStatusRecord           `json:"servers"`
+	InstalledIntegrations []installedIntegrationResponse `json:"installed_integrations"`
 }
 
 type serverStatusRecord struct {
@@ -107,7 +128,21 @@ type serverStatusRecord struct {
 	HeaderEnvVars     []keyValuePair `json:"header_env_vars"`
 	AutoStart         bool           `json:"auto_start"`
 	IsEnabled         bool           `json:"is_enabled"`
+	AuthType          string         `json:"auth_type"`
+	OAuthProvider     string         `json:"oauth_provider"`
+	OAuthAuthorizeURL string         `json:"oauth_authorize_url"`
+	OAuthTokenURL     string         `json:"oauth_token_url"`
+	OAuthRefreshURL   string         `json:"oauth_refresh_url"`
+	OAuthClientID     string         `json:"oauth_client_id"`
+	OAuthClientSecret string         `json:"oauth_client_secret"`
+	OAuthScopes       []string       `json:"oauth_scopes"`
+	OAuthConnected    bool           `json:"oauth_connected"`
+	OAuthConnectedAt  string         `json:"oauth_connected_at,omitempty"`
+	OAuthLastError    string         `json:"oauth_last_error"`
 	Status            string         `json:"status"`
+	HealthStatus      string         `json:"health_status"`
+	HealthError       string         `json:"health_error"`
+	HealthCheckedAt   string         `json:"health_checked_at,omitempty"`
 	IsPrimary         bool           `json:"is_primary"`
 }
 
@@ -134,6 +169,7 @@ func NewServer(store *storage.Store, registry *orchestrator.Registry) *Server {
 		registry: registry,
 		mux:      http.NewServeMux(),
 		sessions: make(map[string]connectSession),
+		oauth:    make(map[string]oauthSession),
 	}
 
 	s.registerRoutes()
@@ -147,6 +183,8 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("GET /api/logs", s.handleListLogs)
+	s.mux.HandleFunc("GET /api/catalog/items", s.handleCatalogList)
+	s.mux.HandleFunc("POST /api/catalog/sync", s.handleCatalogSync)
 	s.mux.HandleFunc("GET /api/projects", s.handleListProjects)
 	s.mux.HandleFunc("POST /api/projects", s.handleCreateProject)
 	s.mux.HandleFunc("GET /api/projects/", s.handleProjectStatus)
@@ -157,6 +195,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/servers/", s.handleServerAction)
 	s.mux.HandleFunc("PUT /api/servers/", s.handleServerUpdate)
 	s.mux.HandleFunc("DELETE /api/servers/", s.handleServerDelete)
+	s.mux.HandleFunc("GET /oauth/callback", s.handleOAuthCallback)
 	s.mux.HandleFunc("/mcp/", s.handleConnect)
 	s.mux.HandleFunc("/connect/", s.handleConnect)
 	s.mux.Handle("/", s.handleUI())
@@ -290,6 +329,8 @@ func (s *Server) handleProjectAction(w http.ResponseWriter, r *http.Request) {
 	switch tail {
 	case "servers":
 		s.handleAddServer(w, r, projectID)
+	case "integrations":
+		s.handleProjectInstallIntegration(w, r, projectID)
 	case "primary-server":
 		s.handleSetPrimaryServer(w, r, projectID)
 	case "pause":
@@ -404,6 +445,13 @@ func (s *Server) handleAddServer(w http.ResponseWriter, r *http.Request, project
 		}
 	}
 
+	runner := s.registry.Runner(server.ID)
+	if err := s.refreshServerHealth(r.Context(), clientActor(r), *server, runner); err != nil && runner != nil && runner.Running() {
+		stopCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		_ = s.registry.StopServer(stopCtx, server.ID)
+		cancel()
+	}
+
 	updatedProject, err := s.store.GetProject(r.Context(), projectID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
@@ -492,6 +540,17 @@ func (s *Server) handleServerAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		err = s.registry.StartServer(r.Context(), *server)
+		if err == nil {
+			runner := s.registry.Runner(server.ID)
+			if healthErr := s.refreshServerHealth(r.Context(), clientActor(r), *server, runner); healthErr != nil {
+				stopCtx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+				_ = s.registry.StopServer(stopCtx, server.ID)
+				cancel()
+				s.logAudit(r.Context(), &server.ProjectID, &server.ID, "server_start_failed_health_check", clientActor(r), truncateDetail(healthErr.Error()))
+				writeError(w, http.StatusBadGateway, healthErr)
+				return
+			}
+		}
 	case "stop":
 		if server.Transport == models.ServerTransportHTTPStream {
 			writeError(w, http.StatusBadRequest, errors.New("start/stop actions are only available for stdio servers"))
@@ -511,6 +570,13 @@ func (s *Server) handleServerAction(w http.ResponseWriter, r *http.Request) {
 		}
 	case "enable":
 		err = s.store.SetServerEnabled(r.Context(), server.ID, true)
+	case "check":
+		err = s.refreshServerHealth(r.Context(), clientActor(r), *server, s.registry.Runner(server.ID))
+	case "oauth-start":
+		s.handleServerOAuthStart(w, r, *server)
+		return
+	case "oauth-disconnect":
+		err = s.store.ClearServerOAuthTokens(r.Context(), server.ID)
 	default:
 		http.NotFound(w, r)
 		return
@@ -561,10 +627,26 @@ func (s *Server) handleServerUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	server.ID = existing.ID
 	server.IsEnabled = existing.IsEnabled
+	server.OAuthAccessToken = existing.OAuthAccessToken
+	server.OAuthRefreshToken = existing.OAuthRefreshToken
+	server.OAuthTokenExpiry = existing.OAuthTokenExpiry
+	server.OAuthConnectedAt = existing.OAuthConnectedAt
+	server.OAuthLastError = existing.OAuthLastError
+
+	if oauthConfigChanged(*existing, *server) {
+		server.OAuthAccessToken = ""
+		server.OAuthRefreshToken = ""
+		server.OAuthTokenExpiry = nil
+		server.OAuthConnectedAt = nil
+		server.OAuthLastError = ""
+	}
 
 	if err := s.store.UpdateServer(r.Context(), server); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
+	}
+	if oauthConfigChanged(*existing, *server) || normalizedAuthType(server.AuthType) != models.ServerAuthTypeOAuth2 {
+		_ = s.store.ClearServerOAuthTokens(r.Context(), server.ID)
 	}
 
 	if existing.Transport == models.ServerTransportSTDIO {
@@ -572,6 +654,8 @@ func (s *Server) handleServerUpdate(w http.ResponseWriter, r *http.Request) {
 		_ = s.registry.StopServer(stopCtx, existing.ID)
 		cancel()
 	}
+
+	_ = s.refreshServerHealth(r.Context(), clientActor(r), *server, nil)
 
 	updatedProject, err := s.store.GetProject(r.Context(), existing.ProjectID)
 	if err != nil {
@@ -866,15 +950,16 @@ func (s *Server) handleUI() http.Handler {
 
 func (s *Server) projectStatus(r *http.Request, project models.Project) projectStatusResponse {
 	response := projectStatusResponse{
-		ProjectID:       project.ID,
-		Name:            project.Name,
-		Description:     project.Description,
-		Token:           project.Token,
-		PrimaryServerID: project.PrimaryServerID,
-		IsPaused:        project.IsPaused,
-		ConnectURL:      s.connectURL(r, project.Token),
-		ConnectionReady: project.PrimaryServerID != nil,
-		Servers:         make([]serverStatusRecord, 0, len(project.Servers)),
+		ProjectID:             project.ID,
+		Name:                  project.Name,
+		Description:           project.Description,
+		Token:                 project.Token,
+		PrimaryServerID:       project.PrimaryServerID,
+		IsPaused:              project.IsPaused,
+		ConnectURL:            s.connectURL(r, project.Token),
+		ConnectionReady:       project.PrimaryServerID != nil,
+		Servers:               make([]serverStatusRecord, 0, len(project.Servers)),
+		InstalledIntegrations: mapInstalledIntegrations(project.InstalledIntegrations),
 	}
 
 	for _, server := range project.Servers {
@@ -883,6 +968,7 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 		envPassthrough, _ := decodeStringSlice(server.EnvPassthroughJSON)
 		headers, _ := decodeKeyValuePairs(server.HeadersJSON)
 		headerEnvVars, _ := decodeKeyValuePairs(server.HeaderEnvJSON)
+		oauthScopes, _ := decodeStringSlice(server.OAuthScopesJSON)
 
 		response.Servers = append(response.Servers, serverStatusRecord{
 			ID:                server.ID,
@@ -900,7 +986,21 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 			HeaderEnvVars:     headerEnvVars,
 			AutoStart:         server.AutoStart,
 			IsEnabled:         server.IsEnabled,
+			AuthType:          normalizedAuthType(server.AuthType),
+			OAuthProvider:     strings.TrimSpace(server.OAuthProvider),
+			OAuthAuthorizeURL: strings.TrimSpace(server.OAuthAuthorizeURL),
+			OAuthTokenURL:     strings.TrimSpace(server.OAuthTokenURL),
+			OAuthRefreshURL:   strings.TrimSpace(server.OAuthRefreshURL),
+			OAuthClientID:     strings.TrimSpace(server.OAuthClientID),
+			OAuthClientSecret: strings.TrimSpace(server.OAuthClientSecret),
+			OAuthScopes:       coalesceStringSlice(oauthScopes),
+			OAuthConnected:    strings.TrimSpace(server.OAuthAccessToken) != "",
+			OAuthConnectedAt:  formatServerHealthCheckedAt(server.OAuthConnectedAt),
+			OAuthLastError:    strings.TrimSpace(server.OAuthLastError),
 			Status:            s.serverStatus(server),
+			HealthStatus:      serverHealthStatus(server),
+			HealthError:       strings.TrimSpace(server.HealthError),
+			HealthCheckedAt:   formatServerHealthCheckedAt(server.HealthCheckedAt),
 			IsPrimary:         project.PrimaryServerID != nil && server.ID == *project.PrimaryServerID,
 		})
 	}
@@ -948,6 +1048,98 @@ func (s *Server) serverStatus(server models.MCPServer) string {
 	return s.registry.Status(server.ID)
 }
 
+func serverHealthStatus(server models.MCPServer) string {
+	status := strings.TrimSpace(server.HealthStatus)
+	if status == "" {
+		return models.ServerHealthUnknown
+	}
+
+	return status
+}
+
+func formatServerHealthCheckedAt(checkedAt *time.Time) string {
+	if checkedAt == nil || checkedAt.IsZero() {
+		return ""
+	}
+
+	return checkedAt.UTC().Format(time.RFC3339)
+}
+
+func (s *Server) refreshServerHealth(ctx context.Context, actor string, server models.MCPServer, runner *orchestrator.ServerRunner) error {
+	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	if normalizedAuthType(server.AuthType) == models.ServerAuthTypeOAuth2 {
+		var err error
+		server, err = s.ensureOAuthAccessToken(checkCtx, server)
+		if err != nil {
+			return err
+		}
+	}
+
+	var err error
+	if runner != nil && runner.Running() && server.Transport == models.ServerTransportSTDIO {
+		err = orchestrator.CheckRunningServer(checkCtx, runner)
+	} else {
+		err = orchestrator.CheckServer(checkCtx, server)
+	}
+
+	checkedAt := time.Now().UTC()
+	status := models.ServerHealthHealthy
+	detail := ""
+	if err != nil {
+		status = models.ServerHealthFailed
+		detail = truncateDetail(err.Error())
+	}
+
+	if storeErr := s.store.UpdateServerHealth(ctx, server.ID, status, detail, checkedAt); storeErr != nil {
+		log.Printf("update server health failed for server %d: %v", server.ID, storeErr)
+	}
+
+	if err == nil {
+		s.logAudit(ctx, &server.ProjectID, &server.ID, "server_health_ok", actor, server.Name)
+		return nil
+	}
+
+	s.logAudit(ctx, &server.ProjectID, &server.ID, "server_health_failed", actor, detail)
+	return err
+}
+
+func (s *Server) ensureOAuthAccessToken(ctx context.Context, server models.MCPServer) (models.MCPServer, error) {
+	if normalizedAuthType(server.AuthType) != models.ServerAuthTypeOAuth2 {
+		return server, nil
+	}
+	if strings.TrimSpace(server.OAuthAccessToken) == "" {
+		return server, errors.New("oauth access token is missing, connect the server first")
+	}
+
+	expiry := server.OAuthTokenExpiry
+	if expiry == nil || expiry.IsZero() || expiry.After(time.Now().UTC().Add(60*time.Second)) {
+		return server, nil
+	}
+
+	token, err := refreshOAuthToken(ctx, server)
+	if err != nil {
+		_ = s.store.SaveServerOAuthTokens(ctx, server.ID, "", server.OAuthRefreshToken, nil, server.OAuthConnectedAt, truncateDetail(err.Error()))
+		return server, err
+	}
+
+	connectedAt := server.OAuthConnectedAt
+	if connectedAt == nil {
+		now := time.Now().UTC()
+		connectedAt = &now
+	}
+	if err := s.store.SaveServerOAuthTokens(ctx, server.ID, token.AccessToken, token.RefreshToken, token.Expiry, connectedAt, ""); err != nil {
+		return server, err
+	}
+
+	server.OAuthAccessToken = token.AccessToken
+	server.OAuthRefreshToken = token.RefreshToken
+	server.OAuthTokenExpiry = token.Expiry
+	server.OAuthLastError = ""
+	return server, nil
+}
+
 func buildServerModel(projectID uint, req addServerRequest) (*models.MCPServer, error) {
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
@@ -962,6 +1154,13 @@ func buildServerModel(projectID uint, req addServerRequest) (*models.MCPServer, 
 		WorkingDir:        strings.TrimSpace(req.WorkingDir),
 		URL:               strings.TrimSpace(req.URL),
 		BearerTokenEnvVar: strings.TrimSpace(req.BearerTokenEnvVar),
+		AuthType:          normalizedAuthType(req.AuthType),
+		OAuthProvider:     strings.TrimSpace(req.OAuthProvider),
+		OAuthAuthorizeURL: strings.TrimSpace(req.OAuthAuthorizeURL),
+		OAuthTokenURL:     strings.TrimSpace(req.OAuthTokenURL),
+		OAuthRefreshURL:   strings.TrimSpace(req.OAuthRefreshURL),
+		OAuthClientID:     strings.TrimSpace(req.OAuthClientID),
+		OAuthClientSecret: strings.TrimSpace(req.OAuthClientSecret),
 		AutoStart:         req.AutoStart,
 	}
 
@@ -1011,6 +1210,47 @@ func buildServerModel(projectID uint, req addServerRequest) (*models.MCPServer, 
 
 		server.HeadersJSON = string(headersJSON)
 		server.HeaderEnvJSON = string(headerEnvJSON)
+		scopesJSON, err := json.Marshal(sanitizeStrings(req.OAuthScopes))
+		if err != nil {
+			return nil, fmt.Errorf("encode oauth scopes: %w", err)
+		}
+		server.OAuthScopesJSON = string(scopesJSON)
+
+		applyOAuthProviderDefaults(server)
+		if server.AuthType == models.ServerAuthTypeOAuth2 {
+			if server.OAuthAuthorizeURL == "" {
+				return nil, errors.New("oauth authorize url is required for oauth2 servers")
+			}
+			if server.OAuthTokenURL == "" {
+				return nil, errors.New("oauth token url is required for oauth2 servers")
+			}
+			if server.OAuthClientID == "" {
+				return nil, errors.New("oauth client id is required for oauth2 servers")
+			}
+			if server.OAuthClientSecret == "" {
+				return nil, errors.New("oauth client secret is required for oauth2 servers")
+			}
+			if _, err := url.ParseRequestURI(server.OAuthAuthorizeURL); err != nil {
+				return nil, errors.New("oauth authorize url must be a valid absolute URL")
+			}
+			if _, err := url.ParseRequestURI(server.OAuthTokenURL); err != nil {
+				return nil, errors.New("oauth token url must be a valid absolute URL")
+			}
+			if server.OAuthRefreshURL != "" {
+				if _, err := url.ParseRequestURI(server.OAuthRefreshURL); err != nil {
+					return nil, errors.New("oauth refresh url must be a valid absolute URL")
+				}
+			}
+		} else {
+			server.AuthType = models.ServerAuthTypeNone
+			server.OAuthProvider = ""
+			server.OAuthAuthorizeURL = ""
+			server.OAuthTokenURL = ""
+			server.OAuthRefreshURL = ""
+			server.OAuthClientID = ""
+			server.OAuthClientSecret = ""
+			server.OAuthScopesJSON = "[]"
+		}
 	default:
 		return nil, errors.New("unsupported transport")
 	}
@@ -1061,6 +1301,14 @@ func decodeStringSlice(raw string) ([]string, error) {
 	return values, nil
 }
 
+func coalesceStringSlice(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+
+	return values
+}
+
 func decodeKeyValuePairs(raw string) ([]keyValuePair, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, nil
@@ -1083,6 +1331,43 @@ func normalizedTransport(raw string) string {
 	default:
 		return strings.TrimSpace(raw)
 	}
+}
+
+func normalizedAuthType(raw string) string {
+	switch strings.TrimSpace(raw) {
+	case "", models.ServerAuthTypeNone:
+		return models.ServerAuthTypeNone
+	case models.ServerAuthTypeOAuth2:
+		return models.ServerAuthTypeOAuth2
+	default:
+		return strings.TrimSpace(raw)
+	}
+}
+
+func applyOAuthProviderDefaults(server *models.MCPServer) {
+	switch strings.ToLower(strings.TrimSpace(server.OAuthProvider)) {
+	case "figma":
+		if server.OAuthAuthorizeURL == "" {
+			server.OAuthAuthorizeURL = "https://www.figma.com/oauth"
+		}
+		if server.OAuthTokenURL == "" {
+			server.OAuthTokenURL = "https://api.figma.com/v1/oauth/token"
+		}
+		if server.OAuthRefreshURL == "" {
+			server.OAuthRefreshURL = "https://api.figma.com/v1/oauth/refresh"
+		}
+	}
+}
+
+func oauthConfigChanged(current, next models.MCPServer) bool {
+	return normalizedAuthType(current.AuthType) != normalizedAuthType(next.AuthType) ||
+		strings.TrimSpace(current.OAuthProvider) != strings.TrimSpace(next.OAuthProvider) ||
+		strings.TrimSpace(current.OAuthAuthorizeURL) != strings.TrimSpace(next.OAuthAuthorizeURL) ||
+		strings.TrimSpace(current.OAuthTokenURL) != strings.TrimSpace(next.OAuthTokenURL) ||
+		strings.TrimSpace(current.OAuthRefreshURL) != strings.TrimSpace(next.OAuthRefreshURL) ||
+		strings.TrimSpace(current.OAuthClientID) != strings.TrimSpace(next.OAuthClientID) ||
+		strings.TrimSpace(current.OAuthClientSecret) != strings.TrimSpace(next.OAuthClientSecret) ||
+		strings.TrimSpace(current.OAuthScopesJSON) != strings.TrimSpace(next.OAuthScopesJSON)
 }
 
 func clientActor(r *http.Request) string {
@@ -1121,7 +1406,328 @@ func (s *Server) logAudit(ctx context.Context, projectID, serverID *uint, action
 	}
 }
 
+func (s *Server) handleServerOAuthStart(w http.ResponseWriter, r *http.Request, server models.MCPServer) {
+	if server.Transport != models.ServerTransportHTTPStream {
+		writeError(w, http.StatusBadRequest, errors.New("oauth is only available for http streaming servers"))
+		return
+	}
+	if normalizedAuthType(server.AuthType) != models.ServerAuthTypeOAuth2 {
+		writeError(w, http.StatusBadRequest, errors.New("server is not configured for oauth2"))
+		return
+	}
+
+	applyOAuthProviderDefaults(&server)
+	redirectURI := s.absoluteURL(r, "/oauth/callback")
+	state, err := newConnectSessionID()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	verifier, err := newOAuthVerifier()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	s.oauthMu.Lock()
+	s.oauth[state] = oauthSession{
+		ID:          state,
+		ServerID:    server.ID,
+		RedirectURI: redirectURI,
+		Verifier:    verifier,
+		CreatedAt:   time.Now().UTC(),
+	}
+	s.oauthMu.Unlock()
+
+	authURL, err := buildOAuthAuthorizeURL(server, redirectURI, state, verifier)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"auth_url": authURL})
+}
+
+func (s *Server) handleOAuthCallback(w http.ResponseWriter, r *http.Request) {
+	state := strings.TrimSpace(r.URL.Query().Get("state"))
+	code := strings.TrimSpace(r.URL.Query().Get("code"))
+	callbackErr := strings.TrimSpace(r.URL.Query().Get("error"))
+	callbackErrDesc := strings.TrimSpace(r.URL.Query().Get("error_description"))
+
+	session, ok := s.consumeOAuthSession(state)
+	if !ok {
+		http.Error(w, "Invalid or expired OAuth session.", http.StatusBadRequest)
+		return
+	}
+
+	server, err := s.store.GetServer(r.Context(), session.ServerID)
+	if err != nil {
+		http.Error(w, "Failed to load server configuration.", http.StatusInternalServerError)
+		return
+	}
+	if server == nil {
+		http.Error(w, "Server not found.", http.StatusNotFound)
+		return
+	}
+
+	if callbackErr != "" {
+		detail := callbackErr
+		if callbackErrDesc != "" {
+			detail += ": " + callbackErrDesc
+		}
+		_ = s.store.SaveServerOAuthTokens(r.Context(), server.ID, "", "", nil, nil, detail)
+		s.logAudit(r.Context(), &server.ProjectID, &server.ID, "server_oauth_failed", clientActor(r), truncateDetail(detail))
+		writeOAuthCallbackPage(w, false, "OAuth connection failed", detail)
+		return
+	}
+	if code == "" {
+		writeOAuthCallbackPage(w, false, "OAuth connection failed", "No authorization code was returned.")
+		return
+	}
+
+	token, err := exchangeOAuthCode(r.Context(), *server, session.RedirectURI, session.Verifier, code)
+	if err != nil {
+		_ = s.store.SaveServerOAuthTokens(r.Context(), server.ID, "", "", nil, nil, truncateDetail(err.Error()))
+		s.logAudit(r.Context(), &server.ProjectID, &server.ID, "server_oauth_failed", clientActor(r), truncateDetail(err.Error()))
+		writeOAuthCallbackPage(w, false, "OAuth connection failed", err.Error())
+		return
+	}
+
+	connectedAt := time.Now().UTC()
+	if err := s.store.SaveServerOAuthTokens(
+		r.Context(),
+		server.ID,
+		token.AccessToken,
+		token.RefreshToken,
+		token.Expiry,
+		&connectedAt,
+		"",
+	); err != nil {
+		writeOAuthCallbackPage(w, false, "OAuth connection failed", err.Error())
+		return
+	}
+
+	updatedServer, err := s.store.GetServer(r.Context(), server.ID)
+	if err == nil && updatedServer != nil {
+		_ = s.refreshServerHealth(r.Context(), clientActor(r), *updatedServer, nil)
+	}
+
+	s.logAudit(r.Context(), &server.ProjectID, &server.ID, "server_oauth_connected", clientActor(r), server.Name)
+	writeOAuthCallbackPage(w, true, "OAuth connected", "You can close this window and return to MCPBox.")
+}
+
+type oauthTokenResponse struct {
+	AccessToken  string     `json:"access_token"`
+	TokenType    string     `json:"token_type"`
+	RefreshToken string     `json:"refresh_token"`
+	ExpiresIn    int        `json:"expires_in"`
+	Expiry       *time.Time `json:"-"`
+}
+
+func (s *Server) consumeOAuthSession(state string) (oauthSession, bool) {
+	s.oauthMu.Lock()
+	defer s.oauthMu.Unlock()
+
+	session, ok := s.oauth[state]
+	if ok {
+		delete(s.oauth, state)
+	}
+
+	return session, ok
+}
+
+func buildOAuthAuthorizeURL(server models.MCPServer, redirectURI, state, verifier string) (string, error) {
+	authURL, err := url.Parse(server.OAuthAuthorizeURL)
+	if err != nil {
+		return "", err
+	}
+
+	values := authURL.Query()
+	values.Set("client_id", server.OAuthClientID)
+	values.Set("redirect_uri", redirectURI)
+	values.Set("response_type", "code")
+	values.Set("state", state)
+	scopes, _ := decodeStringSlice(server.OAuthScopesJSON)
+	if len(scopes) > 0 {
+		values.Set("scope", strings.Join(scopes, " "))
+	}
+	values.Set("code_challenge", oauthCodeChallenge(verifier))
+	values.Set("code_challenge_method", "S256")
+	authURL.RawQuery = values.Encode()
+
+	return authURL.String(), nil
+}
+
+func exchangeOAuthCode(ctx context.Context, server models.MCPServer, redirectURI, verifier, code string) (*oauthTokenResponse, error) {
+	form := url.Values{}
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", code)
+	form.Set("redirect_uri", redirectURI)
+	if strings.TrimSpace(server.OAuthClientSecret) == "" && strings.TrimSpace(server.OAuthClientID) != "" {
+		form.Set("client_id", server.OAuthClientID)
+	}
+	if verifier != "" {
+		form.Set("code_verifier", verifier)
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, server.OAuthTokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	applyOAuthClientAuth(request, server)
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(response.Body, 1024*1024))
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("oauth token exchange failed with status %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var payload oauthTokenResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("decode oauth token response: %w", err)
+	}
+	if payload.AccessToken == "" {
+		return nil, errors.New("oauth token exchange returned an empty access token")
+	}
+	if payload.ExpiresIn > 0 {
+		expiry := time.Now().UTC().Add(time.Duration(payload.ExpiresIn) * time.Second)
+		payload.Expiry = &expiry
+	}
+
+	return &payload, nil
+}
+
+func refreshOAuthToken(ctx context.Context, server models.MCPServer) (*oauthTokenResponse, error) {
+	refreshURL := strings.TrimSpace(server.OAuthRefreshURL)
+	if refreshURL == "" {
+		refreshURL = strings.TrimSpace(server.OAuthTokenURL)
+	}
+	if refreshURL == "" {
+		return nil, errors.New("oauth refresh url is not configured")
+	}
+	if strings.TrimSpace(server.OAuthRefreshToken) == "" {
+		return nil, errors.New("oauth refresh token is missing")
+	}
+
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("refresh_token", server.OAuthRefreshToken)
+	if strings.TrimSpace(server.OAuthClientSecret) == "" && strings.TrimSpace(server.OAuthClientID) != "" {
+		form.Set("client_id", server.OAuthClientID)
+	}
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, refreshURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	applyOAuthClientAuth(request, server)
+
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(response.Body, 1024*1024))
+	if err != nil {
+		return nil, err
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("oauth token refresh failed with status %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var payload oauthTokenResponse
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, fmt.Errorf("decode oauth refresh response: %w", err)
+	}
+	if payload.AccessToken == "" {
+		return nil, errors.New("oauth token refresh returned an empty access token")
+	}
+	if payload.RefreshToken == "" {
+		payload.RefreshToken = server.OAuthRefreshToken
+	}
+	if payload.ExpiresIn > 0 {
+		expiry := time.Now().UTC().Add(time.Duration(payload.ExpiresIn) * time.Second)
+		payload.Expiry = &expiry
+	}
+
+	return &payload, nil
+}
+
+func applyOAuthClientAuth(request *http.Request, server models.MCPServer) {
+	if strings.TrimSpace(server.OAuthClientSecret) != "" {
+		request.SetBasicAuth(server.OAuthClientID, server.OAuthClientSecret)
+	}
+}
+
+func newOAuthVerifier() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+
+	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+func oauthCodeChallenge(verifier string) string {
+	sum := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+func writeOAuthCallbackPage(w http.ResponseWriter, success bool, title, description string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+
+	stateClass := "#0f172a"
+	badge := "Disconnected"
+	if success {
+		stateClass = "#166534"
+		badge = "Connected"
+	}
+
+	_, _ = fmt.Fprintf(w, `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>%s</title>
+</head>
+<body style="font-family: Inter, Arial, sans-serif; background:#f8fafc; color:#0f172a; display:flex; min-height:100vh; align-items:center; justify-content:center; margin:0;">
+  <div style="width:min(560px, 92vw); background:white; border:1px solid #e2e8f0; border-radius:16px; padding:32px; box-shadow:0 20px 60px rgba(15,23,42,0.08);">
+    <div style="display:inline-block; padding:6px 10px; border-radius:999px; background:#eef2ff; color:%s; font-size:12px; font-weight:600;">%s</div>
+    <h1 style="margin:16px 0 10px; font-size:28px;">%s</h1>
+    <p style="margin:0; line-height:1.6; color:#475569;">%s</p>
+  </div>
+  <script>
+    if (window.opener && !window.opener.closed) {
+      window.opener.postMessage({ type: 'mcpbox-oauth-complete' }, window.location.origin);
+      window.setTimeout(function () { window.close(); }, 1200);
+    }
+  </script>
+</body>
+</html>`, title, stateClass, badge, title, description)
+}
+
 func (s *Server) proxyHTTPServer(w http.ResponseWriter, r *http.Request, server models.MCPServer) {
+	if normalizedAuthType(server.AuthType) == models.ServerAuthTypeOAuth2 {
+		var err error
+		server, err = s.ensureOAuthAccessToken(r.Context(), server)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+	}
+
 	targetURL, err := url.Parse(server.URL)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, errors.New("invalid upstream server URL"))
@@ -1213,6 +1819,12 @@ func applyConfiguredHeaders(dst http.Header, server models.MCPServer) {
 
 	if server.BearerTokenEnvVar != "" {
 		if token := strings.TrimSpace(os.Getenv(server.BearerTokenEnvVar)); token != "" {
+			dst.Set("Authorization", "Bearer "+token)
+		}
+	}
+
+	if normalizedAuthType(server.AuthType) == models.ServerAuthTypeOAuth2 {
+		if token := strings.TrimSpace(server.OAuthAccessToken); token != "" {
 			dst.Set("Authorization", "Bearer "+token)
 		}
 	}

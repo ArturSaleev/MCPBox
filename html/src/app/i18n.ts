@@ -84,6 +84,16 @@ type Dictionary = {
     noResources: string;
     noPrompts: string;
     inspectServer: string;
+    health: string;
+    healthy: string;
+    failed: string;
+    unknown: string;
+    lastCheck: string;
+    check: string;
+    oauth: string;
+    connected: string;
+    notConnected: string;
+    oauthConnected: string;
   };
   messages: {
     loadingProjects: string;
@@ -127,6 +137,7 @@ type Dictionary = {
     popularityDescription: string;
     inspectDescription: string;
     inspectServerError: string;
+    checkServerError: string;
     requestFailed: (status: number) => string;
   };
 };
@@ -219,6 +230,16 @@ export const dictionaries: Record<Language, Dictionary> = {
       noResources: 'No resources exposed.',
       noPrompts: 'No prompts exposed.',
       inspectServer: 'Inspect server',
+      health: 'Health',
+      healthy: 'Healthy',
+      failed: 'Failed',
+      unknown: 'Unknown',
+      lastCheck: 'Last check',
+      check: 'Check',
+      oauth: 'OAuth',
+      connected: 'Connected',
+      notConnected: 'Not connected',
+      oauthConnected: 'OAuth connected',
     },
     messages: {
       loadingProjects: 'Loading projects...',
@@ -265,6 +286,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       popularityDescription: 'Who is receiving the most MCP traffic right now based on the current filter.',
       inspectDescription: 'Live MCP inspection for this local STDIO server plus nearby README if found.',
       inspectServerError: 'Failed to inspect server',
+      checkServerError: 'Failed to verify server health',
       requestFailed: (status: number) => `Request failed with status ${status}`,
     },
   },
@@ -352,6 +374,16 @@ export const dictionaries: Record<Language, Dictionary> = {
       noResources: 'Resources не найдены.',
       noPrompts: 'Prompts не найдены.',
       inspectServer: 'Проверить сервер',
+      health: 'Состояние',
+      healthy: 'Исправен',
+      failed: 'Ошибка',
+      unknown: 'Неизвестно',
+      lastCheck: 'Последняя проверка',
+      check: 'Проверить',
+      oauth: 'OAuth',
+      connected: 'Подключен',
+      notConnected: 'Не подключен',
+      oauthConnected: 'OAuth подключен',
     },
     messages: {
       loadingProjects: 'Загружаю проекты...',
@@ -398,6 +430,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       popularityDescription: 'Кто сейчас получает больше всего MCP-трафика в рамках текущего фильтра.',
       inspectDescription: 'Живой MCP inspection для локального STDIO сервера и nearby README, если он найден.',
       inspectServerError: 'Не удалось проинспектировать сервер',
+      checkServerError: 'Не удалось проверить сервер',
       requestFailed: (status: number) => `Запрос завершился со статусом ${status}`,
     },
   },

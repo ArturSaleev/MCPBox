@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"time"
 
 	"MCPBox/internal/models"
 	"github.com/glebarez/sqlite"
@@ -15,6 +16,17 @@ import (
 
 type Store struct {
 	db *gorm.DB
+}
+
+func (s *Store) Close() error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	sqlDB, err := s.db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
 }
 
 func NewStore(dsn string) (*Store, error) {
@@ -29,6 +41,9 @@ func NewStore(dsn string) (*Store, error) {
 		return nil, err
 	}
 	if err := db.AutoMigrate(&models.AuditLog{}); err != nil {
+		return nil, err
+	}
+	if err := db.AutoMigrate(&models.ProjectCatalogSettings{}, &models.IntegrationCatalogItem{}, &models.InstalledIntegration{}); err != nil {
 		return nil, err
 	}
 
@@ -61,6 +76,7 @@ func (s *Store) ListProjects(ctx context.Context) ([]models.Project, error) {
 	var projects []models.Project
 	err := s.db.WithContext(ctx).
 		Preload("Servers").
+		Preload("InstalledIntegrations").
 		Order("id asc").
 		Find(&projects).Error
 	return projects, err
@@ -70,6 +86,7 @@ func (s *Store) GetProject(ctx context.Context, id uint) (*models.Project, error
 	var project models.Project
 	err := s.db.WithContext(ctx).
 		Preload("Servers").
+		Preload("InstalledIntegrations").
 		First(&project, id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
@@ -82,6 +99,7 @@ func (s *Store) GetProjectByToken(ctx context.Context, token string) (*models.Pr
 	var project models.Project
 	err := s.db.WithContext(ctx).
 		Preload("Servers").
+		Preload("InstalledIntegrations").
 		Where("token = ?", token).
 		First(&project).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -119,6 +137,14 @@ func (s *Store) UpdateServer(ctx context.Context, server *models.MCPServer) erro
 			"bearer_token_env_var": server.BearerTokenEnvVar,
 			"headers_json":         server.HeadersJSON,
 			"header_env_json":      server.HeaderEnvJSON,
+			"auth_type":            server.AuthType,
+			"oauth_provider":       server.OAuthProvider,
+			"oauth_authorize_url":  server.OAuthAuthorizeURL,
+			"oauth_token_url":      server.OAuthTokenURL,
+			"oauth_refresh_url":    server.OAuthRefreshURL,
+			"oauth_client_id":      server.OAuthClientID,
+			"oauth_client_secret":  server.OAuthClientSecret,
+			"oauth_scopes_json":    server.OAuthScopesJSON,
 			"auto_start":           server.AutoStart,
 		}).Error
 }
@@ -170,6 +196,9 @@ func (s *Store) SetPrimaryServer(ctx context.Context, projectID, serverID uint) 
 func (s *Store) DeleteProject(ctx context.Context, projectID uint) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("project_id = ?", projectID).Delete(&models.AuditLog{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("project_id = ?", projectID).Delete(&models.InstalledIntegration{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("project_id = ?", projectID).Delete(&models.MCPServer{}).Error; err != nil {
@@ -230,6 +259,56 @@ func (s *Store) SetServerEnabled(ctx context.Context, serverID uint, enabled boo
 	return s.db.WithContext(ctx).Model(&models.MCPServer{}).
 		Where("id = ?", serverID).
 		Update("is_enabled", enabled).Error
+}
+
+func (s *Store) UpdateServerHealth(ctx context.Context, serverID uint, status, detail string, checkedAt time.Time) error {
+	return s.db.WithContext(ctx).Model(&models.MCPServer{}).
+		Where("id = ?", serverID).
+		Updates(map[string]any{
+			"health_status":     status,
+			"health_error":      detail,
+			"health_checked_at": checkedAt.UTC(),
+		}).Error
+}
+
+func (s *Store) SaveServerOAuthTokens(
+	ctx context.Context,
+	serverID uint,
+	accessToken, refreshToken string,
+	tokenExpiry, connectedAt *time.Time,
+	lastError string,
+) error {
+	updates := map[string]any{
+		"oauth_access_token":  accessToken,
+		"oauth_refresh_token": refreshToken,
+		"oauth_last_error":    lastError,
+	}
+	if tokenExpiry == nil {
+		updates["oauth_token_expiry"] = nil
+	} else {
+		updates["oauth_token_expiry"] = tokenExpiry.UTC()
+	}
+	if connectedAt == nil {
+		updates["oauth_connected_at"] = nil
+	} else {
+		updates["oauth_connected_at"] = connectedAt.UTC()
+	}
+
+	return s.db.WithContext(ctx).Model(&models.MCPServer{}).
+		Where("id = ?", serverID).
+		Updates(updates).Error
+}
+
+func (s *Store) ClearServerOAuthTokens(ctx context.Context, serverID uint) error {
+	return s.db.WithContext(ctx).Model(&models.MCPServer{}).
+		Where("id = ?", serverID).
+		Updates(map[string]any{
+			"oauth_access_token":  "",
+			"oauth_refresh_token": "",
+			"oauth_token_expiry":  nil,
+			"oauth_connected_at":  nil,
+			"oauth_last_error":    "",
+		}).Error
 }
 
 func (s *Store) CreateAuditLog(ctx context.Context, entry *models.AuditLog) error {
