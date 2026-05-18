@@ -23,50 +23,80 @@ type catalogManifest struct {
 }
 
 type catalogManifestItem struct {
-	ID                string          `json:"id"`
-	Name              string          `json:"name"`
-	Category          string          `json:"category"`
-	Description       string          `json:"description"`
-	Icon              string          `json:"icon"`
-	Transport         string          `json:"transport"`
-	MCPURL            string          `json:"mcp_url"`
-	AuthType          string          `json:"auth_type"`
-	AuthProvider      string          `json:"auth_provider"`
-	OAuthAuthorizeURL string          `json:"oauth_authorize_url"`
-	OAuthTokenURL     string          `json:"oauth_token_url"`
-	OAuthRefreshURL   string          `json:"oauth_refresh_url"`
-	ConfigSchema      json.RawMessage `json:"config_schema"`
-	Capabilities      []string        `json:"capabilities"`
-	Tags              []string        `json:"tags"`
-	Website           string          `json:"website"`
-	DocsURL           string          `json:"docs_url"`
-	Enabled           *bool           `json:"enabled"`
-	Version           string          `json:"version"`
+	ID                       string          `json:"id"`
+	Name                     string          `json:"name"`
+	Category                 string          `json:"category"`
+	Description              string          `json:"description"`
+	Icon                     string          `json:"icon"`
+	Transport                string          `json:"transport"`
+	MCPURL                   string          `json:"mcp_url"`
+	Command                  string          `json:"command"`
+	Args                     []string        `json:"args"`
+	Env                      []keyValuePair  `json:"env"`
+	EnvPassthrough           []string        `json:"env_passthrough"`
+	WorkingDir               string          `json:"working_dir"`
+	DefaultAutoStart         bool            `json:"default_auto_start"`
+	AuthType                 string          `json:"auth_type"`
+	AuthProvider             string          `json:"auth_provider"`
+	OAuthAuthorizeURL        string          `json:"oauth_authorize_url"`
+	OAuthTokenURL            string          `json:"oauth_token_url"`
+	OAuthRefreshURL          string          `json:"oauth_refresh_url"`
+	OAuthUsePKCE             *bool           `json:"oauth_use_pkce"`
+	OAuthScopeDelimiter      string          `json:"oauth_scope_delimiter"`
+	OAuthClientAuthMethod    string          `json:"oauth_client_auth_method"`
+	OAuthAuthorizeParams     json.RawMessage `json:"oauth_authorize_params"`
+	OAuthTokenParams         json.RawMessage `json:"oauth_token_params"`
+	DefaultOAuthScopes       []string        `json:"default_oauth_scopes"`
+	DefaultHeaders           []keyValuePair  `json:"default_headers"`
+	DefaultHeaderEnvVars     []keyValuePair  `json:"default_header_env_vars"`
+	DefaultBearerTokenEnvVar string          `json:"default_bearer_token_env_var"`
+	ConfigSchema             json.RawMessage `json:"config_schema"`
+	Capabilities             []string        `json:"capabilities"`
+	Tags                     []string        `json:"tags"`
+	Website                  string          `json:"website"`
+	DocsURL                  string          `json:"docs_url"`
+	Enabled                  *bool           `json:"enabled"`
+	Version                  string          `json:"version"`
 }
 
 type catalogItemResponse struct {
-	ID                string          `json:"id"`
-	Name              string          `json:"name"`
-	Category          string          `json:"category"`
-	Description       string          `json:"description"`
-	Icon              string          `json:"icon"`
-	Transport         string          `json:"transport"`
-	MCPURL            string          `json:"mcp_url"`
-	AuthType          string          `json:"auth_type"`
-	AuthProvider      string          `json:"auth_provider"`
-	OAuthAuthorizeURL string          `json:"oauth_authorize_url,omitempty"`
-	OAuthTokenURL     string          `json:"oauth_token_url,omitempty"`
-	OAuthRefreshURL   string          `json:"oauth_refresh_url,omitempty"`
-	ConfigSchema      json.RawMessage `json:"config_schema"`
-	Capabilities      []string        `json:"capabilities"`
-	Tags              []string        `json:"tags"`
-	Website           string          `json:"website"`
-	DocsURL           string          `json:"docs_url"`
-	Enabled           bool            `json:"enabled"`
-	Version           string          `json:"version"`
-	ManifestSourceURL string          `json:"manifest_source_url"`
-	SchemaVersion     string          `json:"schema_version"`
-	LastSyncedAt      string          `json:"last_synced_at"`
+	ID                       string          `json:"id"`
+	Name                     string          `json:"name"`
+	Category                 string          `json:"category"`
+	Description              string          `json:"description"`
+	Icon                     string          `json:"icon"`
+	Transport                string          `json:"transport"`
+	MCPURL                   string          `json:"mcp_url"`
+	Command                  string          `json:"command,omitempty"`
+	Args                     []string        `json:"args,omitempty"`
+	Env                      []keyValuePair  `json:"env,omitempty"`
+	EnvPassthrough           []string        `json:"env_passthrough,omitempty"`
+	WorkingDir               string          `json:"working_dir,omitempty"`
+	DefaultAutoStart         bool            `json:"default_auto_start,omitempty"`
+	AuthType                 string          `json:"auth_type"`
+	AuthProvider             string          `json:"auth_provider"`
+	OAuthAuthorizeURL        string          `json:"oauth_authorize_url,omitempty"`
+	OAuthTokenURL            string          `json:"oauth_token_url,omitempty"`
+	OAuthRefreshURL          string          `json:"oauth_refresh_url,omitempty"`
+	OAuthUsePKCE             bool            `json:"oauth_use_pkce"`
+	OAuthScopeDelimiter      string          `json:"oauth_scope_delimiter,omitempty"`
+	OAuthClientAuthMethod    string          `json:"oauth_client_auth_method,omitempty"`
+	OAuthAuthorizeParams     json.RawMessage `json:"oauth_authorize_params,omitempty"`
+	OAuthTokenParams         json.RawMessage `json:"oauth_token_params,omitempty"`
+	DefaultOAuthScopes       []string        `json:"default_oauth_scopes,omitempty"`
+	DefaultHeaders           []keyValuePair  `json:"default_headers,omitempty"`
+	DefaultHeaderEnvVars     []keyValuePair  `json:"default_header_env_vars,omitempty"`
+	DefaultBearerTokenEnvVar string          `json:"default_bearer_token_env_var,omitempty"`
+	ConfigSchema             json.RawMessage `json:"config_schema"`
+	Capabilities             []string        `json:"capabilities"`
+	Tags                     []string        `json:"tags"`
+	Website                  string          `json:"website"`
+	DocsURL                  string          `json:"docs_url"`
+	Enabled                  bool            `json:"enabled"`
+	Version                  string          `json:"version"`
+	ManifestSourceURL        string          `json:"manifest_source_url"`
+	SchemaVersion            string          `json:"schema_version"`
+	LastSyncedAt             string          `json:"last_synced_at"`
 }
 
 type catalogSettingsResponse struct {
@@ -315,6 +345,10 @@ func normalizeCatalogItem(
 		if _, err := url.ParseRequestURI(mcpURL); err != nil {
 			return nil, fmt.Errorf("catalog item %s mcp_url must be a valid absolute URL", id)
 		}
+	} else {
+		if strings.TrimSpace(item.Command) == "" {
+			return nil, fmt.Errorf("catalog item %s command is required for stdio transport", id)
+		}
 	}
 
 	authType := normalizedCatalogAuthType(item.AuthType)
@@ -323,6 +357,15 @@ func normalizeCatalogItem(
 			return nil, fmt.Errorf("catalog item %s oauth urls are required for oauth2 auth_type", id)
 		}
 	}
+	usePKCE := true
+	if item.OAuthUsePKCE != nil {
+		usePKCE = *item.OAuthUsePKCE
+	}
+	scopeDelimiter := strings.TrimSpace(item.OAuthScopeDelimiter)
+	if scopeDelimiter == "" {
+		scopeDelimiter = " "
+	}
+	clientAuthMethod := normalizedOAuthClientAuthMethod(item.OAuthClientAuthMethod)
 
 	enabled := true
 	if item.Enabled != nil {
@@ -330,30 +373,45 @@ func normalizeCatalogItem(
 	}
 
 	catalogItem := &models.IntegrationCatalogItem{
-		ID:                  id,
-		Name:                name,
-		Category:            strings.TrimSpace(item.Category),
-		Description:         strings.TrimSpace(item.Description),
-		Icon:                strings.TrimSpace(item.Icon),
-		Transport:           transport,
-		MCPURL:              mcpURL,
-		AuthType:            authType,
-		AuthProvider:        strings.TrimSpace(item.AuthProvider),
-		OAuthAuthorizeURL:   strings.TrimSpace(item.OAuthAuthorizeURL),
-		OAuthTokenURL:       strings.TrimSpace(item.OAuthTokenURL),
-		OAuthRefreshURL:     strings.TrimSpace(item.OAuthRefreshURL),
-		ConfigSchemaJSON:    normalizedRawJSON(item.ConfigSchema, "{}"),
-		CapabilitiesJSON:    encodeStringArrayJSON(item.Capabilities),
-		TagsJSON:            encodeStringArrayJSON(item.Tags),
-		Website:             strings.TrimSpace(item.Website),
-		DocsURL:             strings.TrimSpace(item.DocsURL),
-		Enabled:             enabled,
-		Version:             strings.TrimSpace(item.Version),
-		ManifestSourceURL:   sourceURL,
-		ManifestGeneratedAt: generatedAt,
-		SchemaVersion:       schemaVersion,
-		LastSyncedAt:        lastSyncAt,
-		RawJSON:             mustJSON(item),
+		ID:                       id,
+		Name:                     name,
+		Category:                 strings.TrimSpace(item.Category),
+		Description:              strings.TrimSpace(item.Description),
+		Icon:                     strings.TrimSpace(item.Icon),
+		Transport:                transport,
+		MCPURL:                   mcpURL,
+		Command:                  strings.TrimSpace(item.Command),
+		ArgsJSON:                 encodeStringArrayJSON(item.Args),
+		EnvJSON:                  encodeKeyValuePairsJSON(item.Env),
+		EnvPassthroughJSON:       encodeStringArrayJSON(item.EnvPassthrough),
+		WorkingDir:               strings.TrimSpace(item.WorkingDir),
+		DefaultAutoStart:         item.DefaultAutoStart,
+		AuthType:                 authType,
+		AuthProvider:             strings.TrimSpace(item.AuthProvider),
+		OAuthAuthorizeURL:        strings.TrimSpace(item.OAuthAuthorizeURL),
+		OAuthTokenURL:            strings.TrimSpace(item.OAuthTokenURL),
+		OAuthRefreshURL:          strings.TrimSpace(item.OAuthRefreshURL),
+		OAuthUsePKCE:             usePKCE,
+		OAuthScopeDelimiter:      scopeDelimiter,
+		OAuthClientAuthMethod:    clientAuthMethod,
+		OAuthAuthorizeParamsJSON: normalizedRawJSON(item.OAuthAuthorizeParams, "{}"),
+		OAuthTokenParamsJSON:     normalizedRawJSON(item.OAuthTokenParams, "{}"),
+		DefaultOAuthScopesJSON:   encodeStringArrayJSON(item.DefaultOAuthScopes),
+		DefaultHeadersJSON:       encodeKeyValuePairsJSON(item.DefaultHeaders),
+		DefaultHeaderEnvJSON:     encodeKeyValuePairsJSON(item.DefaultHeaderEnvVars),
+		DefaultBearerTokenEnvVar: strings.TrimSpace(item.DefaultBearerTokenEnvVar),
+		ConfigSchemaJSON:         normalizedRawJSON(item.ConfigSchema, "{}"),
+		CapabilitiesJSON:         encodeStringArrayJSON(item.Capabilities),
+		TagsJSON:                 encodeStringArrayJSON(item.Tags),
+		Website:                  strings.TrimSpace(item.Website),
+		DocsURL:                  strings.TrimSpace(item.DocsURL),
+		Enabled:                  enabled,
+		Version:                  strings.TrimSpace(item.Version),
+		ManifestSourceURL:        sourceURL,
+		ManifestGeneratedAt:      generatedAt,
+		SchemaVersion:            schemaVersion,
+		LastSyncedAt:             lastSyncAt,
+		RawJSON:                  mustJSON(item),
 	}
 	return catalogItem, nil
 }
@@ -369,40 +427,85 @@ func buildInstalledIntegration(projectID uint, item models.IntegrationCatalogIte
 		name = item.Name
 	}
 	headers := readConfigKeyValuePairs(config["headers"])
+	if len(headers) == 0 {
+		headers = decodeKeyValuePairsSafe(item.DefaultHeadersJSON)
+	}
 	headerEnvVars := readConfigKeyValuePairs(config["header_env_vars"])
+	if len(headerEnvVars) == 0 {
+		headerEnvVars = decodeKeyValuePairsSafe(item.DefaultHeaderEnvJSON)
+	}
 	oauthScopes := readConfigStringArray(config["oauth_scopes"])
+	if len(oauthScopes) == 0 {
+		oauthScopes = decodeJSONArray(item.DefaultOAuthScopesJSON)
+	}
 	bearerTokenEnvVar := strings.TrimSpace(readConfigString(config["bearer_token_env_var"]))
+	if bearerTokenEnvVar == "" {
+		bearerTokenEnvVar = strings.TrimSpace(item.DefaultBearerTokenEnvVar)
+	}
 	oauthClientID := strings.TrimSpace(readConfigString(config["oauth_client_id"]))
 	oauthClientSecret := strings.TrimSpace(readConfigString(config["oauth_client_secret"]))
 
 	server := &models.MCPServer{
-		ProjectID:         projectID,
-		Name:              name,
-		Transport:         item.Transport,
-		URL:               item.MCPURL,
-		LaunchCommand:     item.MCPURL,
-		BearerTokenEnvVar: bearerTokenEnvVar,
-		HeadersJSON:       encodeKeyValuePairsJSON(headers),
-		HeaderEnvJSON:     encodeKeyValuePairsJSON(headerEnvVars),
-		AuthType:          normalizedCatalogAuthType(item.AuthType),
-		OAuthProvider:     item.AuthProvider,
-		OAuthAuthorizeURL: item.OAuthAuthorizeURL,
-		OAuthTokenURL:     item.OAuthTokenURL,
-		OAuthRefreshURL:   item.OAuthRefreshURL,
-		OAuthClientID:     oauthClientID,
-		OAuthClientSecret: oauthClientSecret,
-		OAuthScopesJSON:   encodeStringArrayJSON(oauthScopes),
-		AutoStart:         false,
-		IsEnabled:         true,
+		ProjectID:                projectID,
+		Name:                     name,
+		Transport:                item.Transport,
+		URL:                      item.MCPURL,
+		LaunchCommand:            item.MCPURL,
+		BearerTokenEnvVar:        bearerTokenEnvVar,
+		HeadersJSON:              encodeKeyValuePairsJSON(headers),
+		HeaderEnvJSON:            encodeKeyValuePairsJSON(headerEnvVars),
+		AuthType:                 normalizedCatalogAuthType(item.AuthType),
+		OAuthProvider:            item.AuthProvider,
+		OAuthAuthorizeURL:        item.OAuthAuthorizeURL,
+		OAuthTokenURL:            item.OAuthTokenURL,
+		OAuthRefreshURL:          item.OAuthRefreshURL,
+		OAuthUsePKCE:             item.OAuthUsePKCE,
+		OAuthScopeDelimiter:      item.OAuthScopeDelimiter,
+		OAuthClientAuthMethod:    normalizedOAuthClientAuthMethod(item.OAuthClientAuthMethod),
+		OAuthAuthorizeParamsJSON: normalizedStringJSON(item.OAuthAuthorizeParamsJSON, "{}"),
+		OAuthTokenParamsJSON:     normalizedStringJSON(item.OAuthTokenParamsJSON, "{}"),
+		OAuthClientID:            oauthClientID,
+		OAuthClientSecret:        oauthClientSecret,
+		OAuthScopesJSON:          encodeStringArrayJSON(oauthScopes),
+		AutoStart:                item.DefaultAutoStart,
+		IsEnabled:                true,
+	}
+
+	if server.Transport == models.ServerTransportSTDIO {
+		server.Command = item.Command
+		server.ArgsJSON = normalizedStringJSON(item.ArgsJSON, "[]")
+		server.EnvJSON = normalizedStringJSON(item.EnvJSON, "[]")
+		server.EnvPassthroughJSON = normalizedStringJSON(item.EnvPassthroughJSON, "[]")
+		server.WorkingDir = item.WorkingDir
+		server.URL = ""
+		server.BearerTokenEnvVar = ""
+		server.HeadersJSON = "[]"
+		server.HeaderEnvJSON = "[]"
+		server.AuthType = models.ServerAuthTypeNone
+		server.OAuthProvider = ""
+		server.OAuthAuthorizeURL = ""
+		server.OAuthTokenURL = ""
+		server.OAuthRefreshURL = ""
+		server.OAuthClientID = ""
+		server.OAuthClientSecret = ""
+		server.OAuthScopesJSON = "[]"
+		server.OAuthUsePKCE = true
+		server.OAuthScopeDelimiter = " "
+		server.OAuthClientAuthMethod = "client_secret_basic"
+		server.OAuthAuthorizeParamsJSON = "{}"
+		server.OAuthTokenParamsJSON = "{}"
+		server.AutoStart = item.DefaultAutoStart
+		server.LaunchCommand = strings.TrimSpace(strings.Join(append([]string{server.Command}, decodeJSONArray(item.ArgsJSON)...), " "))
 	}
 
 	switch server.AuthType {
 	case models.ServerAuthTypeNone:
+	case models.ServerAuthTypeMCPDiscovery:
 	case models.ServerAuthTypeOAuth2:
 		if server.OAuthClientID == "" {
 			return nil, nil, errors.New("oauth_client_id is required for oauth2 integrations")
 		}
-		if server.OAuthClientSecret == "" {
+		if oauthClientSecretRequired(*server) && server.OAuthClientSecret == "" {
 			return nil, nil, errors.New("oauth_client_secret is required for oauth2 integrations")
 		}
 	case models.IntegrationAuthTypeBearer:
@@ -414,26 +517,41 @@ func buildInstalledIntegration(projectID uint, item models.IntegrationCatalogIte
 	}
 
 	manifestSnapshot := map[string]any{
-		"id":                   item.ID,
-		"name":                 item.Name,
-		"category":             item.Category,
-		"transport":            item.Transport,
-		"mcp_url":              item.MCPURL,
-		"auth_type":            item.AuthType,
-		"auth_provider":        item.AuthProvider,
-		"oauth_authorize_url":  item.OAuthAuthorizeURL,
-		"oauth_token_url":      item.OAuthTokenURL,
-		"oauth_refresh_url":    item.OAuthRefreshURL,
-		"config_schema":        decodeJSONObject(item.ConfigSchemaJSON),
-		"capabilities":         decodeJSONArray(item.CapabilitiesJSON),
-		"tags":                 decodeJSONArray(item.TagsJSON),
-		"website":              item.Website,
-		"docs_url":             item.DocsURL,
-		"enabled":              item.Enabled,
-		"version":              item.Version,
-		"manifest_source_url":  item.ManifestSourceURL,
-		"manifest_schema":      item.SchemaVersion,
-		"manifest_last_synced": item.LastSyncedAt.UTC().Format(time.RFC3339),
+		"id":                           item.ID,
+		"name":                         item.Name,
+		"category":                     item.Category,
+		"transport":                    item.Transport,
+		"mcp_url":                      item.MCPURL,
+		"command":                      item.Command,
+		"args":                         decodeJSONArray(item.ArgsJSON),
+		"env":                          decodeKeyValuePairsSafe(item.EnvJSON),
+		"env_passthrough":              decodeJSONArray(item.EnvPassthroughJSON),
+		"working_dir":                  item.WorkingDir,
+		"default_auto_start":           item.DefaultAutoStart,
+		"auth_type":                    item.AuthType,
+		"auth_provider":                item.AuthProvider,
+		"oauth_authorize_url":          item.OAuthAuthorizeURL,
+		"oauth_token_url":              item.OAuthTokenURL,
+		"oauth_refresh_url":            item.OAuthRefreshURL,
+		"oauth_use_pkce":               item.OAuthUsePKCE,
+		"oauth_scope_delimiter":        item.OAuthScopeDelimiter,
+		"oauth_client_auth_method":     item.OAuthClientAuthMethod,
+		"oauth_authorize_params":       decodeJSONObject(item.OAuthAuthorizeParamsJSON),
+		"oauth_token_params":           decodeJSONObject(item.OAuthTokenParamsJSON),
+		"default_oauth_scopes":         decodeJSONArray(item.DefaultOAuthScopesJSON),
+		"default_headers":              decodeKeyValuePairsSafe(item.DefaultHeadersJSON),
+		"default_header_env_vars":      decodeKeyValuePairsSafe(item.DefaultHeaderEnvJSON),
+		"default_bearer_token_env_var": item.DefaultBearerTokenEnvVar,
+		"config_schema":                decodeJSONObject(item.ConfigSchemaJSON),
+		"capabilities":                 decodeJSONArray(item.CapabilitiesJSON),
+		"tags":                         decodeJSONArray(item.TagsJSON),
+		"website":                      item.Website,
+		"docs_url":                     item.DocsURL,
+		"enabled":                      item.Enabled,
+		"version":                      item.Version,
+		"manifest_source_url":          item.ManifestSourceURL,
+		"manifest_schema":              item.SchemaVersion,
+		"manifest_last_synced":         item.LastSyncedAt.UTC().Format(time.RFC3339),
 	}
 	now := time.Now().UTC()
 	integration := &models.InstalledIntegration{
@@ -454,28 +572,43 @@ func mapCatalogItems(items []models.IntegrationCatalogItem) []catalogItemRespons
 	response := make([]catalogItemResponse, 0, len(items))
 	for _, item := range items {
 		response = append(response, catalogItemResponse{
-			ID:                item.ID,
-			Name:              item.Name,
-			Category:          item.Category,
-			Description:       item.Description,
-			Icon:              item.Icon,
-			Transport:         item.Transport,
-			MCPURL:            item.MCPURL,
-			AuthType:          item.AuthType,
-			AuthProvider:      item.AuthProvider,
-			OAuthAuthorizeURL: item.OAuthAuthorizeURL,
-			OAuthTokenURL:     item.OAuthTokenURL,
-			OAuthRefreshURL:   item.OAuthRefreshURL,
-			ConfigSchema:      json.RawMessage(normalizedRawJSON(json.RawMessage(item.ConfigSchemaJSON), "{}")),
-			Capabilities:      decodeJSONArray(item.CapabilitiesJSON),
-			Tags:              decodeJSONArray(item.TagsJSON),
-			Website:           item.Website,
-			DocsURL:           item.DocsURL,
-			Enabled:           item.Enabled,
-			Version:           item.Version,
-			ManifestSourceURL: item.ManifestSourceURL,
-			SchemaVersion:     item.SchemaVersion,
-			LastSyncedAt:      item.LastSyncedAt.UTC().Format(time.RFC3339),
+			ID:                       item.ID,
+			Name:                     item.Name,
+			Category:                 item.Category,
+			Description:              item.Description,
+			Icon:                     item.Icon,
+			Transport:                item.Transport,
+			MCPURL:                   item.MCPURL,
+			Command:                  item.Command,
+			Args:                     decodeJSONArray(item.ArgsJSON),
+			Env:                      decodeKeyValuePairsSafe(item.EnvJSON),
+			EnvPassthrough:           decodeJSONArray(item.EnvPassthroughJSON),
+			WorkingDir:               item.WorkingDir,
+			DefaultAutoStart:         item.DefaultAutoStart,
+			AuthType:                 item.AuthType,
+			AuthProvider:             item.AuthProvider,
+			OAuthAuthorizeURL:        item.OAuthAuthorizeURL,
+			OAuthTokenURL:            item.OAuthTokenURL,
+			OAuthRefreshURL:          item.OAuthRefreshURL,
+			OAuthUsePKCE:             item.OAuthUsePKCE,
+			OAuthScopeDelimiter:      item.OAuthScopeDelimiter,
+			OAuthClientAuthMethod:    item.OAuthClientAuthMethod,
+			OAuthAuthorizeParams:     json.RawMessage(normalizedStringJSON(item.OAuthAuthorizeParamsJSON, "{}")),
+			OAuthTokenParams:         json.RawMessage(normalizedStringJSON(item.OAuthTokenParamsJSON, "{}")),
+			DefaultOAuthScopes:       decodeJSONArray(item.DefaultOAuthScopesJSON),
+			DefaultHeaders:           decodeKeyValuePairsSafe(item.DefaultHeadersJSON),
+			DefaultHeaderEnvVars:     decodeKeyValuePairsSafe(item.DefaultHeaderEnvJSON),
+			DefaultBearerTokenEnvVar: item.DefaultBearerTokenEnvVar,
+			ConfigSchema:             json.RawMessage(normalizedRawJSON(json.RawMessage(item.ConfigSchemaJSON), "{}")),
+			Capabilities:             decodeJSONArray(item.CapabilitiesJSON),
+			Tags:                     decodeJSONArray(item.TagsJSON),
+			Website:                  item.Website,
+			DocsURL:                  item.DocsURL,
+			Enabled:                  item.Enabled,
+			Version:                  item.Version,
+			ManifestSourceURL:        item.ManifestSourceURL,
+			SchemaVersion:            item.SchemaVersion,
+			LastSyncedAt:             item.LastSyncedAt.UTC().Format(time.RFC3339),
 		})
 	}
 	return response
@@ -534,6 +667,8 @@ func normalizedCatalogAuthType(raw string) string {
 	switch strings.TrimSpace(raw) {
 	case "", models.ServerAuthTypeNone:
 		return models.ServerAuthTypeNone
+	case models.ServerAuthTypeMCPDiscovery:
+		return models.ServerAuthTypeMCPDiscovery
 	case models.ServerAuthTypeOAuth2:
 		return models.ServerAuthTypeOAuth2
 	case models.IntegrationAuthTypeBearer:
@@ -548,6 +683,13 @@ func normalizedRawJSON(raw json.RawMessage, fallback string) string {
 		return fallback
 	}
 	return string(raw)
+}
+
+func normalizedStringJSON(raw string, fallback string) string {
+	if strings.TrimSpace(raw) == "" {
+		return fallback
+	}
+	return raw
 }
 
 func encodeStringArrayJSON(values []string) string {
@@ -585,6 +727,17 @@ func decodeJSONObject(raw string) map[string]any {
 	return value
 }
 
+func decodeKeyValuePairsSafe(raw string) []keyValuePair {
+	if strings.TrimSpace(raw) == "" {
+		return []keyValuePair{}
+	}
+	var value []keyValuePair
+	if err := json.Unmarshal([]byte(raw), &value); err != nil {
+		return []keyValuePair{}
+	}
+	return sanitizeKeyValuePairs(value)
+}
+
 func mustJSON(value any) string {
 	payload, err := json.Marshal(value)
 	if err != nil {
@@ -616,6 +769,19 @@ func readConfigStringArray(value any) []string {
 		return sanitizeStrings(casted)
 	default:
 		return nil
+	}
+}
+
+func normalizedOAuthClientAuthMethod(raw string) string {
+	switch strings.TrimSpace(raw) {
+	case "", "client_secret_basic":
+		return "client_secret_basic"
+	case "client_secret_post":
+		return "client_secret_post"
+	case "none":
+		return "none"
+	default:
+		return strings.TrimSpace(raw)
 	}
 }
 

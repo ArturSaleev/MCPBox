@@ -63,26 +63,31 @@ type updateProjectRequest struct {
 }
 
 type addServerRequest struct {
-	Name              string         `json:"name"`
-	Transport         string         `json:"transport"`
-	Command           string         `json:"command"`
-	Args              []string       `json:"args"`
-	EnvVars           []keyValuePair `json:"env_vars"`
-	EnvPassthrough    []string       `json:"env_passthrough"`
-	WorkingDir        string         `json:"working_dir"`
-	URL               string         `json:"url"`
-	BearerTokenEnvVar string         `json:"bearer_token_env_var"`
-	Headers           []keyValuePair `json:"headers"`
-	HeaderEnvVars     []keyValuePair `json:"header_env_vars"`
-	AuthType          string         `json:"auth_type"`
-	OAuthProvider     string         `json:"oauth_provider"`
-	OAuthAuthorizeURL string         `json:"oauth_authorize_url"`
-	OAuthTokenURL     string         `json:"oauth_token_url"`
-	OAuthRefreshURL   string         `json:"oauth_refresh_url"`
-	OAuthClientID     string         `json:"oauth_client_id"`
-	OAuthClientSecret string         `json:"oauth_client_secret"`
-	OAuthScopes       []string       `json:"oauth_scopes"`
-	AutoStart         bool           `json:"auto_start"`
+	Name                  string         `json:"name"`
+	Transport             string         `json:"transport"`
+	Command               string         `json:"command"`
+	Args                  []string       `json:"args"`
+	EnvVars               []keyValuePair `json:"env_vars"`
+	EnvPassthrough        []string       `json:"env_passthrough"`
+	WorkingDir            string         `json:"working_dir"`
+	URL                   string         `json:"url"`
+	BearerTokenEnvVar     string         `json:"bearer_token_env_var"`
+	Headers               []keyValuePair `json:"headers"`
+	HeaderEnvVars         []keyValuePair `json:"header_env_vars"`
+	AuthType              string         `json:"auth_type"`
+	OAuthProvider         string         `json:"oauth_provider"`
+	OAuthAuthorizeURL     string         `json:"oauth_authorize_url"`
+	OAuthTokenURL         string         `json:"oauth_token_url"`
+	OAuthRefreshURL       string         `json:"oauth_refresh_url"`
+	OAuthUsePKCE          *bool          `json:"oauth_use_pkce"`
+	OAuthScopeDelimiter   string         `json:"oauth_scope_delimiter"`
+	OAuthClientAuthMethod string         `json:"oauth_client_auth_method"`
+	OAuthAuthorizeParams  map[string]any `json:"oauth_authorize_params"`
+	OAuthTokenParams      map[string]any `json:"oauth_token_params"`
+	OAuthClientID         string         `json:"oauth_client_id"`
+	OAuthClientSecret     string         `json:"oauth_client_secret"`
+	OAuthScopes           []string       `json:"oauth_scopes"`
+	AutoStart             bool           `json:"auto_start"`
 }
 
 type setPrimaryServerRequest struct {
@@ -113,37 +118,42 @@ type projectStatusResponse struct {
 }
 
 type serverStatusRecord struct {
-	ID                uint           `json:"id"`
-	Name              string         `json:"name"`
-	Transport         string         `json:"transport"`
-	LaunchCommand     string         `json:"launch_command"`
-	Command           string         `json:"command"`
-	Args              []string       `json:"args"`
-	EnvVars           []keyValuePair `json:"env_vars"`
-	EnvPassthrough    []string       `json:"env_passthrough"`
-	WorkingDir        string         `json:"working_dir"`
-	URL               string         `json:"url"`
-	BearerTokenEnvVar string         `json:"bearer_token_env_var"`
-	Headers           []keyValuePair `json:"headers"`
-	HeaderEnvVars     []keyValuePair `json:"header_env_vars"`
-	AutoStart         bool           `json:"auto_start"`
-	IsEnabled         bool           `json:"is_enabled"`
-	AuthType          string         `json:"auth_type"`
-	OAuthProvider     string         `json:"oauth_provider"`
-	OAuthAuthorizeURL string         `json:"oauth_authorize_url"`
-	OAuthTokenURL     string         `json:"oauth_token_url"`
-	OAuthRefreshURL   string         `json:"oauth_refresh_url"`
-	OAuthClientID     string         `json:"oauth_client_id"`
-	OAuthClientSecret string         `json:"oauth_client_secret"`
-	OAuthScopes       []string       `json:"oauth_scopes"`
-	OAuthConnected    bool           `json:"oauth_connected"`
-	OAuthConnectedAt  string         `json:"oauth_connected_at,omitempty"`
-	OAuthLastError    string         `json:"oauth_last_error"`
-	Status            string         `json:"status"`
-	HealthStatus      string         `json:"health_status"`
-	HealthError       string         `json:"health_error"`
-	HealthCheckedAt   string         `json:"health_checked_at,omitempty"`
-	IsPrimary         bool           `json:"is_primary"`
+	ID                    uint           `json:"id"`
+	Name                  string         `json:"name"`
+	Transport             string         `json:"transport"`
+	LaunchCommand         string         `json:"launch_command"`
+	Command               string         `json:"command"`
+	Args                  []string       `json:"args"`
+	EnvVars               []keyValuePair `json:"env_vars"`
+	EnvPassthrough        []string       `json:"env_passthrough"`
+	WorkingDir            string         `json:"working_dir"`
+	URL                   string         `json:"url"`
+	BearerTokenEnvVar     string         `json:"bearer_token_env_var"`
+	Headers               []keyValuePair `json:"headers"`
+	HeaderEnvVars         []keyValuePair `json:"header_env_vars"`
+	AutoStart             bool           `json:"auto_start"`
+	IsEnabled             bool           `json:"is_enabled"`
+	AuthType              string         `json:"auth_type"`
+	OAuthProvider         string         `json:"oauth_provider"`
+	OAuthAuthorizeURL     string         `json:"oauth_authorize_url"`
+	OAuthTokenURL         string         `json:"oauth_token_url"`
+	OAuthRefreshURL       string         `json:"oauth_refresh_url"`
+	OAuthUsePKCE          bool           `json:"oauth_use_pkce"`
+	OAuthScopeDelimiter   string         `json:"oauth_scope_delimiter"`
+	OAuthClientAuthMethod string         `json:"oauth_client_auth_method"`
+	OAuthAuthorizeParams  map[string]any `json:"oauth_authorize_params"`
+	OAuthTokenParams      map[string]any `json:"oauth_token_params"`
+	OAuthClientID         string         `json:"oauth_client_id"`
+	OAuthClientSecret     string         `json:"oauth_client_secret"`
+	OAuthScopes           []string       `json:"oauth_scopes"`
+	OAuthConnected        bool           `json:"oauth_connected"`
+	OAuthConnectedAt      string         `json:"oauth_connected_at,omitempty"`
+	OAuthLastError        string         `json:"oauth_last_error"`
+	Status                string         `json:"status"`
+	HealthStatus          string         `json:"health_status"`
+	HealthError           string         `json:"health_error"`
+	HealthCheckedAt       string         `json:"health_checked_at,omitempty"`
+	IsPrimary             bool           `json:"is_primary"`
 }
 
 type keyValuePair struct {
@@ -971,37 +981,42 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 		oauthScopes, _ := decodeStringSlice(server.OAuthScopesJSON)
 
 		response.Servers = append(response.Servers, serverStatusRecord{
-			ID:                server.ID,
-			Name:              server.Name,
-			Transport:         normalizedTransport(server.Transport),
-			LaunchCommand:     server.LaunchCommand,
-			Command:           server.Command,
-			Args:              args,
-			EnvVars:           envVars,
-			EnvPassthrough:    envPassthrough,
-			WorkingDir:        server.WorkingDir,
-			URL:               server.URL,
-			BearerTokenEnvVar: server.BearerTokenEnvVar,
-			Headers:           headers,
-			HeaderEnvVars:     headerEnvVars,
-			AutoStart:         server.AutoStart,
-			IsEnabled:         server.IsEnabled,
-			AuthType:          normalizedAuthType(server.AuthType),
-			OAuthProvider:     strings.TrimSpace(server.OAuthProvider),
-			OAuthAuthorizeURL: strings.TrimSpace(server.OAuthAuthorizeURL),
-			OAuthTokenURL:     strings.TrimSpace(server.OAuthTokenURL),
-			OAuthRefreshURL:   strings.TrimSpace(server.OAuthRefreshURL),
-			OAuthClientID:     strings.TrimSpace(server.OAuthClientID),
-			OAuthClientSecret: strings.TrimSpace(server.OAuthClientSecret),
-			OAuthScopes:       coalesceStringSlice(oauthScopes),
-			OAuthConnected:    strings.TrimSpace(server.OAuthAccessToken) != "",
-			OAuthConnectedAt:  formatServerHealthCheckedAt(server.OAuthConnectedAt),
-			OAuthLastError:    strings.TrimSpace(server.OAuthLastError),
-			Status:            s.serverStatus(server),
-			HealthStatus:      serverHealthStatus(server),
-			HealthError:       strings.TrimSpace(server.HealthError),
-			HealthCheckedAt:   formatServerHealthCheckedAt(server.HealthCheckedAt),
-			IsPrimary:         project.PrimaryServerID != nil && server.ID == *project.PrimaryServerID,
+			ID:                    server.ID,
+			Name:                  server.Name,
+			Transport:             normalizedTransport(server.Transport),
+			LaunchCommand:         server.LaunchCommand,
+			Command:               server.Command,
+			Args:                  args,
+			EnvVars:               envVars,
+			EnvPassthrough:        envPassthrough,
+			WorkingDir:            server.WorkingDir,
+			URL:                   server.URL,
+			BearerTokenEnvVar:     server.BearerTokenEnvVar,
+			Headers:               headers,
+			HeaderEnvVars:         headerEnvVars,
+			AutoStart:             server.AutoStart,
+			IsEnabled:             server.IsEnabled,
+			AuthType:              normalizedAuthType(server.AuthType),
+			OAuthProvider:         strings.TrimSpace(server.OAuthProvider),
+			OAuthAuthorizeURL:     strings.TrimSpace(server.OAuthAuthorizeURL),
+			OAuthTokenURL:         strings.TrimSpace(server.OAuthTokenURL),
+			OAuthRefreshURL:       strings.TrimSpace(server.OAuthRefreshURL),
+			OAuthUsePKCE:          server.OAuthUsePKCE,
+			OAuthScopeDelimiter:   oauthScopeDelimiter(server),
+			OAuthClientAuthMethod: normalizedOAuthClientAuthMethod(server.OAuthClientAuthMethod),
+			OAuthAuthorizeParams:  decodeJSONObject(server.OAuthAuthorizeParamsJSON),
+			OAuthTokenParams:      decodeJSONObject(server.OAuthTokenParamsJSON),
+			OAuthClientID:         strings.TrimSpace(server.OAuthClientID),
+			OAuthClientSecret:     strings.TrimSpace(server.OAuthClientSecret),
+			OAuthScopes:           coalesceStringSlice(oauthScopes),
+			OAuthConnected:        strings.TrimSpace(server.OAuthAccessToken) != "",
+			OAuthConnectedAt:      formatServerHealthCheckedAt(server.OAuthConnectedAt),
+			OAuthLastError:        strings.TrimSpace(server.OAuthLastError),
+			Status:                s.serverStatus(server),
+			HealthStatus:          serverHealthStatus(server),
+			HealthError:           strings.TrimSpace(server.HealthError),
+			HealthCheckedAt:       formatServerHealthCheckedAt(server.HealthCheckedAt),
+			IsPrimary:             project.PrimaryServerID != nil && server.ID == *project.PrimaryServerID,
 		})
 	}
 
@@ -1148,20 +1163,31 @@ func buildServerModel(projectID uint, req addServerRequest) (*models.MCPServer, 
 
 	transport := normalizedTransport(req.Transport)
 	server := &models.MCPServer{
-		ProjectID:         projectID,
-		Name:              name,
-		Transport:         transport,
-		WorkingDir:        strings.TrimSpace(req.WorkingDir),
-		URL:               strings.TrimSpace(req.URL),
-		BearerTokenEnvVar: strings.TrimSpace(req.BearerTokenEnvVar),
-		AuthType:          normalizedAuthType(req.AuthType),
-		OAuthProvider:     strings.TrimSpace(req.OAuthProvider),
-		OAuthAuthorizeURL: strings.TrimSpace(req.OAuthAuthorizeURL),
-		OAuthTokenURL:     strings.TrimSpace(req.OAuthTokenURL),
-		OAuthRefreshURL:   strings.TrimSpace(req.OAuthRefreshURL),
-		OAuthClientID:     strings.TrimSpace(req.OAuthClientID),
-		OAuthClientSecret: strings.TrimSpace(req.OAuthClientSecret),
-		AutoStart:         req.AutoStart,
+		ProjectID:                projectID,
+		Name:                     name,
+		Transport:                transport,
+		WorkingDir:               strings.TrimSpace(req.WorkingDir),
+		URL:                      strings.TrimSpace(req.URL),
+		BearerTokenEnvVar:        strings.TrimSpace(req.BearerTokenEnvVar),
+		AuthType:                 normalizedAuthType(req.AuthType),
+		OAuthProvider:            strings.TrimSpace(req.OAuthProvider),
+		OAuthAuthorizeURL:        strings.TrimSpace(req.OAuthAuthorizeURL),
+		OAuthTokenURL:            strings.TrimSpace(req.OAuthTokenURL),
+		OAuthRefreshURL:          strings.TrimSpace(req.OAuthRefreshURL),
+		OAuthUsePKCE:             true,
+		OAuthScopeDelimiter:      strings.TrimSpace(req.OAuthScopeDelimiter),
+		OAuthClientAuthMethod:    normalizedOAuthClientAuthMethod(req.OAuthClientAuthMethod),
+		OAuthAuthorizeParamsJSON: mustJSON(req.OAuthAuthorizeParams),
+		OAuthTokenParamsJSON:     mustJSON(req.OAuthTokenParams),
+		OAuthClientID:            strings.TrimSpace(req.OAuthClientID),
+		OAuthClientSecret:        strings.TrimSpace(req.OAuthClientSecret),
+		AutoStart:                req.AutoStart,
+	}
+	if req.OAuthUsePKCE != nil {
+		server.OAuthUsePKCE = *req.OAuthUsePKCE
+	}
+	if server.OAuthScopeDelimiter == "" {
+		server.OAuthScopeDelimiter = " "
 	}
 
 	switch transport {
@@ -1227,7 +1253,7 @@ func buildServerModel(projectID uint, req addServerRequest) (*models.MCPServer, 
 			if server.OAuthClientID == "" {
 				return nil, errors.New("oauth client id is required for oauth2 servers")
 			}
-			if server.OAuthClientSecret == "" {
+			if oauthClientSecretRequired(*server) && server.OAuthClientSecret == "" {
 				return nil, errors.New("oauth client secret is required for oauth2 servers")
 			}
 			if _, err := url.ParseRequestURI(server.OAuthAuthorizeURL); err != nil {
@@ -1241,12 +1267,30 @@ func buildServerModel(projectID uint, req addServerRequest) (*models.MCPServer, 
 					return nil, errors.New("oauth refresh url must be a valid absolute URL")
 				}
 			}
+		} else if server.AuthType == models.ServerAuthTypeMCPDiscovery {
+			server.OAuthProvider = ""
+			server.OAuthAuthorizeURL = ""
+			server.OAuthTokenURL = ""
+			server.OAuthRefreshURL = ""
+			server.OAuthUsePKCE = true
+			server.OAuthScopeDelimiter = " "
+			server.OAuthClientAuthMethod = "client_secret_basic"
+			server.OAuthAuthorizeParamsJSON = "{}"
+			server.OAuthTokenParamsJSON = "{}"
+			server.OAuthClientID = ""
+			server.OAuthClientSecret = ""
+			server.OAuthScopesJSON = "[]"
 		} else {
 			server.AuthType = models.ServerAuthTypeNone
 			server.OAuthProvider = ""
 			server.OAuthAuthorizeURL = ""
 			server.OAuthTokenURL = ""
 			server.OAuthRefreshURL = ""
+			server.OAuthUsePKCE = true
+			server.OAuthScopeDelimiter = " "
+			server.OAuthClientAuthMethod = "client_secret_basic"
+			server.OAuthAuthorizeParamsJSON = "{}"
+			server.OAuthTokenParamsJSON = "{}"
 			server.OAuthClientID = ""
 			server.OAuthClientSecret = ""
 			server.OAuthScopesJSON = "[]"
@@ -1337,6 +1381,8 @@ func normalizedAuthType(raw string) string {
 	switch strings.TrimSpace(raw) {
 	case "", models.ServerAuthTypeNone:
 		return models.ServerAuthTypeNone
+	case models.ServerAuthTypeMCPDiscovery:
+		return models.ServerAuthTypeMCPDiscovery
 	case models.ServerAuthTypeOAuth2:
 		return models.ServerAuthTypeOAuth2
 	default:
@@ -1365,6 +1411,11 @@ func oauthConfigChanged(current, next models.MCPServer) bool {
 		strings.TrimSpace(current.OAuthAuthorizeURL) != strings.TrimSpace(next.OAuthAuthorizeURL) ||
 		strings.TrimSpace(current.OAuthTokenURL) != strings.TrimSpace(next.OAuthTokenURL) ||
 		strings.TrimSpace(current.OAuthRefreshURL) != strings.TrimSpace(next.OAuthRefreshURL) ||
+		current.OAuthUsePKCE != next.OAuthUsePKCE ||
+		strings.TrimSpace(current.OAuthScopeDelimiter) != strings.TrimSpace(next.OAuthScopeDelimiter) ||
+		strings.TrimSpace(current.OAuthClientAuthMethod) != strings.TrimSpace(next.OAuthClientAuthMethod) ||
+		strings.TrimSpace(current.OAuthAuthorizeParamsJSON) != strings.TrimSpace(next.OAuthAuthorizeParamsJSON) ||
+		strings.TrimSpace(current.OAuthTokenParamsJSON) != strings.TrimSpace(next.OAuthTokenParamsJSON) ||
 		strings.TrimSpace(current.OAuthClientID) != strings.TrimSpace(next.OAuthClientID) ||
 		strings.TrimSpace(current.OAuthClientSecret) != strings.TrimSpace(next.OAuthClientSecret) ||
 		strings.TrimSpace(current.OAuthScopesJSON) != strings.TrimSpace(next.OAuthScopesJSON)
@@ -1549,10 +1600,18 @@ func buildOAuthAuthorizeURL(server models.MCPServer, redirectURI, state, verifie
 	values.Set("state", state)
 	scopes, _ := decodeStringSlice(server.OAuthScopesJSON)
 	if len(scopes) > 0 {
-		values.Set("scope", strings.Join(scopes, " "))
+		values.Set("scope", strings.Join(scopes, oauthScopeDelimiter(server)))
 	}
-	values.Set("code_challenge", oauthCodeChallenge(verifier))
-	values.Set("code_challenge_method", "S256")
+	if server.OAuthUsePKCE {
+		values.Set("code_challenge", oauthCodeChallenge(verifier))
+		values.Set("code_challenge_method", "S256")
+	}
+	for key, value := range decodeJSONObject(server.OAuthAuthorizeParamsJSON) {
+		if key == "" {
+			continue
+		}
+		values.Set(key, fmt.Sprint(value))
+	}
 	authURL.RawQuery = values.Encode()
 
 	return authURL.String(), nil
@@ -1563,11 +1622,21 @@ func exchangeOAuthCode(ctx context.Context, server models.MCPServer, redirectURI
 	form.Set("grant_type", "authorization_code")
 	form.Set("code", code)
 	form.Set("redirect_uri", redirectURI)
-	if strings.TrimSpace(server.OAuthClientSecret) == "" && strings.TrimSpace(server.OAuthClientID) != "" {
+	if shouldSendOAuthClientIDInBody(server) && strings.TrimSpace(server.OAuthClientID) != "" {
 		form.Set("client_id", server.OAuthClientID)
 	}
-	if verifier != "" {
+	if normalizedOAuthClientAuthMethod(server.OAuthClientAuthMethod) == "client_secret_post" &&
+		strings.TrimSpace(server.OAuthClientSecret) != "" {
+		form.Set("client_secret", server.OAuthClientSecret)
+	}
+	if server.OAuthUsePKCE && verifier != "" {
 		form.Set("code_verifier", verifier)
+	}
+	for key, value := range decodeJSONObject(server.OAuthTokenParamsJSON) {
+		if key == "" {
+			continue
+		}
+		form.Set(key, fmt.Sprint(value))
 	}
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, server.OAuthTokenURL, strings.NewReader(form.Encode()))
@@ -1621,8 +1690,18 @@ func refreshOAuthToken(ctx context.Context, server models.MCPServer) (*oauthToke
 	form := url.Values{}
 	form.Set("grant_type", "refresh_token")
 	form.Set("refresh_token", server.OAuthRefreshToken)
-	if strings.TrimSpace(server.OAuthClientSecret) == "" && strings.TrimSpace(server.OAuthClientID) != "" {
+	if shouldSendOAuthClientIDInBody(server) && strings.TrimSpace(server.OAuthClientID) != "" {
 		form.Set("client_id", server.OAuthClientID)
+	}
+	if normalizedOAuthClientAuthMethod(server.OAuthClientAuthMethod) == "client_secret_post" &&
+		strings.TrimSpace(server.OAuthClientSecret) != "" {
+		form.Set("client_secret", server.OAuthClientSecret)
+	}
+	for key, value := range decodeJSONObject(server.OAuthTokenParamsJSON) {
+		if key == "" || key == "code" || key == "code_verifier" || key == "redirect_uri" {
+			continue
+		}
+		form.Set(key, fmt.Sprint(value))
 	}
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, refreshURL, strings.NewReader(form.Encode()))
@@ -1665,7 +1744,8 @@ func refreshOAuthToken(ctx context.Context, server models.MCPServer) (*oauthToke
 }
 
 func applyOAuthClientAuth(request *http.Request, server models.MCPServer) {
-	if strings.TrimSpace(server.OAuthClientSecret) != "" {
+	if normalizedOAuthClientAuthMethod(server.OAuthClientAuthMethod) == "client_secret_basic" &&
+		strings.TrimSpace(server.OAuthClientSecret) != "" {
 		request.SetBasicAuth(server.OAuthClientID, server.OAuthClientSecret)
 	}
 }
@@ -1682,6 +1762,26 @@ func newOAuthVerifier() (string, error) {
 func oauthCodeChallenge(verifier string) string {
 	sum := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+func oauthScopeDelimiter(server models.MCPServer) string {
+	if strings.TrimSpace(server.OAuthScopeDelimiter) == "" {
+		return " "
+	}
+	return server.OAuthScopeDelimiter
+}
+
+func oauthClientSecretRequired(server models.MCPServer) bool {
+	method := normalizedOAuthClientAuthMethod(server.OAuthClientAuthMethod)
+	if method == "none" {
+		return false
+	}
+	return !server.OAuthUsePKCE
+}
+
+func shouldSendOAuthClientIDInBody(server models.MCPServer) bool {
+	method := normalizedOAuthClientAuthMethod(server.OAuthClientAuthMethod)
+	return method == "client_secret_post" || method == "none" || strings.TrimSpace(server.OAuthClientSecret) == ""
 }
 
 func writeOAuthCallbackPage(w http.ResponseWriter, success bool, title, description string) {

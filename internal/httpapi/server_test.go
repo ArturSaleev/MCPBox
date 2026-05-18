@@ -189,3 +189,164 @@ func TestCatalogSyncAndInstallIntegration(t *testing.T) {
 		t.Fatalf("PrimaryServerID = %#v, want server %d", payload.PrimaryServerID, payload.Servers[0].ID)
 	}
 }
+
+func TestCatalogOAuthPKCEInstallWithoutClientSecret(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	project := &models.Project{Name: "Workspace", Description: "OAuth PKCE install test"}
+	if err := store.CreateProject(ctx, project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"schema_version": "2026-05-19",
+			"generated_at":   "2026-05-19T10:00:00Z",
+			"items": []map[string]any{
+				{
+					"id":                       "figma",
+					"name":                     "Figma MCP",
+					"category":                 "design",
+					"description":              "Figma OAuth integration",
+					"transport":                "http_stream",
+					"mcp_url":                  "https://api.example.com/mcp/figma",
+					"auth_type":                "oauth2",
+					"auth_provider":            "figma",
+					"oauth_authorize_url":      "https://www.figma.com/oauth",
+					"oauth_token_url":          "https://api.figma.com/v1/oauth/token",
+					"oauth_use_pkce":           true,
+					"oauth_client_auth_method": "none",
+					"oauth_authorize_params": map[string]any{
+						"prompt": "consent",
+					},
+					"default_oauth_scopes": []string{"file_content:read"},
+					"enabled":              true,
+					"version":              "1.0.0",
+				},
+			},
+		})
+	}))
+	defer manifestServer.Close()
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	syncBody := bytes.NewBufferString(`{"url":"` + manifestServer.URL + `"}`)
+	syncRequest := httptest.NewRequest(http.MethodPost, "/api/catalog/sync", syncBody)
+	syncRequest.Host = "mcpbox.local:38180"
+	syncResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(syncResponse, syncRequest)
+
+	if syncResponse.Code != http.StatusOK {
+		t.Fatalf("catalog sync status = %d, body = %s", syncResponse.Code, syncResponse.Body.String())
+	}
+
+	installBody := bytes.NewBufferString(`{"catalog_item_id":"figma","name":"Figma MCP","config":{"oauth_client_id":"figma-client-id"}}`)
+	installRequest := httptest.NewRequest(http.MethodPost, "/api/projects/"+jsonNumber(project.ID)+"/integrations", installBody)
+	installRequest.Host = "mcpbox.local:38180"
+	installResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(installResponse, installRequest)
+
+	if installResponse.Code != http.StatusCreated {
+		t.Fatalf("install integration status = %d, body = %s", installResponse.Code, installResponse.Body.String())
+	}
+
+	var payload projectStatusResponse
+	if err := json.Unmarshal(installResponse.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload.Servers) != 1 {
+		t.Fatalf("len(payload.Servers) = %d, want 1", len(payload.Servers))
+	}
+	if !payload.Servers[0].OAuthUsePKCE {
+		t.Fatal("OAuthUsePKCE = false, want true")
+	}
+	if payload.Servers[0].OAuthClientSecret != "" {
+		t.Fatalf("OAuthClientSecret = %q, want empty", payload.Servers[0].OAuthClientSecret)
+	}
+	if payload.Servers[0].OAuthClientAuthMethod != "none" {
+		t.Fatalf("OAuthClientAuthMethod = %q, want none", payload.Servers[0].OAuthClientAuthMethod)
+	}
+	if len(payload.Servers[0].OAuthScopes) != 1 || payload.Servers[0].OAuthScopes[0] != "file_content:read" {
+		t.Fatalf("OAuthScopes = %#v", payload.Servers[0].OAuthScopes)
+	}
+}
+
+func TestCatalogMCPDiscoveryInstallWithoutConfig(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	project := &models.Project{Name: "Workspace", Description: "MCP discovery install test"}
+	if err := store.CreateProject(ctx, project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"schema_version": "2026-05-19",
+			"generated_at":   "2026-05-19T10:00:00Z",
+			"items": []map[string]any{
+				{
+					"id":          "figma-remote",
+					"name":        "Figma Remote MCP",
+					"category":    "design",
+					"description": "Figma remote MCP",
+					"transport":   "http_stream",
+					"mcp_url":     "https://mcp.figma.com/mcp",
+					"auth_type":   "mcp_discovery",
+					"enabled":     true,
+					"version":     "1.0.0",
+				},
+			},
+		})
+	}))
+	defer manifestServer.Close()
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	syncBody := bytes.NewBufferString(`{"url":"` + manifestServer.URL + `"}`)
+	syncRequest := httptest.NewRequest(http.MethodPost, "/api/catalog/sync", syncBody)
+	syncRequest.Host = "mcpbox.local:38180"
+	syncResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(syncResponse, syncRequest)
+
+	if syncResponse.Code != http.StatusOK {
+		t.Fatalf("catalog sync status = %d, body = %s", syncResponse.Code, syncResponse.Body.String())
+	}
+
+	installBody := bytes.NewBufferString(`{"catalog_item_id":"figma-remote","name":"Figma Remote MCP","config":{}}`)
+	installRequest := httptest.NewRequest(http.MethodPost, "/api/projects/"+jsonNumber(project.ID)+"/integrations", installBody)
+	installRequest.Host = "mcpbox.local:38180"
+	installResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(installResponse, installRequest)
+
+	if installResponse.Code != http.StatusCreated {
+		t.Fatalf("install integration status = %d, body = %s", installResponse.Code, installResponse.Body.String())
+	}
+
+	var payload projectStatusResponse
+	if err := json.Unmarshal(installResponse.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload.Servers) != 1 {
+		t.Fatalf("len(payload.Servers) = %d, want 1", len(payload.Servers))
+	}
+	if payload.Servers[0].AuthType != models.ServerAuthTypeMCPDiscovery {
+		t.Fatalf("AuthType = %q, want %q", payload.Servers[0].AuthType, models.ServerAuthTypeMCPDiscovery)
+	}
+	if payload.Servers[0].OAuthClientID != "" {
+		t.Fatalf("OAuthClientID = %q, want empty", payload.Servers[0].OAuthClientID)
+	}
+}

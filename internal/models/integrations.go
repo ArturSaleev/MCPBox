@@ -20,32 +20,47 @@ type ProjectCatalogSettings struct {
 }
 
 type IntegrationCatalogItem struct {
-	ID                  string     `gorm:"primaryKey;size:255" json:"id"`
-	Name                string     `gorm:"size:255;not null" json:"name"`
-	Category            string     `gorm:"size:128" json:"category"`
-	Description         string     `gorm:"type:text" json:"description"`
-	Icon                string     `gorm:"size:2048" json:"icon"`
-	Transport           string     `gorm:"size:32;not null" json:"transport"`
-	MCPURL              string     `gorm:"column:mcp_url;size:2048" json:"mcp_url"`
-	AuthType            string     `gorm:"column:auth_type;size:32;not null;default:'none'" json:"auth_type"`
-	AuthProvider        string     `gorm:"column:auth_provider;size:128" json:"auth_provider"`
-	OAuthAuthorizeURL   string     `gorm:"column:oauth_authorize_url;size:2048" json:"oauth_authorize_url"`
-	OAuthTokenURL       string     `gorm:"column:oauth_token_url;size:2048" json:"oauth_token_url"`
-	OAuthRefreshURL     string     `gorm:"column:oauth_refresh_url;size:2048" json:"oauth_refresh_url"`
-	ConfigSchemaJSON    string     `gorm:"column:config_schema_json;type:text" json:"config_schema"`
-	CapabilitiesJSON    string     `gorm:"column:capabilities_json;type:text" json:"capabilities"`
-	TagsJSON            string     `gorm:"column:tags_json;type:text" json:"tags"`
-	Website             string     `gorm:"size:2048" json:"website"`
-	DocsURL             string     `gorm:"column:docs_url;size:2048" json:"docs_url"`
-	Enabled             bool       `gorm:"not null;default:true" json:"enabled"`
-	Version             string     `gorm:"size:64" json:"version"`
-	ManifestSourceURL   string     `gorm:"column:manifest_source_url;size:2048" json:"manifest_source_url"`
-	ManifestGeneratedAt *time.Time `gorm:"column:manifest_generated_at" json:"manifest_generated_at,omitempty"`
-	SchemaVersion       string     `gorm:"column:schema_version;size:64" json:"schema_version"`
-	LastSyncedAt        time.Time  `gorm:"column:last_synced_at" json:"last_synced_at"`
-	RawJSON             string     `gorm:"column:raw_json;type:text" json:"raw_json"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
+	ID                       string     `gorm:"primaryKey;size:255" json:"id"`
+	Name                     string     `gorm:"size:255;not null" json:"name"`
+	Category                 string     `gorm:"size:128" json:"category"`
+	Description              string     `gorm:"type:text" json:"description"`
+	Icon                     string     `gorm:"size:2048" json:"icon"`
+	Transport                string     `gorm:"size:32;not null" json:"transport"`
+	MCPURL                   string     `gorm:"column:mcp_url;size:2048" json:"mcp_url"`
+	Command                  string     `gorm:"column:command;type:text" json:"command"`
+	ArgsJSON                 string     `gorm:"column:args_json;type:text" json:"args"`
+	EnvJSON                  string     `gorm:"column:env_json;type:text" json:"env"`
+	EnvPassthroughJSON       string     `gorm:"column:env_passthrough_json;type:text" json:"env_passthrough"`
+	WorkingDir               string     `gorm:"column:working_dir;size:1024" json:"working_dir"`
+	DefaultAutoStart         bool       `gorm:"column:default_auto_start;not null;default:false" json:"default_auto_start"`
+	AuthType                 string     `gorm:"column:auth_type;size:32;not null;default:'none'" json:"auth_type"`
+	AuthProvider             string     `gorm:"column:auth_provider;size:128" json:"auth_provider"`
+	OAuthAuthorizeURL        string     `gorm:"column:oauth_authorize_url;size:2048" json:"oauth_authorize_url"`
+	OAuthTokenURL            string     `gorm:"column:oauth_token_url;size:2048" json:"oauth_token_url"`
+	OAuthRefreshURL          string     `gorm:"column:oauth_refresh_url;size:2048" json:"oauth_refresh_url"`
+	OAuthUsePKCE             bool       `gorm:"column:oauth_use_pkce;not null;default:true" json:"oauth_use_pkce"`
+	OAuthScopeDelimiter      string     `gorm:"column:oauth_scope_delimiter;size:16;not null;default:' '" json:"oauth_scope_delimiter"`
+	OAuthClientAuthMethod    string     `gorm:"column:oauth_client_auth_method;size:64;not null;default:'client_secret_basic'" json:"oauth_client_auth_method"`
+	OAuthAuthorizeParamsJSON string     `gorm:"column:oauth_authorize_params_json;type:text" json:"oauth_authorize_params"`
+	OAuthTokenParamsJSON     string     `gorm:"column:oauth_token_params_json;type:text" json:"oauth_token_params"`
+	DefaultOAuthScopesJSON   string     `gorm:"column:default_oauth_scopes_json;type:text" json:"default_oauth_scopes"`
+	DefaultHeadersJSON       string     `gorm:"column:default_headers_json;type:text" json:"default_headers"`
+	DefaultHeaderEnvJSON     string     `gorm:"column:default_header_env_json;type:text" json:"default_header_env_vars"`
+	DefaultBearerTokenEnvVar string     `gorm:"column:default_bearer_token_env_var;size:255" json:"default_bearer_token_env_var"`
+	ConfigSchemaJSON         string     `gorm:"column:config_schema_json;type:text" json:"config_schema"`
+	CapabilitiesJSON         string     `gorm:"column:capabilities_json;type:text" json:"capabilities"`
+	TagsJSON                 string     `gorm:"column:tags_json;type:text" json:"tags"`
+	Website                  string     `gorm:"size:2048" json:"website"`
+	DocsURL                  string     `gorm:"column:docs_url;size:2048" json:"docs_url"`
+	Enabled                  bool       `gorm:"not null;default:true" json:"enabled"`
+	Version                  string     `gorm:"size:64" json:"version"`
+	ManifestSourceURL        string     `gorm:"column:manifest_source_url;size:2048" json:"manifest_source_url"`
+	ManifestGeneratedAt      *time.Time `gorm:"column:manifest_generated_at" json:"manifest_generated_at,omitempty"`
+	SchemaVersion            string     `gorm:"column:schema_version;size:64" json:"schema_version"`
+	LastSyncedAt             time.Time  `gorm:"column:last_synced_at" json:"last_synced_at"`
+	RawJSON                  string     `gorm:"column:raw_json;type:text" json:"raw_json"`
+	CreatedAt                time.Time  `json:"created_at"`
+	UpdatedAt                time.Time  `json:"updated_at"`
 }
 
 type InstalledIntegration struct {

@@ -3,6 +3,7 @@ import {
   AlertCircle,
   CheckCircle2,
   Copy,
+  FolderKanban,
   Info,
   LoaderCircle,
   Pause,
@@ -12,8 +13,10 @@ import {
   Radio,
   RefreshCw,
   Server,
+  ShoppingBag,
   Square,
   Star,
+  TextSearch,
   Trash2,
 } from 'lucide-react';
 import {
@@ -31,6 +34,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from './components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './components/ui/select';
+import { Tooltip, TooltipContent, TooltipTrigger } from './components/ui/tooltip';
 
 type ServerStatus = {
   id: number;
@@ -112,11 +123,18 @@ type CatalogItem = {
   icon: string;
   transport: string;
   mcp_url: string;
+  command?: string;
+  args?: string[];
+  env?: KeyValuePair[];
+  env_passthrough?: string[];
+  working_dir?: string;
+  default_auto_start?: boolean;
   auth_type: string;
   auth_provider: string;
   oauth_authorize_url?: string;
   oauth_token_url?: string;
   oauth_refresh_url?: string;
+  default_oauth_scopes?: string[];
   config_schema: Record<string, unknown>;
   capabilities: string[];
   tags: string[];
@@ -146,6 +164,15 @@ type AuditLog = {
 
 type ApiError = {
   error: string;
+};
+
+type CatalogConfigField = {
+  key: string;
+  label: string;
+  type: 'string' | 'array';
+  required: boolean;
+  secret: boolean;
+  defaultValue: string;
 };
 
 type ServerInspection = {
@@ -329,6 +356,80 @@ function formatSchema(schema: unknown) {
   }
 }
 
+function catalogConfigFields(item: CatalogItem): CatalogConfigField[] {
+  const schema = item.config_schema;
+  const properties =
+    schema && typeof schema === 'object' && 'properties' in schema && schema.properties && typeof schema.properties === 'object'
+      ? (schema.properties as Record<string, unknown>)
+      : {};
+  const requiredSet = new Set(
+    schema && typeof schema === 'object' && 'required' in schema && Array.isArray(schema.required)
+      ? schema.required.filter((value): value is string => typeof value === 'string')
+      : [],
+  );
+
+  return Object.entries(properties).flatMap(([key, rawProperty]) => {
+    if (!rawProperty || typeof rawProperty !== 'object') {
+      return [];
+    }
+
+    const property = rawProperty as Record<string, unknown>;
+    const rawType = typeof property.type === 'string' ? property.type : 'string';
+    if (rawType !== 'string' && rawType !== 'array') {
+      return [];
+    }
+
+    const title = typeof property.title === 'string' && property.title.trim() !== '' ? property.title.trim() : key;
+    const defaultValue =
+      rawType === 'array'
+        ? Array.isArray(property.default)
+          ? property.default.filter((value): value is string => typeof value === 'string').join('\n')
+          : key === 'oauth_scopes' && Array.isArray(item.default_oauth_scopes)
+            ? item.default_oauth_scopes.join('\n')
+            : ''
+        : typeof property.default === 'string'
+          ? property.default
+          : '';
+
+    return [{
+      key,
+      label: title,
+      type: rawType,
+      required: requiredSet.has(key),
+      secret: key.toLowerCase().includes('secret') || key.toLowerCase().includes('token'),
+      defaultValue,
+    }];
+  });
+}
+
+function normalizeInstallConfig(
+  fields: CatalogConfigField[],
+  rawValues: Record<string, string>,
+): Record<string, string | string[]> {
+  const config: Record<string, string | string[]> = {};
+
+  for (const field of fields) {
+    const rawValue = rawValues[field.key] ?? '';
+    if (field.type === 'array') {
+      const values = rawValue
+        .split(/\r?\n|,/)
+        .map((value) => value.trim())
+        .filter(Boolean);
+      if (values.length > 0) {
+        config[field.key] = values;
+      }
+      continue;
+    }
+
+    const value = rawValue.trim();
+    if (value !== '') {
+      config[field.key] = value;
+    }
+  }
+
+  return config;
+}
+
 export default function App() {
   const [view, setView] = useState<'projects' | 'market' | 'logs'>('projects');
   const [language, setLanguage] = useState<Language>(detectInitialLanguage);
@@ -355,7 +456,12 @@ export default function App() {
   const [catalogURL, setCatalogURL] = useState('https://webeasy.kz/mcpbox/catalog.json');
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogSyncing, setCatalogSyncing] = useState(false);
+  const [catalogURLVisible, setCatalogURLVisible] = useState(false);
+  const [selectedCatalogCategory, setSelectedCatalogCategory] = useState('all');
   const [installingCatalogItemId, setInstallingCatalogItemId] = useState<string | null>(null);
+  const [installDialogOpen, setInstallDialogOpen] = useState(false);
+  const [installDialogItem, setInstallDialogItem] = useState<CatalogItem | null>(null);
+  const [installDialogValues, setInstallDialogValues] = useState<Record<string, string>>({});
   const [busyProjectId, setBusyProjectId] = useState<number | null>(null);
   const [busyServerId, setBusyServerId] = useState<number | null>(null);
   const [busyPrimaryId, setBusyPrimaryId] = useState<number | null>(null);
@@ -370,6 +476,15 @@ export default function App() {
   const logsViewportRef = useRef<HTMLDivElement | null>(null);
   const dictionary = dictionaries[language];
   const { labels, messages } = dictionary;
+  const languageOptions: Array<{ value: Language; label: string }> = [
+    { value: 'en', label: labels.english },
+    { value: 'ru', label: labels.russian },
+  ];
+  const navigationItems = [
+    { id: 'projects' as const, label: labels.projects, icon: FolderKanban },
+    { id: 'market' as const, label: 'Market', icon: ShoppingBag },
+    { id: 'logs' as const, label: labels.logs, icon: TextSearch },
+  ];
 
   const selectedProject =
     projects.find((project) => project.project_id === selectedProjectId) ?? null;
@@ -395,6 +510,11 @@ export default function App() {
   const installedCatalogIDs = new Set(
     (selectedProject?.installed_integrations ?? []).map((integration) => integration.catalog_item_id),
   );
+  const catalogCategories = ['all', ...Array.from(new Set(catalogItems.map((item) => item.category || 'general'))).sort((left, right) => left.localeCompare(right))];
+  const filteredCatalogItems = selectedCatalogCategory === 'all'
+    ? catalogItems
+    : catalogItems.filter((item) => (item.category || 'general') === selectedCatalogCategory);
+  const installDialogFields = installDialogItem ? catalogConfigFields(installDialogItem) : [];
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -404,6 +524,31 @@ export default function App() {
     window.localStorage.setItem(languageStorageKey, language);
     document.documentElement.lang = language;
   }, [language]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      const isToggleCombo =
+        (event.metaKey || event.ctrlKey) &&
+        event.shiftKey &&
+        event.key.toLowerCase() === 'u';
+
+      if (isToggleCombo) {
+        event.preventDefault();
+        setCatalogURLVisible((current) => !current);
+      }
+
+      if (event.key === 'Escape') {
+        setCatalogURLVisible(false);
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -560,10 +705,23 @@ export default function App() {
     }
   }
 
-  async function installCatalogItem(item: CatalogItem) {
+  function openInstallDialog(item: CatalogItem) {
+    const fields = catalogConfigFields(item);
+    const nextValues = Object.fromEntries(
+      fields.map((field) => [field.key, field.defaultValue]),
+    );
+    setInstallDialogItem(item);
+    setInstallDialogValues(nextValues);
+    setInstallDialogOpen(true);
+  }
+
+  async function performCatalogInstall(
+    item: CatalogItem,
+    config: Record<string, string | string[]>,
+  ) {
     if (!selectedProject) {
       setActionError('Select a project before installing an integration.');
-      return;
+      return false;
     }
 
     setInstallingCatalogItemId(item.id);
@@ -579,7 +737,7 @@ export default function App() {
             catalog_item_id: item.id,
             name: item.name,
             make_primary: !selectedProject.primary_server_id,
-            config: {},
+            config,
           }),
         },
       );
@@ -590,13 +748,25 @@ export default function App() {
         ),
       );
       await loadLogs({ silent: true });
+      return true;
     } catch (installError) {
       setActionError(
         installError instanceof Error ? installError.message : 'Failed to install integration',
       );
+      return false;
     } finally {
       setInstallingCatalogItemId(null);
     }
+  }
+
+  async function installCatalogItem(item: CatalogItem) {
+    const fields = catalogConfigFields(item);
+    if (fields.length > 0) {
+      openInstallDialog(item);
+      return;
+    }
+
+    await performCatalogInstall(item, {});
   }
 
   function projectNameFromLog(projectId: number | null) {
@@ -1200,6 +1370,36 @@ export default function App() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="mx-auto flex min-h-screen max-w-[1600px]">
+        <aside className="flex w-20 flex-col items-center border-r border-border bg-sidebar/55 px-3 py-6">
+          <div className="flex h-full flex-col items-center gap-3">
+            {navigationItems.map((item) => {
+              const Icon = item.icon;
+              const isActive = view === item.id;
+
+              return (
+                <Tooltip key={item.id}>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => setView(item.id)}
+                      aria-label={item.label}
+                      className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl border transition-colors ${
+                        isActive
+                          ? 'border-electric-blue/40 bg-electric-blue text-white shadow-[0_12px_30px_rgba(38,132,255,0.22)]'
+                          : 'border-transparent bg-card text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground'
+                      }`}
+                    >
+                      <Icon className="h-5 w-5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={10}>
+                    {item.label}
+                  </TooltipContent>
+                </Tooltip>
+              );
+            })}
+          </div>
+        </aside>
+
         <aside className="w-full max-w-sm border-r border-border bg-sidebar/40">
           <div className="border-b border-border px-6 py-5">
             <div className="flex items-center justify-between gap-3">
@@ -1207,26 +1407,21 @@ export default function App() {
                 <p className="text-sm uppercase tracking-[0.24em] text-electric-blue">{labels.appTitle}</p>
               </div>
               <div className="flex items-center gap-2">
-                <div className="flex items-center rounded-md border border-border bg-card p-1 text-xs">
-                  <button
-                    onClick={() => setLanguage(defaultLanguage)}
-                    className={`rounded px-2 py-1 transition-colors ${
-                      language === 'en' ? 'bg-electric-blue text-white' : 'text-muted-foreground'
-                    }`}
-                    aria-label={labels.english}
+                <Select value={language} onValueChange={(value) => setLanguage(value as Language)}>
+                  <SelectTrigger
+                    className="h-10 w-[150px] rounded-md border-border bg-card text-xs"
+                    aria-label={labels.language}
                   >
-                    EN
-                  </button>
-                  <button
-                    onClick={() => setLanguage('ru')}
-                    className={`rounded px-2 py-1 transition-colors ${
-                      language === 'ru' ? 'bg-electric-blue text-white' : 'text-muted-foreground'
-                    }`}
-                    aria-label={labels.russian}
-                  >
-                    RU
-                  </button>
-                </div>
+                    <SelectValue placeholder={labels.language} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {languageOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <button
                   onClick={() => void loadProjects()}
                   className="rounded-md border border-border bg-card p-2 transition-colors hover:bg-accent"
@@ -1242,39 +1437,6 @@ export default function App() {
           </div>
 
           <div className="space-y-6 p-6">
-            <div className="grid grid-cols-3 gap-2 rounded-xl border border-border bg-card p-1">
-              <button
-                onClick={() => setView('projects')}
-                className={`h-10 rounded-lg text-sm font-medium transition-colors ${
-                  view === 'projects'
-                    ? 'bg-electric-blue text-white'
-                    : 'text-muted-foreground hover:bg-accent'
-                }`}
-              >
-                {labels.projects}
-              </button>
-              <button
-                onClick={() => setView('market')}
-                className={`h-10 rounded-lg text-sm font-medium transition-colors ${
-                  view === 'market'
-                    ? 'bg-electric-blue text-white'
-                    : 'text-muted-foreground hover:bg-accent'
-                }`}
-              >
-                Market
-              </button>
-              <button
-                onClick={() => setView('logs')}
-                className={`h-10 rounded-lg text-sm font-medium transition-colors ${
-                  view === 'logs'
-                    ? 'bg-electric-blue text-white'
-                    : 'text-muted-foreground hover:bg-accent'
-                }`}
-              >
-                {labels.logs}
-              </button>
-            </div>
-
             <section className="space-y-3">
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-medium text-muted-foreground">{labels.projects}</h2>
@@ -1617,16 +1779,18 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
-                  <label className="block space-y-2">
-                    <span className="text-sm text-muted-foreground">External manifest URL</span>
-                    <input
-                      value={catalogURL}
-                      onChange={(event) => setCatalogURL(event.target.value)}
-                      className="h-11 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                      placeholder="https://webeasy.kz/mcpbox/catalog.json"
-                    />
-                  </label>
+                <div className={`mt-6 grid gap-4 ${catalogURLVisible ? 'lg:grid-cols-[minmax(0,1fr)_auto]' : 'lg:grid-cols-[auto]'}`}>
+                  {catalogURLVisible ? (
+                    <label className="block space-y-2">
+                      <span className="text-sm text-muted-foreground">External manifest URL</span>
+                      <input
+                        value={catalogURL}
+                        onChange={(event) => setCatalogURL(event.target.value)}
+                        className="h-11 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
+                        placeholder="https://webeasy.kz/mcpbox/catalog.json"
+                      />
+                    </label>
+                  ) : null}
                   <button
                     onClick={() => void syncCatalog()}
                     disabled={catalogSyncing}
@@ -1641,6 +1805,12 @@ export default function App() {
                   </button>
                 </div>
 
+                {catalogURLVisible ? (
+                  <div className="mt-3 text-xs text-muted-foreground">
+                    Advanced mode enabled. Press <kbd className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[11px]">Cmd/Ctrl + Shift + U</kbd> to hide.
+                  </div>
+                ) : null}
+
                 {catalogSettings?.last_sync_status === 'failed' && catalogSettings.last_sync_error ? (
                   <div className="mt-4 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
                     {catalogSettings.last_sync_error}
@@ -1654,10 +1824,32 @@ export default function App() {
                 </div>
               ) : null}
 
+              <div className="flex flex-wrap gap-2">
+                {catalogCategories.map((category) => (
+                  <button
+                    key={`catalog-category-${category}`}
+                    onClick={() => setSelectedCatalogCategory(category)}
+                    className={`inline-flex h-9 items-center justify-center rounded-full border px-4 text-sm font-medium transition-colors ${
+                      selectedCatalogCategory === category
+                        ? 'border-electric-blue bg-electric-blue text-white'
+                        : 'border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground'
+                    }`}
+                  >
+                    {category === 'all' ? 'All categories' : category}
+                  </button>
+                ))}
+              </div>
+
               <div className="grid gap-4 xl:grid-cols-2">
-                {catalogItems.map((item) => {
+                {filteredCatalogItems.map((item) => {
                   const installing = installingCatalogItemId === item.id;
                   const installed = installedCatalogIDs.has(item.id);
+                  const transportLabel = item.transport === 'stdio' ? 'STDIO' : item.transport;
+                  const primaryInfoLabel = item.transport === 'stdio' ? 'Command' : 'Endpoint';
+                  const primaryInfoValue = item.transport === 'stdio'
+                    ? [item.command, ...(item.args ?? [])].filter(Boolean).join(' ')
+                    : item.mcp_url || 'n/a';
+                  const authLabel = item.auth_type === 'mcp_discovery' ? 'mcp discovery' : item.auth_type;
 
                   return (
                     <div key={item.id} className="rounded-2xl border border-border bg-card p-5">
@@ -1666,10 +1858,10 @@ export default function App() {
                           <div className="flex flex-wrap items-center gap-2">
                             <h3 className="text-lg font-semibold">{item.name}</h3>
                             <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
-                              {item.transport}
+                              {transportLabel}
                             </span>
                             <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
-                              {item.auth_type}
+                              {authLabel}
                             </span>
                           </div>
                           <div className="mt-1 text-sm text-electric-blue">{item.category || 'general'}</div>
@@ -1692,12 +1884,27 @@ export default function App() {
                       <p className="mt-4 text-sm text-muted-foreground">
                         {item.description || 'No description provided.'}
                       </p>
+                      {item.auth_type === 'mcp_discovery' ? (
+                        <div className="mt-4 rounded-xl border border-electric-blue/20 bg-electric-blue/8 px-4 py-3 text-sm text-muted-foreground">
+                          Authentication is handled by the upstream MCP server. After install, your MCP client should complete the sign-in flow when it connects through MCPBox.
+                        </div>
+                      ) : null}
 
                       <div className="mt-4 rounded-xl border border-border bg-background p-3">
-                        <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Endpoint</div>
+                        <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{primaryInfoLabel}</div>
                         <code className="mt-2 block overflow-x-auto text-xs text-electric-blue">
-                          {item.mcp_url || 'n/a'}
+                          {primaryInfoValue || 'n/a'}
                         </code>
+                        {item.transport === 'stdio' && item.working_dir ? (
+                          <div className="mt-3 text-sm text-muted-foreground">
+                            Working directory: {item.working_dir}
+                          </div>
+                        ) : null}
+                        {item.transport === 'stdio' && item.default_auto_start ? (
+                          <div className="mt-2 text-sm text-muted-foreground">
+                            Starts automatically after install
+                          </div>
+                        ) : null}
                       </div>
 
                       {(item.tags?.length ?? 0) > 0 ? (
@@ -1745,6 +1952,99 @@ export default function App() {
                   Sync the external manifest to populate the catalog.
                 </div>
               ) : null}
+              {!catalogLoading && catalogItems.length > 0 && filteredCatalogItems.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-border bg-card/50 px-6 py-10 text-center text-muted-foreground">
+                  No integrations in this category yet.
+                </div>
+              ) : null}
+
+              <Dialog
+                open={installDialogOpen}
+                onOpenChange={(open) => {
+                  setInstallDialogOpen(open);
+                  if (!open) {
+                    setInstallDialogItem(null);
+                    setInstallDialogValues({});
+                  }
+                }}
+              >
+                <DialogContent className="sm:max-w-xl">
+                  <DialogHeader>
+                    <DialogTitle>{installDialogItem ? `Install ${installDialogItem.name}` : 'Install integration'}</DialogTitle>
+                    <DialogDescription>
+                      Fill in the required connection settings before adding this integration to the selected project.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  {installDialogItem ? (
+                    <form
+                      className="space-y-4"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        const config = normalizeInstallConfig(installDialogFields, installDialogValues);
+                        void performCatalogInstall(installDialogItem, config).then((success) => {
+                          if (!success) {
+                            return;
+                          }
+                          setInstallDialogOpen(false);
+                          setInstallDialogItem(null);
+                          setInstallDialogValues({});
+                        });
+                      }}
+                    >
+                      {installDialogFields.map((field) => (
+                        <label key={`install-field-${field.key}`} className="block space-y-2">
+                          <span className="text-sm text-muted-foreground">
+                            {field.label}
+                            {field.required ? ' *' : ''}
+                          </span>
+                          {field.type === 'array' ? (
+                            <textarea
+                              value={installDialogValues[field.key] ?? ''}
+                              onChange={(event) =>
+                                setInstallDialogValues((current) => ({
+                                  ...current,
+                                  [field.key]: event.target.value,
+                                }))
+                              }
+                              rows={4}
+                              className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm outline-none transition-colors focus:border-electric-blue"
+                              placeholder="One value per line"
+                              required={field.required}
+                            />
+                          ) : (
+                            <input
+                              type={field.secret ? 'password' : 'text'}
+                              value={installDialogValues[field.key] ?? ''}
+                              onChange={(event) =>
+                                setInstallDialogValues((current) => ({
+                                  ...current,
+                                  [field.key]: event.target.value,
+                                }))
+                              }
+                              className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
+                              required={field.required}
+                            />
+                          )}
+                        </label>
+                      ))}
+
+                      <button
+                        type="submit"
+                        disabled={!installDialogItem || installingCatalogItemId === installDialogItem.id}
+                        className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {installDialogItem && installingCatalogItemId === installDialogItem.id ? (
+                          <LoaderCircle className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Plus className="h-4 w-4" />
+                        )}
+                        Install integration
+                      </button>
+                    </form>
+                  ) : null}
+                </DialogContent>
+              </Dialog>
             </section>
           ) : !selectedProject ? (
             <div className="flex min-h-[60vh] items-center justify-center rounded-2xl border border-dashed border-border bg-card/50">
