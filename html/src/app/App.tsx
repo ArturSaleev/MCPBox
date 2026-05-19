@@ -15,7 +15,6 @@ import {
   Server,
   ShoppingBag,
   Square,
-  Star,
   TextSearch,
   Trash2,
 } from 'lucide-react';
@@ -26,6 +25,7 @@ import {
   languageStorageKey,
   Language,
 } from './i18n';
+import logo from '../styles/logo.png';
 import {
   Dialog,
   DialogContent,
@@ -73,7 +73,6 @@ type ServerStatus = {
   health_status: 'healthy' | 'failed' | 'unknown' | string;
   health_error: string;
   health_checked_at: string;
-  is_primary: boolean;
   is_enabled: boolean;
 };
 
@@ -81,13 +80,14 @@ type ProjectStatus = {
   project_id: number;
   name: string;
   description: string;
+  root_path: string;
   token: string;
-  primary_server_id: number | null;
   is_paused: boolean;
   connect_url: string;
   connection_ready: boolean;
   servers: ServerStatus[];
   installed_integrations: InstalledIntegration[];
+  package_instances?: ProjectPackageInstance[];
 };
 
 type InstalledIntegration = {
@@ -106,6 +106,23 @@ type InstalledIntegration = {
   updated_at: string;
 };
 
+type ProjectPackageInstance = {
+  id: number;
+  project_id: number;
+  installed_package_id: number;
+  server_id: number | null;
+  catalog_item_id: string;
+  name: string;
+  status: string;
+  config_json: string;
+};
+
+type ProjectOption = {
+  project_id: number;
+  name: string;
+  root_path: string;
+};
+
 type CatalogSettings = {
   catalog_source_url: string;
   last_sync_at: string;
@@ -121,6 +138,28 @@ type CatalogItem = {
   category: string;
   description: string;
   icon: string;
+  runtime: {
+    type: string;
+    version: string;
+  };
+  source: {
+    type: string;
+    package: string;
+    version: string;
+    url: string;
+  };
+  install: {
+    strategy: string;
+    metadata: Record<string, unknown>;
+  };
+  launch: {
+    command: string;
+    args: string[];
+    working_dir: string;
+    entry_point: string;
+  };
+  shared_install: boolean;
+  supports_multi_project: boolean;
   transport: string;
   mcp_url: string;
   command?: string;
@@ -152,6 +191,32 @@ type CatalogResponse = {
   items: CatalogItem[];
 };
 
+type InstalledPackage = {
+  id: number;
+  catalog_item_id: string;
+  name: string;
+  version: string;
+  runtime_type: string;
+  source_type: string;
+  install_strategy: string;
+  install_dir: string;
+  entry_point: string;
+  status: string;
+  last_error: string;
+  installed_at: string;
+  project_use_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+type InstalledPackageListResponse = {
+  items: InstalledPackage[];
+};
+
+type InstallPackageResponse = {
+  package: InstalledPackage;
+};
+
 type AuditLog = {
   id: number;
   project_id: number | null;
@@ -174,6 +239,8 @@ type CatalogConfigField = {
   secret: boolean;
   defaultValue: string;
 };
+
+const projectPathConfigKeys = new Set(['root_path', 'project_path', 'workspace_path']);
 
 type ServerInspection = {
   protocol_version: string;
@@ -215,6 +282,7 @@ type ServerInspection = {
 type ProjectFormState = {
   name: string;
   description: string;
+  root_path: string;
 };
 
 type ServerFormState = {
@@ -248,6 +316,7 @@ type KeyValuePair = {
 const emptyProjectForm: ProjectFormState = {
   name: '',
   description: '',
+  root_path: '',
 };
 
 const emptyServerForm: ServerFormState = {
@@ -453,18 +522,20 @@ export default function App() {
   const [logsLoading, setLogsLoading] = useState(false);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [catalogSettings, setCatalogSettings] = useState<CatalogSettings | null>(null);
+  const [installedPackages, setInstalledPackages] = useState<InstalledPackage[]>([]);
   const [catalogURL, setCatalogURL] = useState('https://webeasy.kz/mcpbox/catalog.json');
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogSyncing, setCatalogSyncing] = useState(false);
   const [catalogURLVisible, setCatalogURLVisible] = useState(false);
   const [selectedCatalogCategory, setSelectedCatalogCategory] = useState('all');
   const [installingCatalogItemId, setInstallingCatalogItemId] = useState<string | null>(null);
+  const [addingCatalogItemId, setAddingCatalogItemId] = useState<string | null>(null);
   const [installDialogOpen, setInstallDialogOpen] = useState(false);
   const [installDialogItem, setInstallDialogItem] = useState<CatalogItem | null>(null);
+  const [installDialogProjectId, setInstallDialogProjectId] = useState<number | null>(null);
   const [installDialogValues, setInstallDialogValues] = useState<Record<string, string>>({});
   const [busyProjectId, setBusyProjectId] = useState<number | null>(null);
   const [busyServerId, setBusyServerId] = useState<number | null>(null);
-  const [busyPrimaryId, setBusyPrimaryId] = useState<number | null>(null);
   const [inspectOpen, setInspectOpen] = useState(false);
   const [inspectingServerId, setInspectingServerId] = useState<number | null>(null);
   const [inspection, setInspection] = useState<ServerInspection | null>(null);
@@ -482,7 +553,7 @@ export default function App() {
   ];
   const navigationItems = [
     { id: 'projects' as const, label: labels.projects, icon: FolderKanban },
-    { id: 'market' as const, label: 'Market', icon: ShoppingBag },
+    { id: 'market' as const, label: labels.market, icon: ShoppingBag },
     { id: 'logs' as const, label: labels.logs, icon: TextSearch },
   ];
 
@@ -503,18 +574,28 @@ export default function App() {
         (server) => server.transport === 'http_stream' && server.auth_type === 'oauth2' && server.oauth_connected,
       ).length
     : 0;
-  const selectedProjectPrimaryServer =
-    selectedProject?.servers.find((server) => server.is_primary) ?? null;
   const authServer =
     selectedProject?.servers.find((server) => server.id === authServerId) ?? null;
   const installedCatalogIDs = new Set(
     (selectedProject?.installed_integrations ?? []).map((integration) => integration.catalog_item_id),
   );
-  const catalogCategories = ['all', ...Array.from(new Set(catalogItems.map((item) => item.category || 'general'))).sort((left, right) => left.localeCompare(right))];
+  const installedPackageCatalogIDs = new Set(
+    installedPackages
+      .filter((pkg) => pkg.status === 'installed')
+      .map((pkg) => pkg.catalog_item_id),
+  );
+  const catalogCategories = ['all', ...Array.from(new Set(catalogItems.map((item) => item.category || labels.generalCategory))).sort((left, right) => left.localeCompare(right))];
   const filteredCatalogItems = selectedCatalogCategory === 'all'
     ? catalogItems
-    : catalogItems.filter((item) => (item.category || 'general') === selectedCatalogCategory);
+    : catalogItems.filter((item) => (item.category || labels.generalCategory) === selectedCatalogCategory);
   const installDialogFields = installDialogItem ? catalogConfigFields(installDialogItem) : [];
+  const projectOptions: ProjectOption[] = projects.map((project) => ({
+    project_id: project.project_id,
+    name: project.name,
+    root_path: project.root_path,
+  }));
+  const installDialogProject =
+    projectOptions.find((project) => project.project_id === installDialogProjectId) ?? null;
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -572,7 +653,7 @@ export default function App() {
   }, [logsCurrentProjectOnly, selectedProjectId]);
 
   useEffect(() => {
-    void Promise.all([loadProjects(true), loadCatalog(true)]);
+    void Promise.all([loadProjects(true), loadCatalog(true), loadInstalledPackages()]);
   }, []);
 
   useEffect(() => {
@@ -614,6 +695,22 @@ export default function App() {
       setSelectedProjectId(projects[0].project_id);
     }
   }, [projects, selectedProjectId]);
+
+  useEffect(() => {
+    if (projects.length === 0) {
+      setInstallDialogProjectId(null);
+      return;
+    }
+
+    if (
+      installDialogProjectId &&
+      projects.some((project) => project.project_id === installDialogProjectId)
+    ) {
+      return;
+    }
+
+    setInstallDialogProjectId(selectedProjectId ?? projects[0].project_id);
+  }, [projects, selectedProjectId, installDialogProjectId]);
 
   async function loadProjects(initial = false) {
     if (initial) {
@@ -682,6 +779,18 @@ export default function App() {
     }
   }
 
+  async function loadInstalledPackages() {
+    try {
+      const response = await apiRequest<InstalledPackageListResponse>(
+        '/api/packages',
+        messages.requestFailed,
+      );
+      setInstalledPackages(response.items);
+    } catch (loadError) {
+      setActionError(loadError instanceof Error ? loadError.message : messages.loadPackagesError);
+    }
+  }
+
   async function syncCatalog() {
     setCatalogSyncing(true);
     setActionError(null);
@@ -697,6 +806,7 @@ export default function App() {
       );
       setCatalogItems(response.items);
       setCatalogSettings(response.settings);
+      await loadInstalledPackages();
       await loadLogs({ silent: true });
     } catch (syncError) {
       setActionError(syncError instanceof Error ? syncError.message : 'Failed to sync catalog');
@@ -705,38 +815,93 @@ export default function App() {
     }
   }
 
-  function openInstallDialog(item: CatalogItem) {
+  function applyProjectDefaultsToInstallValues(
+    values: Record<string, string>,
+    fields: CatalogConfigField[],
+    project: ProjectOption | null,
+  ) {
+    if (!project || project.root_path.trim() === '') {
+      return values;
+    }
+
+    const nextValues = { ...values };
+    for (const field of fields) {
+      if (field.type !== 'string' || !projectPathConfigKeys.has(field.key)) {
+        continue;
+      }
+      nextValues[field.key] = project.root_path;
+    }
+
+    return nextValues;
+  }
+
+  function openInstallDialog(item: CatalogItem, preferredProjectId?: number | null) {
     const fields = catalogConfigFields(item);
-    const nextValues = Object.fromEntries(
+    const baseValues = Object.fromEntries(
       fields.map((field) => [field.key, field.defaultValue]),
     );
+    const resolvedProjectId =
+      preferredProjectId && projects.some((project) => project.project_id === preferredProjectId)
+        ? preferredProjectId
+        : selectedProjectId && projects.some((project) => project.project_id === selectedProjectId)
+          ? selectedProjectId
+          : projects[0]?.project_id ?? null;
+    const project =
+      projectOptions.find((entry) => entry.project_id === resolvedProjectId) ?? null;
     setInstallDialogItem(item);
-    setInstallDialogValues(nextValues);
+    setInstallDialogProjectId(resolvedProjectId);
+    setInstallDialogValues(applyProjectDefaultsToInstallValues(baseValues, fields, project));
     setInstallDialogOpen(true);
   }
 
-  async function performCatalogInstall(
-    item: CatalogItem,
-    config: Record<string, string | string[]>,
-  ) {
-    if (!selectedProject) {
-      setActionError('Select a project before installing an integration.');
-      return false;
-    }
-
+  async function installCatalogPackage(item: CatalogItem) {
     setInstallingCatalogItemId(item.id);
     setActionError(null);
 
     try {
+      await apiRequest<InstallPackageResponse>(
+        `/api/catalog/items/${item.id}/install`,
+        messages.requestFailed,
+        {
+          method: 'POST',
+        },
+      );
+      await loadInstalledPackages();
+      await loadLogs({ silent: true });
+      return true;
+    } catch (installError) {
+      setActionError(
+        installError instanceof Error ? installError.message : messages.installPackageError,
+      );
+      return false;
+    } finally {
+      setInstallingCatalogItemId(null);
+    }
+  }
+
+  async function performCatalogInstall(
+    item: CatalogItem,
+    projectId: number,
+    config: Record<string, string | string[]>,
+  ) {
+    const targetProject = projects.find((project) => project.project_id === projectId);
+    if (!targetProject) {
+      setActionError(messages.selectProjectBeforeInstall);
+      return false;
+    }
+
+    setAddingCatalogItemId(item.id);
+    setActionError(null);
+
+    try {
       const updatedProject = await apiRequest<ProjectStatus>(
-        `/api/projects/${selectedProject.project_id}/integrations`,
+        `/api/catalog/items/${item.id}/add-to-project`,
         messages.requestFailed,
         {
           method: 'POST',
           body: JSON.stringify({
-            catalog_item_id: item.id,
+            project_id: projectId,
             name: item.name,
-            make_primary: !selectedProject.primary_server_id,
             config,
           }),
         },
@@ -747,26 +912,45 @@ export default function App() {
           project.project_id === updatedProject.project_id ? updatedProject : project,
         ),
       );
+      await loadInstalledPackages();
       await loadLogs({ silent: true });
       return true;
     } catch (installError) {
       setActionError(
-        installError instanceof Error ? installError.message : 'Failed to install integration',
+        installError instanceof Error ? installError.message : messages.addPackageToProjectError,
       );
       return false;
     } finally {
-      setInstallingCatalogItemId(null);
+      setAddingCatalogItemId(null);
     }
   }
 
-  async function installCatalogItem(item: CatalogItem) {
-    const fields = catalogConfigFields(item);
-    if (fields.length > 0) {
-      openInstallDialog(item);
+  async function installCatalogItem(item: CatalogItem, preferredProjectId?: number | null) {
+    const targetProjectId =
+      preferredProjectId && projects.some((project) => project.project_id === preferredProjectId)
+        ? preferredProjectId
+        : selectedProjectId && projects.some((project) => project.project_id === selectedProjectId)
+          ? selectedProjectId
+          : projects[0]?.project_id ?? null;
+    if (!targetProjectId) {
+      setActionError(messages.selectProjectBeforeInstall);
       return;
     }
 
-    await performCatalogInstall(item, {});
+    const packageInstalled = installedPackageCatalogIDs.has(item.id);
+    if (!packageInstalled) {
+      const ok = await installCatalogPackage(item);
+      if (!ok) {
+        return;
+      }
+    }
+    const fields = catalogConfigFields(item);
+    if (fields.length > 0) {
+      openInstallDialog(item, targetProjectId);
+      return;
+    }
+
+    await performCatalogInstall(item, targetProjectId, {});
   }
 
   function projectNameFromLog(projectId: number | null) {
@@ -980,39 +1164,6 @@ export default function App() {
     }
   }
 
-  async function setPrimaryServer(serverId: number) {
-    if (!selectedProject) {
-      return;
-    }
-
-    setBusyPrimaryId(serverId);
-    setActionError(null);
-
-    try {
-      const updatedProject = await apiRequest<ProjectStatus>(
-        `/api/projects/${selectedProject.project_id}/primary-server`,
-        messages.requestFailed,
-        {
-          method: 'POST',
-          body: JSON.stringify({ server_id: serverId }),
-        },
-      );
-
-      setProjects((current) =>
-        current.map((project) =>
-          project.project_id === updatedProject.project_id ? updatedProject : project,
-        ),
-      );
-      await loadLogs();
-    } catch (submitError) {
-      setActionError(
-        submitError instanceof Error ? submitError.message : messages.updatePrimaryError,
-      );
-    } finally {
-      setBusyPrimaryId(null);
-    }
-  }
-
   async function setProjectPaused(projectId: number, paused: boolean) {
     setBusyProjectId(projectId);
     setActionError(null);
@@ -1031,7 +1182,7 @@ export default function App() {
       );
       await loadLogs();
     } catch (submitError) {
-      setActionError(submitError instanceof Error ? submitError.message : messages.updatePrimaryError);
+      setActionError(submitError instanceof Error ? submitError.message : messages.setProjectPausedError);
     } finally {
       setBusyProjectId(null);
     }
@@ -1061,9 +1212,7 @@ export default function App() {
       await loadProjects();
       await loadLogs();
     } catch (submitError) {
-      setActionError(
-        submitError instanceof Error ? submitError.message : messages.updatePrimaryError,
-      );
+      setActionError(submitError instanceof Error ? submitError.message : messages.setServerEnabledError);
     } finally {
       setBusyServerId(null);
     }
@@ -1103,6 +1252,7 @@ export default function App() {
     setProjectForm({
       name: selectedProject.name,
       description: selectedProject.description,
+      root_path: selectedProject.root_path,
     });
     setEditingProjectId(selectedProject.project_id);
     setCreateProjectOpen(true);
@@ -1127,7 +1277,7 @@ export default function App() {
       await loadProjects();
       await loadLogs();
     } catch (submitError) {
-      setActionError(submitError instanceof Error ? submitError.message : messages.updatePrimaryError);
+      setActionError(submitError instanceof Error ? submitError.message : messages.loadProjectsError);
     } finally {
       setBusyProjectId(null);
     }
@@ -1299,7 +1449,7 @@ export default function App() {
       );
       await loadLogs();
     } catch (submitError) {
-      setActionError(submitError instanceof Error ? submitError.message : messages.updatePrimaryError);
+      setActionError(submitError instanceof Error ? submitError.message : messages.loadProjectsError);
     } finally {
       setBusyServerId(null);
     }
@@ -1372,6 +1522,9 @@ export default function App() {
       <div className="mx-auto flex min-h-screen max-w-[1600px]">
         <aside className="flex w-20 flex-col items-center border-r border-border bg-sidebar/55 px-3 py-6">
           <div className="flex h-full flex-col items-center gap-3">
+            <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-2xl border border-border bg-card p-2">
+              <img src={logo} alt={labels.appTitle} className="max-h-full w-auto object-contain" />
+            </div>
             {navigationItems.map((item) => {
               const Icon = item.icon;
               const isActive = view === item.id;
@@ -1493,6 +1646,21 @@ export default function App() {
                             rows={3}
                             className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm outline-none transition-colors focus:border-electric-blue"
                             placeholder={messages.projectDescriptionPlaceholder}
+                          />
+                        </label>
+
+                        <label className="block space-y-2">
+                          <span className="text-sm text-muted-foreground">{labels.workingDirectory}</span>
+                          <input
+                            value={projectForm.root_path}
+                            onChange={(event) =>
+                              setProjectForm((current) => ({
+                                ...current,
+                                root_path: event.target.value,
+                              }))
+                            }
+                            className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
+                            placeholder={messages.workingDirectoryPlaceholder}
                           />
                         </label>
 
@@ -1749,31 +1917,31 @@ export default function App() {
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                   <div>
                     <p className="text-sm uppercase tracking-[0.24em] text-electric-blue">
-                      Integrations
+                      {labels.integrations}
                     </p>
-                    <h2 className="mt-2 text-3xl font-semibold">Market / Catalog</h2>
+                    <h2 className="mt-2 text-3xl font-semibold">{labels.market} / {labels.catalog}</h2>
                     <p className="mt-2 max-w-3xl text-muted-foreground">
-                      Sync the external integration manifest into SQLite and install selected items into the current project as linked MCP servers.
+                      {messages.marketDescription}
                     </p>
                   </div>
 
                   <div className="grid gap-3 sm:grid-cols-3">
                     <div className="rounded-xl border border-border bg-background px-4 py-3">
-                      <div className="text-sm text-muted-foreground">Catalog items</div>
+                      <div className="text-sm text-muted-foreground">{labels.catalogItems}</div>
                       <div className="mt-1 text-2xl font-semibold">{catalogItems.length}</div>
                     </div>
                     <div className="rounded-xl border border-border bg-background px-4 py-3">
-                      <div className="text-sm text-muted-foreground">Installed</div>
+                      <div className="text-sm text-muted-foreground">{labels.installed}</div>
                       <div className="mt-1 text-2xl font-semibold">
                         {selectedProject?.installed_integrations.length ?? 0}
                       </div>
                     </div>
                     <div className="rounded-xl border border-border bg-background px-4 py-3">
-                      <div className="text-sm text-muted-foreground">Last sync</div>
+                      <div className="text-sm text-muted-foreground">{labels.lastSync}</div>
                       <div className="mt-1 text-sm font-medium">
                         {catalogSettings?.last_sync_at
                           ? new Date(catalogSettings.last_sync_at).toLocaleString()
-                          : 'Not synced'}
+                          : messages.notSynced}
                       </div>
                     </div>
                   </div>
@@ -1782,7 +1950,7 @@ export default function App() {
                 <div className={`mt-6 grid gap-4 ${catalogURLVisible ? 'lg:grid-cols-[minmax(0,1fr)_auto]' : 'lg:grid-cols-[auto]'}`}>
                   {catalogURLVisible ? (
                     <label className="block space-y-2">
-                      <span className="text-sm text-muted-foreground">External manifest URL</span>
+                      <span className="text-sm text-muted-foreground">{labels.externalManifestUrl}</span>
                       <input
                         value={catalogURL}
                         onChange={(event) => setCatalogURL(event.target.value)}
@@ -1801,13 +1969,13 @@ export default function App() {
                     ) : (
                       <RefreshCw className="h-4 w-4" />
                     )}
-                    Sync catalog
+                    {labels.syncCatalog}
                   </button>
                 </div>
 
                 {catalogURLVisible ? (
                   <div className="mt-3 text-xs text-muted-foreground">
-                    Advanced mode enabled. Press <kbd className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[11px]">Cmd/Ctrl + Shift + U</kbd> to hide.
+                    {messages.advancedModeEnabled}
                   </div>
                 ) : null}
 
@@ -1820,7 +1988,7 @@ export default function App() {
 
               {!selectedProject ? (
                 <div className="rounded-2xl border border-dashed border-border bg-card/50 px-6 py-10 text-center text-muted-foreground">
-                  Select a project in the sidebar before installing integrations.
+                  {messages.selectProjectBeforeInstall}
                 </div>
               ) : null}
 
@@ -1835,21 +2003,23 @@ export default function App() {
                         : 'border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground'
                     }`}
                   >
-                    {category === 'all' ? 'All categories' : category}
+                    {category === 'all' ? labels.allCategories : category}
                   </button>
                 ))}
               </div>
 
               <div className="grid gap-4 xl:grid-cols-2">
                 {filteredCatalogItems.map((item) => {
-                  const installing = installingCatalogItemId === item.id;
-                  const installed = installedCatalogIDs.has(item.id);
+                  const packageInstalling = installingCatalogItemId === item.id;
+                  const addingToProject = addingCatalogItemId === item.id;
+                  const packageInstalled = installedPackageCatalogIDs.has(item.id);
+                  const addedToProject = installedCatalogIDs.has(item.id);
                   const transportLabel = item.transport === 'stdio' ? 'STDIO' : item.transport;
-                  const primaryInfoLabel = item.transport === 'stdio' ? 'Command' : 'Endpoint';
+                  const primaryInfoLabel = item.transport === 'stdio' ? labels.command : labels.endpoint;
                   const primaryInfoValue = item.transport === 'stdio'
                     ? [item.command, ...(item.args ?? [])].filter(Boolean).join(' ')
-                    : item.mcp_url || 'n/a';
-                  const authLabel = item.auth_type === 'mcp_discovery' ? 'mcp discovery' : item.auth_type;
+                    : item.mcp_url || messages.noValue;
+                  const authLabel = item.auth_type === 'mcp_discovery' ? labels.mcpDiscovery : item.auth_type;
 
                   return (
                     <div key={item.id} className="rounded-2xl border border-border bg-card p-5">
@@ -1863,46 +2033,68 @@ export default function App() {
                             <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
                               {authLabel}
                             </span>
+                            <span className={`rounded-full border px-2 py-1 text-xs ${packageInstalled ? 'border-status-running/30 bg-status-running/12 text-status-running' : 'border-border bg-muted text-muted-foreground'}`}>
+                              {packageInstalled ? labels.packageInstalled : labels.packageNotInstalled}
+                            </span>
+                            {selectedProject ? (
+                              <span className={`rounded-full border px-2 py-1 text-xs ${addedToProject ? 'border-electric-blue/30 bg-electric-blue/12 text-electric-blue' : 'border-border bg-muted text-muted-foreground'}`}>
+                                {addedToProject ? labels.addedToProject : labels.notInProject}
+                              </span>
+                            ) : null}
                           </div>
-                          <div className="mt-1 text-sm text-electric-blue">{item.category || 'general'}</div>
+                          <div className="mt-1 text-sm text-electric-blue">{item.category || labels.generalCategory}</div>
                         </div>
 
-                        <button
-                          onClick={() => void installCatalogItem(item)}
-                          disabled={!selectedProject || installing || installed || !item.enabled}
-                          className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {installing ? (
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Plus className="h-4 w-4" />
-                          )}
-                          {installed ? 'Installed' : 'Install'}
-                        </button>
+                        <div className="flex flex-col gap-2">
+                          <button
+                            onClick={() => void installCatalogPackage(item)}
+                            disabled={packageInstalling || packageInstalled || !item.enabled}
+                            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-electric-blue bg-electric-blue/10 px-4 text-sm font-medium text-electric-blue transition-colors hover:bg-electric-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {packageInstalling ? (
+                              <LoaderCircle className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Plus className="h-4 w-4" />
+                            )}
+                            {packageInstalled ? labels.packageInstalled : labels.installPackage}
+                          </button>
+                          <button
+                            onClick={() => void installCatalogItem(item)}
+                            disabled={projects.length === 0 || addingToProject || !packageInstalled || addedToProject || !item.enabled}
+                            className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {addingToProject ? (
+                              <LoaderCircle className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Plus className="h-4 w-4" />
+                            )}
+                            {addedToProject ? labels.addedToProject : labels.addToProject}
+                          </button>
+                        </div>
                       </div>
 
                       <p className="mt-4 text-sm text-muted-foreground">
-                        {item.description || 'No description provided.'}
+                        {item.description || messages.noDescriptionProvided}
                       </p>
                       {item.auth_type === 'mcp_discovery' ? (
                         <div className="mt-4 rounded-xl border border-electric-blue/20 bg-electric-blue/8 px-4 py-3 text-sm text-muted-foreground">
-                          Authentication is handled by the upstream MCP server. After install, your MCP client should complete the sign-in flow when it connects through MCPBox.
+                          {messages.upstreamAuthNotice}
                         </div>
                       ) : null}
 
                       <div className="mt-4 rounded-xl border border-border bg-background p-3">
                         <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{primaryInfoLabel}</div>
                         <code className="mt-2 block overflow-x-auto text-xs text-electric-blue">
-                          {primaryInfoValue || 'n/a'}
+                          {primaryInfoValue || messages.noValue}
                         </code>
                         {item.transport === 'stdio' && item.working_dir ? (
                           <div className="mt-3 text-sm text-muted-foreground">
-                            Working directory: {item.working_dir}
+                            {messages.workingDirectoryValue(item.working_dir)}
                           </div>
                         ) : null}
                         {item.transport === 'stdio' && item.default_auto_start ? (
                           <div className="mt-2 text-sm text-muted-foreground">
-                            Starts automatically after install
+                            {messages.autoStartAfterInstall}
                           </div>
                         ) : null}
                       </div>
@@ -1928,7 +2120,7 @@ export default function App() {
                             target="_blank"
                             rel="noreferrer"
                           >
-                            Docs
+                            {labels.docs}
                           </a>
                         ) : null}
                         {item.website ? (
@@ -1938,7 +2130,7 @@ export default function App() {
                             target="_blank"
                             rel="noreferrer"
                           >
-                            Website
+                            {labels.website}
                           </a>
                         ) : null}
                       </div>
@@ -1949,12 +2141,12 @@ export default function App() {
 
               {!catalogLoading && catalogItems.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-border bg-card/50 px-6 py-10 text-center text-muted-foreground">
-                  Sync the external manifest to populate the catalog.
+                  {messages.syncManifestToPopulateCatalog}
                 </div>
               ) : null}
               {!catalogLoading && catalogItems.length > 0 && filteredCatalogItems.length === 0 ? (
                 <div className="rounded-2xl border border-dashed border-border bg-card/50 px-6 py-10 text-center text-muted-foreground">
-                  No integrations in this category yet.
+                  {messages.noIntegrationsInCategory}
                 </div>
               ) : null}
 
@@ -1964,15 +2156,20 @@ export default function App() {
                   setInstallDialogOpen(open);
                   if (!open) {
                     setInstallDialogItem(null);
+                    setInstallDialogProjectId(null);
                     setInstallDialogValues({});
                   }
                 }}
               >
                 <DialogContent className="sm:max-w-xl">
                   <DialogHeader>
-                    <DialogTitle>{installDialogItem ? `Install ${installDialogItem.name}` : 'Install integration'}</DialogTitle>
+                    <DialogTitle>
+                      {installDialogItem
+                        ? messages.addPackageDialogTitle(installDialogItem.name)
+                        : messages.addPackageDialogFallbackTitle}
+                    </DialogTitle>
                     <DialogDescription>
-                      Fill in the required connection settings before adding this integration to the selected project.
+                      {messages.addPackageDialogDescription}
                     </DialogDescription>
                   </DialogHeader>
 
@@ -1981,17 +2178,54 @@ export default function App() {
                       className="space-y-4"
                       onSubmit={(event) => {
                         event.preventDefault();
+                        if (!installDialogProjectId) {
+                          setActionError(messages.selectProjectBeforeInstall);
+                          return;
+                        }
                         const config = normalizeInstallConfig(installDialogFields, installDialogValues);
-                        void performCatalogInstall(installDialogItem, config).then((success) => {
+                        void performCatalogInstall(installDialogItem, installDialogProjectId, config).then((success) => {
                           if (!success) {
                             return;
                           }
                           setInstallDialogOpen(false);
                           setInstallDialogItem(null);
+                          setInstallDialogProjectId(null);
                           setInstallDialogValues({});
                         });
                       }}
                     >
+                      <label className="block space-y-2">
+                        <span className="text-sm text-muted-foreground">{labels.projects}</span>
+                        <Select
+                          value={installDialogProjectId ? String(installDialogProjectId) : undefined}
+                          onValueChange={(value) => {
+                            const nextProjectId = Number(value);
+                            const nextProject =
+                              projectOptions.find((project) => project.project_id === nextProjectId) ?? null;
+                            setInstallDialogProjectId(nextProjectId);
+                            setInstallDialogValues((current) =>
+                              applyProjectDefaultsToInstallValues(current, installDialogFields, nextProject),
+                            );
+                          }}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder={labels.notSelected} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {projectOptions.map((project) => (
+                              <SelectItem key={`install-project-${project.project_id}`} value={String(project.project_id)}>
+                                {project.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {installDialogProject?.root_path ? (
+                          <div className="text-xs text-muted-foreground">
+                            {messages.workingDirectoryValue(installDialogProject.root_path)}
+                          </div>
+                        ) : null}
+                      </label>
+
                       {installDialogFields.map((field) => (
                         <label key={`install-field-${field.key}`} className="block space-y-2">
                           <span className="text-sm text-muted-foreground">
@@ -2009,7 +2243,7 @@ export default function App() {
                               }
                               rows={4}
                               className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm outline-none transition-colors focus:border-electric-blue"
-                              placeholder="One value per line"
+                              placeholder={messages.oneValuePerLine}
                               required={field.required}
                             />
                           ) : (
@@ -2031,15 +2265,15 @@ export default function App() {
 
                       <button
                         type="submit"
-                        disabled={!installDialogItem || installingCatalogItemId === installDialogItem.id}
+                        disabled={!installDialogItem || !installDialogProjectId || addingCatalogItemId === installDialogItem.id}
                         className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
                       >
-                        {installDialogItem && installingCatalogItemId === installDialogItem.id ? (
+                        {installDialogItem && addingCatalogItemId === installDialogItem.id ? (
                           <LoaderCircle className="h-4 w-4 animate-spin" />
                         ) : (
                           <Plus className="h-4 w-4" />
                         )}
-                        Install integration
+                        {labels.addToProject}
                       </button>
                     </form>
                   ) : null}
@@ -2071,7 +2305,7 @@ export default function App() {
                       </p>
                     </div>
 
-                    <div className="grid gap-3 sm:grid-cols-5">
+                    <div className="grid gap-3 sm:grid-cols-4">
                       <div className="rounded-xl border border-border bg-background px-4 py-3">
                         <div className="text-sm text-muted-foreground">{labels.servers}</div>
                         <div className="mt-1 text-2xl font-semibold">
@@ -2098,26 +2332,6 @@ export default function App() {
                         <div className="mt-1 text-2xl font-semibold">
                           {selectedProjectOAuthConnectedCount}
                         </div>
-                      </div>
-                      <div className="rounded-xl border border-border bg-background px-4 py-3">
-                        <div className="text-sm text-muted-foreground">{labels.primary}</div>
-                        <div className="mt-1 flex items-center gap-2 text-sm font-medium">
-                          {selectedProjectPrimaryServer?.name ?? labels.notSelected}
-                          {selectedProject.is_paused ? (
-                            <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600">
-                              {labels.paused}
-                            </span>
-                          ) : null}
-                        </div>
-                        {selectedProjectPrimaryServer?.transport === 'http_stream' &&
-                        selectedProjectPrimaryServer.auth_type === 'oauth2' ? (
-                          <div className="mt-2 text-xs text-muted-foreground">
-                            {labels.oauth}:{' '}
-                            {selectedProjectPrimaryServer.oauth_connected
-                              ? labels.connected
-                              : labels.notConnected}
-                          </div>
-                        ) : null}
                       </div>
                     </div>
                   </div>
@@ -2168,9 +2382,9 @@ export default function App() {
                     <div>
                       <h3 className="text-lg font-semibold">{labels.connectionEndpoint}</h3>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        {messages.connectionDescription}
-                      </p>
-                    </div>
+                      {messages.connectionDescription}
+                    </p>
+                  </div>
                     <div
                       className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${
                         selectedProject.connection_ready
@@ -2183,7 +2397,7 @@ export default function App() {
                       ) : (
                         <AlertCircle className="h-3.5 w-3.5" />
                       )}
-                      {selectedProject.connection_ready ? labels.ready : labels.primaryRequired}
+                      {selectedProject.connection_ready ? labels.ready : labels.notSelected}
                     </div>
                   </div>
 
@@ -2564,27 +2778,16 @@ export default function App() {
                   <div className="space-y-4">
                     {selectedProject.servers.map((server) => {
                       const busy = busyServerId === server.id;
-                      const primaryBusy = busyPrimaryId === server.id;
 
                       return (
                         <div
                           key={server.id}
-                          className={`rounded-xl border p-5 ${
-                            server.is_primary
-                              ? 'border-electric-blue/50 bg-electric-blue/6'
-                              : 'border-border bg-background'
-                          }`}
+                          className="rounded-xl border border-border bg-background p-5"
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <div className="flex items-center gap-2">
                                 <h4 className="font-semibold">{server.name}</h4>
-                                {server.is_primary ? (
-                                  <span className="inline-flex items-center gap-1 rounded-full border border-electric-blue/30 bg-electric-blue/12 px-2 py-1 text-xs font-medium text-electric-blue">
-                                    <Star className="h-3 w-3 fill-current" />
-                                    {labels.primary}
-                                  </span>
-                                ) : null}
                                 <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
                                   {server.transport === 'http_stream' ? labels.httpStreaming : labels.stdio}
                                 </span>
@@ -2785,19 +2988,6 @@ export default function App() {
                                 <Play className="h-4 w-4" />
                               )}
                               {server.is_enabled ? labels.disableServer : labels.enableServer}
-                            </button>
-
-                            <button
-                              onClick={() => void setPrimaryServer(server.id)}
-                              disabled={server.is_primary || primaryBusy || !server.is_enabled}
-                              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
-                            >
-                              {primaryBusy ? (
-                                <LoaderCircle className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Star className="h-4 w-4" />
-                              )}
-                              {server.is_primary ? labels.primaryServer : labels.setAsPrimary}
                             </button>
 
                             <button

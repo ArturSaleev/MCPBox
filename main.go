@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"MCPBox/internal/httpapi"
+	"MCPBox/internal/installer"
 	"MCPBox/internal/orchestrator"
 	"MCPBox/internal/storage"
 )
@@ -35,6 +36,7 @@ func main() {
 	}
 
 	registry := orchestrator.NewRegistry(rootCtx)
+	packageInstaller := installer.NewService(store, "package_store")
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -55,7 +57,7 @@ func main() {
 		}
 	}
 
-	api := httpapi.NewServer(store, registry)
+	api := httpapi.NewServerWithInstaller(store, registry, packageInstaller)
 	httpServer := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
 		Handler:           api.Handler(),

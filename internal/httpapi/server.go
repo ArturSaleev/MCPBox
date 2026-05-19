@@ -21,19 +21,22 @@ import (
 	"sync"
 	"time"
 
+	"MCPBox/internal/installer"
 	"MCPBox/internal/models"
 	"MCPBox/internal/orchestrator"
 	"MCPBox/internal/storage"
 )
 
 type Server struct {
-	store     *storage.Store
-	registry  *orchestrator.Registry
-	mux       *http.ServeMux
-	sessionMu sync.RWMutex
-	sessions  map[string]connectSession
-	oauthMu   sync.RWMutex
-	oauth     map[string]oauthSession
+	store              *storage.Store
+	registry           *orchestrator.Registry
+	installer          *installer.Service
+	mux                *http.ServeMux
+	sessionMu          sync.RWMutex
+	sessions           map[string]connectSession
+	oauthMu            sync.RWMutex
+	oauth              map[string]oauthSession
+	initializedServers map[uint]bool
 }
 
 type connectSession struct {
@@ -42,6 +45,7 @@ type connectSession struct {
 	ProjectID    uint
 	ServerID     uint
 	CreatedAt    time.Time
+	Stream       chan []byte
 }
 
 type oauthSession struct {
@@ -55,11 +59,13 @@ type oauthSession struct {
 type createProjectRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	RootPath    string `json:"root_path"`
 }
 
 type updateProjectRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	RootPath    string `json:"root_path"`
 }
 
 type addServerRequest struct {
@@ -90,10 +96,6 @@ type addServerRequest struct {
 	AutoStart             bool           `json:"auto_start"`
 }
 
-type setPrimaryServerRequest struct {
-	ServerID uint `json:"server_id"`
-}
-
 type auditLogResponse struct {
 	ID        uint   `json:"id"`
 	ProjectID *uint  `json:"project_id,omitempty"`
@@ -108,8 +110,8 @@ type projectStatusResponse struct {
 	ProjectID             uint                           `json:"project_id"`
 	Name                  string                         `json:"name"`
 	Description           string                         `json:"description"`
+	RootPath              string                         `json:"root_path"`
 	Token                 string                         `json:"token"`
-	PrimaryServerID       *uint                          `json:"primary_server_id"`
 	IsPaused              bool                           `json:"is_paused"`
 	ConnectURL            string                         `json:"connect_url"`
 	ConnectionReady       bool                           `json:"connection_ready"`
@@ -153,7 +155,6 @@ type serverStatusRecord struct {
 	HealthStatus          string         `json:"health_status"`
 	HealthError           string         `json:"health_error"`
 	HealthCheckedAt       string         `json:"health_checked_at,omitempty"`
-	IsPrimary             bool           `json:"is_primary"`
 }
 
 type keyValuePair struct {
@@ -174,12 +175,18 @@ type serverInspectionResponse struct {
 }
 
 func NewServer(store *storage.Store, registry *orchestrator.Registry) *Server {
+	return NewServerWithInstaller(store, registry, nil)
+}
+
+func NewServerWithInstaller(store *storage.Store, registry *orchestrator.Registry, packageInstaller *installer.Service) *Server {
 	s := &Server{
-		store:    store,
-		registry: registry,
-		mux:      http.NewServeMux(),
-		sessions: make(map[string]connectSession),
-		oauth:    make(map[string]oauthSession),
+		store:              store,
+		registry:           registry,
+		installer:          packageInstaller,
+		mux:                http.NewServeMux(),
+		sessions:           make(map[string]connectSession),
+		oauth:              make(map[string]oauthSession),
+		initializedServers: make(map[uint]bool),
 	}
 
 	s.registerRoutes()
@@ -193,7 +200,9 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("GET /api/logs", s.handleListLogs)
+	s.mux.HandleFunc("GET /api/packages", s.handleInstalledPackageList)
 	s.mux.HandleFunc("GET /api/catalog/items", s.handleCatalogList)
+	s.mux.HandleFunc("POST /api/catalog/items/", s.handleCatalogItemAction)
 	s.mux.HandleFunc("POST /api/catalog/sync", s.handleCatalogSync)
 	s.mux.HandleFunc("GET /api/projects", s.handleListProjects)
 	s.mux.HandleFunc("POST /api/projects", s.handleCreateProject)
@@ -225,6 +234,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	project := &models.Project{
 		Name:        strings.TrimSpace(req.Name),
 		Description: strings.TrimSpace(req.Description),
+		RootPath:    strings.TrimSpace(req.RootPath),
 	}
 	if project.Name == "" {
 		writeError(w, http.StatusBadRequest, errors.New("name is required"))
@@ -341,8 +351,6 @@ func (s *Server) handleProjectAction(w http.ResponseWriter, r *http.Request) {
 		s.handleAddServer(w, r, projectID)
 	case "integrations":
 		s.handleProjectInstallIntegration(w, r, projectID)
-	case "primary-server":
-		s.handleSetPrimaryServer(w, r, projectID)
 	case "pause":
 		s.handleSetProjectPaused(w, r, projectID, true)
 	case "resume":
@@ -381,7 +389,13 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.store.UpdateProject(r.Context(), projectID, name, strings.TrimSpace(req.Description)); err != nil {
+	if err := s.store.UpdateProject(
+		r.Context(),
+		projectID,
+		name,
+		strings.TrimSpace(req.Description),
+		strings.TrimSpace(req.RootPath),
+	); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -469,32 +483,6 @@ func (s *Server) handleAddServer(w http.ResponseWriter, r *http.Request, project
 	}
 
 	writeJSON(w, http.StatusCreated, s.projectStatus(r, *updatedProject))
-}
-
-func (s *Server) handleSetPrimaryServer(w http.ResponseWriter, r *http.Request, projectID uint) {
-	var req setPrimaryServerRequest
-	if err := decodeJSON(r.Body, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-	if req.ServerID == 0 {
-		writeError(w, http.StatusBadRequest, errors.New("server_id is required"))
-		return
-	}
-
-	if err := s.store.SetPrimaryServer(r.Context(), projectID, req.ServerID); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
-	}
-
-	updatedProject, err := s.store.GetProject(r.Context(), projectID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-
-	s.logAudit(r.Context(), &projectID, &req.ServerID, "server_set_primary", clientActor(r), "")
-	writeJSON(w, http.StatusOK, s.projectStatus(r, *updatedProject))
 }
 
 func (s *Server) handleSetProjectPaused(w http.ResponseWriter, r *http.Request, projectID uint, paused bool) {
@@ -789,38 +777,62 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runner, server, err := s.registry.RunnerForProject(r.Context(), *project)
-	if err != nil {
+	servers := s.projectConnectServers(*project)
+	if len(servers) == 0 {
+		err := errors.New("project has no enabled MCP servers configured")
 		s.logAudit(r.Context(), &project.ID, nil, "connect_failed", clientActor(r), truncateDetail(err.Error()))
 		writeError(w, http.StatusBadGateway, err)
 		return
 	}
 
-	if server != nil && server.Transport == models.ServerTransportHTTPStream {
-		if server.ID != 0 {
-			s.logAudit(r.Context(), &project.ID, &server.ID, "connect_http_proxy", clientActor(r), truncateDetail("method="+r.Method+" target="+server.URL))
-		}
-		s.proxyHTTPServer(w, r, *server)
-		return
-	}
-
 	switch r.Method {
 	case http.MethodGet:
-		if server != nil {
-			s.logAudit(r.Context(), &project.ID, &server.ID, "connect_stream_open", clientActor(r), "")
-		}
-		s.serveSSE(w, r, project.Token, project.ID, server.ID, runner)
+		s.logAudit(r.Context(), &project.ID, nil, "connect_stream_open", clientActor(r), "")
+		s.serveProjectSSE(w, r, project.Token, project.ID)
 	case http.MethodPost:
 		if s.isSSESessionRequest(r) {
-			if err := s.validateConnectSession(r, project.Token, server); err != nil {
+			if err := s.validateConnectSession(r, project.Token, nil); err != nil {
 				writeError(w, http.StatusBadRequest, err)
 				return
 			}
-			s.forwardJSONRPC(w, r, runner)
+			payload, err := io.ReadAll(io.LimitReader(r.Body, 1024*1024))
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err)
+				return
+			}
+			response, hasResponse, err := s.dispatchProjectJSONRPC(r.Context(), *project, servers, payload)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, err)
+				return
+			}
+			if hasResponse {
+				sessionID := strings.TrimSpace(r.URL.Query().Get("sessionId"))
+				if err := s.publishConnectSession(sessionID, response); err != nil {
+					writeError(w, http.StatusBadGateway, err)
+					return
+				}
+			}
+			writeJSON(w, http.StatusAccepted, map[string]string{"status": "forwarded"})
 			return
 		}
 
-		s.forwardJSONRPCSync(w, r, runner)
+		payload, err := io.ReadAll(io.LimitReader(r.Body, 1024*1024))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		response, hasResponse, err := s.dispatchProjectJSONRPC(r.Context(), *project, servers, payload)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err)
+			return
+		}
+		if !hasResponse || len(response) == 0 {
+			writeJSON(w, http.StatusAccepted, map[string]string{"status": "forwarded"})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(response)
 	default:
 		w.Header().Set("Allow", "GET, POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -959,15 +971,16 @@ func (s *Server) handleUI() http.Handler {
 }
 
 func (s *Server) projectStatus(r *http.Request, project models.Project) projectStatusResponse {
+	activeServers := s.projectConnectServers(project)
 	response := projectStatusResponse{
 		ProjectID:             project.ID,
 		Name:                  project.Name,
 		Description:           project.Description,
+		RootPath:              project.RootPath,
 		Token:                 project.Token,
-		PrimaryServerID:       project.PrimaryServerID,
 		IsPaused:              project.IsPaused,
 		ConnectURL:            s.connectURL(r, project.Token),
-		ConnectionReady:       project.PrimaryServerID != nil,
+		ConnectionReady:       len(activeServers) > 0,
 		Servers:               make([]serverStatusRecord, 0, len(project.Servers)),
 		InstalledIntegrations: mapInstalledIntegrations(project.InstalledIntegrations),
 	}
@@ -1016,7 +1029,6 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 			HealthStatus:          serverHealthStatus(server),
 			HealthError:           strings.TrimSpace(server.HealthError),
 			HealthCheckedAt:       formatServerHealthCheckedAt(server.HealthCheckedAt),
-			IsPrimary:             project.PrimaryServerID != nil && server.ID == *project.PrimaryServerID,
 		})
 	}
 
@@ -1987,6 +1999,9 @@ func (s *Server) unregisterConnectSession(sessionID string) {
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
 
+	if session, ok := s.sessions[sessionID]; ok && session.Stream != nil {
+		close(session.Stream)
+	}
 	delete(s.sessions, sessionID)
 }
 

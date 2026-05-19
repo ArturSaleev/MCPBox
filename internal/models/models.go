@@ -14,16 +14,17 @@ const (
 )
 
 type Project struct {
-	ID                    uint                   `gorm:"primaryKey" json:"id"`
-	Name                  string                 `gorm:"size:255;not null" json:"name"`
-	Description           string                 `gorm:"type:text" json:"description"`
-	Token                 string                 `gorm:"size:64;uniqueIndex;not null" json:"token"`
-	PrimaryServerID       *uint                  `gorm:"index" json:"primary_server_id,omitempty"`
-	IsPaused              bool                   `gorm:"not null;default:false" json:"is_paused"`
-	Servers               []MCPServer            `json:"servers,omitempty"`
-	InstalledIntegrations []InstalledIntegration `json:"installed_integrations,omitempty"`
-	CreatedAt             time.Time              `json:"created_at"`
-	UpdatedAt             time.Time              `json:"updated_at"`
+	ID                    uint                     `gorm:"primaryKey" json:"id"`
+	Name                  string                   `gorm:"size:255;not null" json:"name"`
+	Description           string                   `gorm:"type:text" json:"description"`
+	RootPath              string                   `gorm:"size:1024" json:"root_path"`
+	Token                 string                   `gorm:"size:64;uniqueIndex;not null" json:"token"`
+	IsPaused              bool                     `gorm:"not null;default:false" json:"is_paused"`
+	Servers               []MCPServer              `json:"servers,omitempty"`
+	InstalledIntegrations []InstalledIntegration   `json:"installed_integrations,omitempty"`
+	PackageInstances      []ProjectPackageInstance `json:"package_instances,omitempty"`
+	CreatedAt             time.Time                `json:"created_at"`
+	UpdatedAt             time.Time                `json:"updated_at"`
 }
 
 type MCPServer struct {

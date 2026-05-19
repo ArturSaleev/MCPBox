@@ -7,7 +7,7 @@ import (
 	"MCPBox/internal/models"
 )
 
-func TestRunnerForProjectRequiresPrimaryServer(t *testing.T) {
+func TestRunnerForProjectRequiresEnabledServer(t *testing.T) {
 	t.Parallel()
 
 	registry := NewRegistry(context.Background())
@@ -15,15 +15,15 @@ func TestRunnerForProjectRequiresPrimaryServer(t *testing.T) {
 		ID:   1,
 		Name: "Workspace",
 		Servers: []models.MCPServer{
-			{ID: 10, ProjectID: 1, Name: "Filesystem", LaunchCommand: "echo test"},
+			{ID: 10, ProjectID: 1, Name: "Filesystem", LaunchCommand: "echo test", IsEnabled: false},
 		},
 	}
 
 	_, _, err := registry.RunnerForProject(context.Background(), project)
 	if err == nil {
-		t.Fatal("RunnerForProject() error = nil, want primary server error")
+		t.Fatal("RunnerForProject() error = nil, want enabled server error")
 	}
-	if err.Error() != "project has no primary MCP server configured" {
+	if err.Error() != "project has no enabled MCP servers" {
 		t.Fatalf("RunnerForProject() error = %q", err.Error())
 	}
 }

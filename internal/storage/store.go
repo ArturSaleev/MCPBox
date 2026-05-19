@@ -43,11 +43,69 @@ func NewStore(dsn string) (*Store, error) {
 	if err := db.AutoMigrate(&models.AuditLog{}); err != nil {
 		return nil, err
 	}
-	if err := db.AutoMigrate(&models.ProjectCatalogSettings{}, &models.IntegrationCatalogItem{}, &models.InstalledIntegration{}); err != nil {
+	if err := db.AutoMigrate(
+		&models.ProjectCatalogSettings{},
+		&models.IntegrationCatalogItem{},
+		&models.InstalledIntegration{},
+		&models.InstalledPackage{},
+		&models.ProjectPackageInstance{},
+	); err != nil {
+		return nil, err
+	}
+	if err := migrateLegacyProjectSchema(db); err != nil {
 		return nil, err
 	}
 
 	return &Store{db: db}, nil
+}
+
+func migrateLegacyProjectSchema(db *gorm.DB) error {
+	if !db.Migrator().HasColumn(&models.Project{}, "primary_server_id") {
+		return nil
+	}
+
+	if err := db.Exec(`DROP INDEX IF EXISTS idx_projects_primary_server_id`).Error; err != nil {
+		return err
+	}
+	if err := db.Exec(`ALTER TABLE projects DROP COLUMN primary_server_id`).Error; err == nil {
+		return nil
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		const replacementTable = "projects__mcpbox_rebuild"
+
+		if err := tx.Exec(fmt.Sprintf(`DROP TABLE IF EXISTS %s`, replacementTable)).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(fmt.Sprintf(`
+			CREATE TABLE %s (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				name TEXT NOT NULL,
+				description TEXT,
+				root_path TEXT,
+				token TEXT NOT NULL,
+				is_paused NUMERIC NOT NULL DEFAULT 0,
+				created_at DATETIME,
+				updated_at DATETIME
+			)
+		`, replacementTable)).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(fmt.Sprintf(`
+			INSERT INTO %s (id, name, description, root_path, token, is_paused, created_at, updated_at)
+			SELECT id, name, description, root_path, token, is_paused, created_at, updated_at
+			FROM projects
+		`, replacementTable)).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`DROP TABLE projects`).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(fmt.Sprintf(`ALTER TABLE %s RENAME TO projects`, replacementTable)).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_token ON projects(token)`).Error
+	})
 }
 
 func (s *Store) CreateProject(ctx context.Context, project *models.Project) error {
@@ -63,12 +121,13 @@ func (s *Store) CreateProject(ctx context.Context, project *models.Project) erro
 	return s.db.WithContext(ctx).Create(project).Error
 }
 
-func (s *Store) UpdateProject(ctx context.Context, projectID uint, name, description string) error {
+func (s *Store) UpdateProject(ctx context.Context, projectID uint, name, description, rootPath string) error {
 	return s.db.WithContext(ctx).Model(&models.Project{}).
 		Where("id = ?", projectID).
 		Updates(map[string]any{
 			"name":        name,
 			"description": description,
+			"root_path":   rootPath,
 		}).Error
 }
 
@@ -77,6 +136,8 @@ func (s *Store) ListProjects(ctx context.Context) ([]models.Project, error) {
 	err := s.db.WithContext(ctx).
 		Preload("Servers").
 		Preload("InstalledIntegrations").
+		Preload("PackageInstances").
+		Preload("PackageInstances.InstalledPackage").
 		Order("id asc").
 		Find(&projects).Error
 	return projects, err
@@ -87,6 +148,8 @@ func (s *Store) GetProject(ctx context.Context, id uint) (*models.Project, error
 	err := s.db.WithContext(ctx).
 		Preload("Servers").
 		Preload("InstalledIntegrations").
+		Preload("PackageInstances").
+		Preload("PackageInstances.InstalledPackage").
 		First(&project, id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
@@ -100,6 +163,8 @@ func (s *Store) GetProjectByToken(ctx context.Context, token string) (*models.Pr
 	err := s.db.WithContext(ctx).
 		Preload("Servers").
 		Preload("InstalledIntegrations").
+		Preload("PackageInstances").
+		Preload("PackageInstances.InstalledPackage").
 		Where("token = ?", token).
 		First(&project).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -110,15 +175,7 @@ func (s *Store) GetProjectByToken(ctx context.Context, token string) (*models.Pr
 }
 
 func (s *Store) AddServer(ctx context.Context, server *models.MCPServer) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(server).Error; err != nil {
-			return err
-		}
-
-		return tx.Model(&models.Project{}).
-			Where("id = ? AND primary_server_id IS NULL", server.ProjectID).
-			Update("primary_server_id", server.ID).Error
-	})
+	return s.db.WithContext(ctx).Create(server).Error
 }
 
 func (s *Store) UpdateServer(ctx context.Context, server *models.MCPServer) error {
@@ -176,34 +233,15 @@ func (s *Store) ListAutoStartServers(ctx context.Context) ([]models.MCPServer, e
 	return servers, err
 }
 
-func (s *Store) SetPrimaryServer(ctx context.Context, projectID, serverID uint) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var project models.Project
-		if err := tx.First(&project, projectID).Error; err != nil {
-			return err
-		}
-
-		var server models.MCPServer
-		err := tx.Where("id = ? AND project_id = ?", serverID, projectID).First(&server).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return fmt.Errorf("server %d does not belong to project %d", serverID, projectID)
-		}
-		if err != nil {
-			return err
-		}
-
-		return tx.Model(&models.Project{}).
-			Where("id = ?", projectID).
-			Update("primary_server_id", serverID).Error
-	})
-}
-
 func (s *Store) DeleteProject(ctx context.Context, projectID uint) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("project_id = ?", projectID).Delete(&models.AuditLog{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("project_id = ?", projectID).Delete(&models.InstalledIntegration{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("project_id = ?", projectID).Delete(&models.ProjectPackageInstance{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("project_id = ?", projectID).Delete(&models.MCPServer{}).Error; err != nil {
@@ -220,6 +258,12 @@ func (s *Store) DeleteServer(ctx context.Context, serverID uint) error {
 			return err
 		}
 
+		if err := tx.Where("server_id = ?", serverID).Delete(&models.InstalledIntegration{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("server_id = ?", serverID).Delete(&models.ProjectPackageInstance{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("server_id = ?", serverID).Delete(&models.AuditLog{}).Error; err != nil {
 			return err
 		}
@@ -227,21 +271,7 @@ func (s *Store) DeleteServer(ctx context.Context, serverID uint) error {
 			return err
 		}
 
-		var replacement models.MCPServer
-		replacementErr := tx.Where("project_id = ? AND is_enabled = ?", server.ProjectID, true).
-			Order("id asc").
-			First(&replacement).Error
-
-		updates := map[string]any{"primary_server_id": nil}
-		if replacementErr == nil {
-			updates["primary_server_id"] = replacement.ID
-		} else if !errors.Is(replacementErr, gorm.ErrRecordNotFound) {
-			return replacementErr
-		}
-
-		return tx.Model(&models.Project{}).
-			Where("id = ? AND primary_server_id = ?", server.ProjectID, serverID).
-			Updates(updates).Error
+		return nil
 	})
 }
 
@@ -318,6 +348,72 @@ func (s *Store) ClearServerOAuthTokens(ctx context.Context, serverID uint) error
 
 func (s *Store) CreateAuditLog(ctx context.Context, entry *models.AuditLog) error {
 	return s.db.WithContext(ctx).Create(entry).Error
+}
+
+func (s *Store) CreateInstalledPackage(ctx context.Context, pkg *models.InstalledPackage) error {
+	return s.db.WithContext(ctx).Create(pkg).Error
+}
+
+func (s *Store) GetInstalledPackageByCatalog(ctx context.Context, catalogItemID, version string) (*models.InstalledPackage, error) {
+	var pkg models.InstalledPackage
+	err := s.db.WithContext(ctx).
+		Where("catalog_item_id = ? AND version = ?", catalogItemID, version).
+		First(&pkg).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+
+	return &pkg, err
+}
+
+func (s *Store) GetInstalledPackage(ctx context.Context, packageID uint) (*models.InstalledPackage, error) {
+	var pkg models.InstalledPackage
+	err := s.db.WithContext(ctx).First(&pkg, packageID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+
+	return &pkg, err
+}
+
+func (s *Store) ListInstalledPackages(ctx context.Context) ([]models.InstalledPackage, error) {
+	var packages []models.InstalledPackage
+	err := s.db.WithContext(ctx).
+		Preload("ProjectInstances").
+		Order("id asc").
+		Find(&packages).Error
+	return packages, err
+}
+
+func (s *Store) UpdateInstalledPackage(ctx context.Context, pkg *models.InstalledPackage) error {
+	return s.db.WithContext(ctx).
+		Model(&models.InstalledPackage{}).
+		Where("id = ?", pkg.ID).
+		Updates(map[string]any{
+			"name":             pkg.Name,
+			"runtime_type":     pkg.RuntimeType,
+			"source_type":      pkg.SourceType,
+			"install_strategy": pkg.InstallStrategy,
+			"install_dir":      pkg.InstallDir,
+			"entry_point":      pkg.EntryPoint,
+			"status":           pkg.Status,
+			"last_error":       pkg.LastError,
+			"installed_at":     pkg.InstalledAt,
+		}).Error
+}
+
+func (s *Store) CreateProjectPackageInstance(ctx context.Context, instance *models.ProjectPackageInstance) error {
+	return s.db.WithContext(ctx).Create(instance).Error
+}
+
+func (s *Store) ListProjectPackageInstances(ctx context.Context, projectID uint) ([]models.ProjectPackageInstance, error) {
+	var instances []models.ProjectPackageInstance
+	err := s.db.WithContext(ctx).
+		Preload("InstalledPackage").
+		Where("project_id = ?", projectID).
+		Order("id asc").
+		Find(&instances).Error
+	return instances, err
 }
 
 func (s *Store) ListAuditLogs(ctx context.Context, projectID *uint, limit int) ([]models.AuditLog, error) {

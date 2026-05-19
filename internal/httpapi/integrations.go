@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,81 +24,117 @@ type catalogManifest struct {
 	Items         []catalogManifestItem `json:"items"`
 }
 
+type catalogRuntimeSpec struct {
+	Type    string `json:"type"`
+	Version string `json:"version"`
+}
+
+type catalogSourceSpec struct {
+	Type    string `json:"type"`
+	Package string `json:"package"`
+	Version string `json:"version"`
+	URL     string `json:"url"`
+}
+
+type catalogInstallSpec struct {
+	Strategy string          `json:"strategy"`
+	Metadata json.RawMessage `json:"metadata"`
+}
+
+type catalogLaunchSpec struct {
+	Command    string   `json:"command"`
+	Args       []string `json:"args"`
+	WorkingDir string   `json:"working_dir"`
+	EntryPoint string   `json:"entry_point"`
+}
+
 type catalogManifestItem struct {
-	ID                       string          `json:"id"`
-	Name                     string          `json:"name"`
-	Category                 string          `json:"category"`
-	Description              string          `json:"description"`
-	Icon                     string          `json:"icon"`
-	Transport                string          `json:"transport"`
-	MCPURL                   string          `json:"mcp_url"`
-	Command                  string          `json:"command"`
-	Args                     []string        `json:"args"`
-	Env                      []keyValuePair  `json:"env"`
-	EnvPassthrough           []string        `json:"env_passthrough"`
-	WorkingDir               string          `json:"working_dir"`
-	DefaultAutoStart         bool            `json:"default_auto_start"`
-	AuthType                 string          `json:"auth_type"`
-	AuthProvider             string          `json:"auth_provider"`
-	OAuthAuthorizeURL        string          `json:"oauth_authorize_url"`
-	OAuthTokenURL            string          `json:"oauth_token_url"`
-	OAuthRefreshURL          string          `json:"oauth_refresh_url"`
-	OAuthUsePKCE             *bool           `json:"oauth_use_pkce"`
-	OAuthScopeDelimiter      string          `json:"oauth_scope_delimiter"`
-	OAuthClientAuthMethod    string          `json:"oauth_client_auth_method"`
-	OAuthAuthorizeParams     json.RawMessage `json:"oauth_authorize_params"`
-	OAuthTokenParams         json.RawMessage `json:"oauth_token_params"`
-	DefaultOAuthScopes       []string        `json:"default_oauth_scopes"`
-	DefaultHeaders           []keyValuePair  `json:"default_headers"`
-	DefaultHeaderEnvVars     []keyValuePair  `json:"default_header_env_vars"`
-	DefaultBearerTokenEnvVar string          `json:"default_bearer_token_env_var"`
-	ConfigSchema             json.RawMessage `json:"config_schema"`
-	Capabilities             []string        `json:"capabilities"`
-	Tags                     []string        `json:"tags"`
-	Website                  string          `json:"website"`
-	DocsURL                  string          `json:"docs_url"`
-	Enabled                  *bool           `json:"enabled"`
-	Version                  string          `json:"version"`
+	ID                       string             `json:"id"`
+	Name                     string             `json:"name"`
+	Category                 string             `json:"category"`
+	Description              string             `json:"description"`
+	Icon                     string             `json:"icon"`
+	Runtime                  catalogRuntimeSpec `json:"runtime"`
+	Source                   catalogSourceSpec  `json:"source"`
+	Install                  catalogInstallSpec `json:"install"`
+	Launch                   catalogLaunchSpec  `json:"launch"`
+	SharedInstall            *bool              `json:"shared_install"`
+	SupportsMultiProject     *bool              `json:"supports_multi_project"`
+	Transport                string             `json:"transport"`
+	MCPURL                   string             `json:"mcp_url"`
+	Command                  string             `json:"command"`
+	Args                     []string           `json:"args"`
+	Env                      []keyValuePair     `json:"env"`
+	EnvPassthrough           []string           `json:"env_passthrough"`
+	WorkingDir               string             `json:"working_dir"`
+	DefaultAutoStart         bool               `json:"default_auto_start"`
+	AuthType                 string             `json:"auth_type"`
+	AuthProvider             string             `json:"auth_provider"`
+	OAuthAuthorizeURL        string             `json:"oauth_authorize_url"`
+	OAuthTokenURL            string             `json:"oauth_token_url"`
+	OAuthRefreshURL          string             `json:"oauth_refresh_url"`
+	OAuthUsePKCE             *bool              `json:"oauth_use_pkce"`
+	OAuthScopeDelimiter      string             `json:"oauth_scope_delimiter"`
+	OAuthClientAuthMethod    string             `json:"oauth_client_auth_method"`
+	OAuthAuthorizeParams     json.RawMessage    `json:"oauth_authorize_params"`
+	OAuthTokenParams         json.RawMessage    `json:"oauth_token_params"`
+	DefaultOAuthScopes       []string           `json:"default_oauth_scopes"`
+	DefaultHeaders           []keyValuePair     `json:"default_headers"`
+	DefaultHeaderEnvVars     []keyValuePair     `json:"default_header_env_vars"`
+	DefaultBearerTokenEnvVar string             `json:"default_bearer_token_env_var"`
+	ConfigSchema             json.RawMessage    `json:"config_schema"`
+	Capabilities             []string           `json:"capabilities"`
+	Tags                     []string           `json:"tags"`
+	Website                  string             `json:"website"`
+	DocsURL                  string             `json:"docs_url"`
+	Enabled                  *bool              `json:"enabled"`
+	Version                  string             `json:"version"`
 }
 
 type catalogItemResponse struct {
-	ID                       string          `json:"id"`
-	Name                     string          `json:"name"`
-	Category                 string          `json:"category"`
-	Description              string          `json:"description"`
-	Icon                     string          `json:"icon"`
-	Transport                string          `json:"transport"`
-	MCPURL                   string          `json:"mcp_url"`
-	Command                  string          `json:"command,omitempty"`
-	Args                     []string        `json:"args,omitempty"`
-	Env                      []keyValuePair  `json:"env,omitempty"`
-	EnvPassthrough           []string        `json:"env_passthrough,omitempty"`
-	WorkingDir               string          `json:"working_dir,omitempty"`
-	DefaultAutoStart         bool            `json:"default_auto_start,omitempty"`
-	AuthType                 string          `json:"auth_type"`
-	AuthProvider             string          `json:"auth_provider"`
-	OAuthAuthorizeURL        string          `json:"oauth_authorize_url,omitempty"`
-	OAuthTokenURL            string          `json:"oauth_token_url,omitempty"`
-	OAuthRefreshURL          string          `json:"oauth_refresh_url,omitempty"`
-	OAuthUsePKCE             bool            `json:"oauth_use_pkce"`
-	OAuthScopeDelimiter      string          `json:"oauth_scope_delimiter,omitempty"`
-	OAuthClientAuthMethod    string          `json:"oauth_client_auth_method,omitempty"`
-	OAuthAuthorizeParams     json.RawMessage `json:"oauth_authorize_params,omitempty"`
-	OAuthTokenParams         json.RawMessage `json:"oauth_token_params,omitempty"`
-	DefaultOAuthScopes       []string        `json:"default_oauth_scopes,omitempty"`
-	DefaultHeaders           []keyValuePair  `json:"default_headers,omitempty"`
-	DefaultHeaderEnvVars     []keyValuePair  `json:"default_header_env_vars,omitempty"`
-	DefaultBearerTokenEnvVar string          `json:"default_bearer_token_env_var,omitempty"`
-	ConfigSchema             json.RawMessage `json:"config_schema"`
-	Capabilities             []string        `json:"capabilities"`
-	Tags                     []string        `json:"tags"`
-	Website                  string          `json:"website"`
-	DocsURL                  string          `json:"docs_url"`
-	Enabled                  bool            `json:"enabled"`
-	Version                  string          `json:"version"`
-	ManifestSourceURL        string          `json:"manifest_source_url"`
-	SchemaVersion            string          `json:"schema_version"`
-	LastSyncedAt             string          `json:"last_synced_at"`
+	ID                       string             `json:"id"`
+	Name                     string             `json:"name"`
+	Category                 string             `json:"category"`
+	Description              string             `json:"description"`
+	Icon                     string             `json:"icon"`
+	Runtime                  catalogRuntimeSpec `json:"runtime"`
+	Source                   catalogSourceSpec  `json:"source"`
+	Install                  catalogInstallSpec `json:"install"`
+	Launch                   catalogLaunchSpec  `json:"launch"`
+	SharedInstall            bool               `json:"shared_install"`
+	SupportsMultiProject     bool               `json:"supports_multi_project"`
+	Transport                string             `json:"transport"`
+	MCPURL                   string             `json:"mcp_url"`
+	Command                  string             `json:"command,omitempty"`
+	Args                     []string           `json:"args,omitempty"`
+	Env                      []keyValuePair     `json:"env,omitempty"`
+	EnvPassthrough           []string           `json:"env_passthrough,omitempty"`
+	WorkingDir               string             `json:"working_dir,omitempty"`
+	DefaultAutoStart         bool               `json:"default_auto_start,omitempty"`
+	AuthType                 string             `json:"auth_type"`
+	AuthProvider             string             `json:"auth_provider"`
+	OAuthAuthorizeURL        string             `json:"oauth_authorize_url,omitempty"`
+	OAuthTokenURL            string             `json:"oauth_token_url,omitempty"`
+	OAuthRefreshURL          string             `json:"oauth_refresh_url,omitempty"`
+	OAuthUsePKCE             bool               `json:"oauth_use_pkce"`
+	OAuthScopeDelimiter      string             `json:"oauth_scope_delimiter,omitempty"`
+	OAuthClientAuthMethod    string             `json:"oauth_client_auth_method,omitempty"`
+	OAuthAuthorizeParams     json.RawMessage    `json:"oauth_authorize_params,omitempty"`
+	OAuthTokenParams         json.RawMessage    `json:"oauth_token_params,omitempty"`
+	DefaultOAuthScopes       []string           `json:"default_oauth_scopes,omitempty"`
+	DefaultHeaders           []keyValuePair     `json:"default_headers,omitempty"`
+	DefaultHeaderEnvVars     []keyValuePair     `json:"default_header_env_vars,omitempty"`
+	DefaultBearerTokenEnvVar string             `json:"default_bearer_token_env_var,omitempty"`
+	ConfigSchema             json.RawMessage    `json:"config_schema"`
+	Capabilities             []string           `json:"capabilities"`
+	Tags                     []string           `json:"tags"`
+	Website                  string             `json:"website"`
+	DocsURL                  string             `json:"docs_url"`
+	Enabled                  bool               `json:"enabled"`
+	Version                  string             `json:"version"`
+	ManifestSourceURL        string             `json:"manifest_source_url"`
+	SchemaVersion            string             `json:"schema_version"`
+	LastSyncedAt             string             `json:"last_synced_at"`
 }
 
 type catalogSettingsResponse struct {
@@ -112,11 +150,38 @@ type catalogSyncRequest struct {
 	URL string `json:"url"`
 }
 
+type installPackageResponse struct {
+	Package installedPackageResponse `json:"package"`
+}
+
+type addPackageToProjectRequest struct {
+	ProjectID uint           `json:"project_id"`
+	Name      string         `json:"name"`
+	Config    map[string]any `json:"config"`
+}
+
 type installIntegrationRequest struct {
 	CatalogItemID string         `json:"catalog_item_id"`
 	Name          string         `json:"name"`
-	MakePrimary   bool           `json:"make_primary"`
 	Config        map[string]any `json:"config"`
+}
+
+type installedPackageResponse struct {
+	ID              uint   `json:"id"`
+	CatalogItemID   string `json:"catalog_item_id"`
+	Name            string `json:"name"`
+	Version         string `json:"version"`
+	RuntimeType     string `json:"runtime_type"`
+	SourceType      string `json:"source_type"`
+	InstallStrategy string `json:"install_strategy"`
+	InstallDir      string `json:"install_dir"`
+	EntryPoint      string `json:"entry_point"`
+	Status          string `json:"status"`
+	LastError       string `json:"last_error"`
+	InstalledAt     string `json:"installed_at,omitempty"`
+	ProjectUseCount int    `json:"project_use_count"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 type installedIntegrationResponse struct {
@@ -158,6 +223,140 @@ func (s *Server) handleCatalogList(w http.ResponseWriter, r *http.Request) {
 		Settings: catalogSettingsFromModel(settings),
 		Items:    mapCatalogItems(items),
 	})
+}
+
+func (s *Server) handleInstalledPackageList(w http.ResponseWriter, r *http.Request) {
+	packages, err := s.store.ListInstalledPackages(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": mapInstalledPackages(packages),
+	})
+}
+
+func (s *Server) handleCatalogItemAction(w http.ResponseWriter, r *http.Request) {
+	itemID, tail, ok := parseStringIDTail(r.URL.Path, "/api/catalog/items/")
+	if !ok || r.Method != http.MethodPost {
+		http.NotFound(w, r)
+		return
+	}
+
+	switch tail {
+	case "install":
+		s.handleCatalogPackageInstall(w, r, itemID)
+	case "add-to-project":
+		s.handleCatalogPackageAddToProject(w, r, itemID)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (s *Server) handleCatalogPackageInstall(w http.ResponseWriter, r *http.Request, itemID string) {
+	if s.installer == nil {
+		writeError(w, http.StatusNotImplemented, errors.New("package installer is not configured"))
+		return
+	}
+
+	item, err := s.store.GetCatalogItem(r.Context(), strings.TrimSpace(itemID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if item == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if !item.Enabled {
+		writeError(w, http.StatusBadRequest, errors.New("catalog item is disabled"))
+		return
+	}
+
+	pkg, err := s.installer.InstallCatalogPackage(r.Context(), *item)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	s.logAudit(r.Context(), nil, nil, "package_installed", clientActor(r), item.ID)
+	writeJSON(w, http.StatusOK, installPackageResponse{
+		Package: mapInstalledPackage(*pkg, 0),
+	})
+}
+
+func (s *Server) handleCatalogPackageAddToProject(w http.ResponseWriter, r *http.Request, itemID string) {
+	var req addPackageToProjectRequest
+	if err := decodeJSON(r.Body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.ProjectID == 0 {
+		writeError(w, http.StatusBadRequest, errors.New("project_id is required"))
+		return
+	}
+
+	item, err := s.store.GetCatalogItem(r.Context(), strings.TrimSpace(itemID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if item == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	version := strings.TrimSpace(item.Version)
+	if version == "" {
+		version = "latest"
+	}
+	pkg, err := s.store.GetInstalledPackageByCatalog(r.Context(), item.ID, version)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if pkg == nil || pkg.Status != models.PackageStatusInstalled {
+		writeError(w, http.StatusBadRequest, errors.New("package must be installed before adding it to a project"))
+		return
+	}
+
+	installReq := installIntegrationRequest{
+		CatalogItemID: item.ID,
+		Name:          req.Name,
+		Config:        req.Config,
+	}
+	server, integration, err := buildInstalledIntegration(req.ProjectID, *item, installReq, pkg)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	instanceName := strings.TrimSpace(req.Name)
+	if instanceName == "" {
+		instanceName = item.Name
+	}
+	instance := &models.ProjectPackageInstance{
+		InstalledPackageID: pkg.ID,
+		CatalogItemID:      item.ID,
+		Name:               instanceName,
+		Status:             models.InstanceStatusReady,
+		ConfigJSON:         mustJSON(req.Config),
+	}
+
+	if err := s.store.AddInstalledPackageToProject(r.Context(), req.ProjectID, server, integration, instance); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	project, err := s.store.GetProject(r.Context(), req.ProjectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	s.logAudit(r.Context(), &req.ProjectID, integration.ServerID, "package_added_to_project", clientActor(r), item.ID)
+	writeJSON(w, http.StatusCreated, s.projectStatus(r, *project))
 }
 
 func (s *Server) handleCatalogSync(w http.ResponseWriter, r *http.Request) {
@@ -231,13 +430,13 @@ func (s *Server) handleProjectInstallIntegration(w http.ResponseWriter, r *http.
 		return
 	}
 
-	server, integration, err := buildInstalledIntegration(projectID, *item, req)
+	server, integration, err := buildInstalledIntegration(projectID, *item, req, nil)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 
-	if err := s.store.InstallCatalogIntegration(r.Context(), projectID, server, integration, req.MakePrimary); err != nil {
+	if err := s.store.InstallCatalogIntegration(r.Context(), projectID, server, integration); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -371,6 +570,45 @@ func normalizeCatalogItem(
 	if item.Enabled != nil {
 		enabled = *item.Enabled
 	}
+	sharedInstall := true
+	if item.SharedInstall != nil {
+		sharedInstall = *item.SharedInstall
+	}
+	supportsMultiProject := true
+	if item.SupportsMultiProject != nil {
+		supportsMultiProject = *item.SupportsMultiProject
+	}
+
+	runtimeType := strings.TrimSpace(item.Runtime.Type)
+	runtimeVersion := strings.TrimSpace(item.Runtime.Version)
+	sourceType := strings.TrimSpace(item.Source.Type)
+	sourcePackage := strings.TrimSpace(item.Source.Package)
+	sourceVersion := strings.TrimSpace(item.Source.Version)
+	sourceArtifactURL := strings.TrimSpace(item.Source.URL)
+	installStrategy := strings.TrimSpace(item.Install.Strategy)
+	launchCommand := strings.TrimSpace(item.Launch.Command)
+	launchWorkingDir := strings.TrimSpace(item.Launch.WorkingDir)
+	launchEntryPoint := strings.TrimSpace(item.Launch.EntryPoint)
+
+	if transport == models.ServerTransportSTDIO {
+		if installStrategy == "" {
+			return nil, fmt.Errorf("catalog item %s install.strategy is required for stdio transport", id)
+		}
+		switch installStrategy {
+		case "binary_download", "npm", "python_venv", "remote_only":
+		default:
+			return nil, fmt.Errorf("catalog item %s has unsupported install.strategy %q", id, installStrategy)
+		}
+		if sourceType == "" {
+			return nil, fmt.Errorf("catalog item %s source.type is required for stdio transport", id)
+		}
+		if launchCommand == "" {
+			launchCommand = strings.TrimSpace(item.Command)
+		}
+		if launchCommand == "" {
+			return nil, fmt.Errorf("catalog item %s launch.command is required for stdio transport", id)
+		}
+	}
 
 	catalogItem := &models.IntegrationCatalogItem{
 		ID:                       id,
@@ -378,6 +616,20 @@ func normalizeCatalogItem(
 		Category:                 strings.TrimSpace(item.Category),
 		Description:              strings.TrimSpace(item.Description),
 		Icon:                     strings.TrimSpace(item.Icon),
+		RuntimeType:              runtimeType,
+		RuntimeVersion:           runtimeVersion,
+		SourceType:               sourceType,
+		SourcePackage:            sourcePackage,
+		SourceVersion:            sourceVersion,
+		SourceURL:                sourceArtifactURL,
+		InstallStrategy:          installStrategy,
+		InstallMetadataJSON:      normalizedRawJSON(item.Install.Metadata, "{}"),
+		LaunchCommand:            launchCommand,
+		LaunchArgsJSON:           encodeStringArrayJSON(item.Launch.Args),
+		LaunchWorkingDir:         launchWorkingDir,
+		LaunchEntryPoint:         launchEntryPoint,
+		SharedInstall:            sharedInstall,
+		SupportsMultiProject:     supportsMultiProject,
 		Transport:                transport,
 		MCPURL:                   mcpURL,
 		Command:                  strings.TrimSpace(item.Command),
@@ -416,7 +668,12 @@ func normalizeCatalogItem(
 	return catalogItem, nil
 }
 
-func buildInstalledIntegration(projectID uint, item models.IntegrationCatalogItem, req installIntegrationRequest) (*models.MCPServer, *models.InstalledIntegration, error) {
+func buildInstalledIntegration(
+	projectID uint,
+	item models.IntegrationCatalogItem,
+	req installIntegrationRequest,
+	installedPkg *models.InstalledPackage,
+) (*models.MCPServer, *models.InstalledIntegration, error) {
 	config := req.Config
 	if config == nil {
 		config = map[string]any{}
@@ -472,11 +729,39 @@ func buildInstalledIntegration(projectID uint, item models.IntegrationCatalogIte
 	}
 
 	if server.Transport == models.ServerTransportSTDIO {
+		installDir := ""
+		if installedPkg != nil {
+			installDir = strings.TrimSpace(installedPkg.InstallDir)
+		}
+		args := decodeJSONArray(item.ArgsJSON)
+		args = applyCatalogConfigArgs(item, config, args)
+		for index := range args {
+			args[index] = applyInstallDirTemplate(args[index], installDir)
+		}
+
 		server.Command = item.Command
-		server.ArgsJSON = normalizedStringJSON(item.ArgsJSON, "[]")
+		server.ArgsJSON = mustJSON(args)
 		server.EnvJSON = normalizedStringJSON(item.EnvJSON, "[]")
 		server.EnvPassthroughJSON = normalizedStringJSON(item.EnvPassthroughJSON, "[]")
-		server.WorkingDir = item.WorkingDir
+		server.WorkingDir = applyInstallDirTemplate(item.WorkingDir, installDir)
+
+		if installedPkg != nil {
+			switch strings.TrimSpace(installedPkg.InstallStrategy) {
+			case "npm":
+				if strings.EqualFold(strings.TrimSpace(server.Command), "node") &&
+					strings.TrimSpace(installedPkg.EntryPoint) != "" &&
+					strings.TrimSpace(item.SourcePackage) != "" &&
+					len(args) > 0 {
+					args[0] = filepath.Join("node_modules", filepath.FromSlash(strings.TrimSpace(item.SourcePackage)), filepath.FromSlash(strings.TrimSpace(installedPkg.EntryPoint)))
+					server.ArgsJSON = mustJSON(args)
+				}
+			case "python_venv":
+				if strings.EqualFold(strings.TrimSpace(server.Command), "python") {
+					server.Command = managedPythonPath(installedPkg.InstallDir)
+				}
+			}
+		}
+
 		server.URL = ""
 		server.BearerTokenEnvVar = ""
 		server.HeadersJSON = "[]"
@@ -495,7 +780,7 @@ func buildInstalledIntegration(projectID uint, item models.IntegrationCatalogIte
 		server.OAuthAuthorizeParamsJSON = "{}"
 		server.OAuthTokenParamsJSON = "{}"
 		server.AutoStart = item.DefaultAutoStart
-		server.LaunchCommand = strings.TrimSpace(strings.Join(append([]string{server.Command}, decodeJSONArray(item.ArgsJSON)...), " "))
+		server.LaunchCommand = strings.TrimSpace(strings.Join(append([]string{server.Command}, args...), " "))
 	}
 
 	switch server.AuthType {
@@ -517,9 +802,31 @@ func buildInstalledIntegration(projectID uint, item models.IntegrationCatalogIte
 	}
 
 	manifestSnapshot := map[string]any{
-		"id":                           item.ID,
-		"name":                         item.Name,
-		"category":                     item.Category,
+		"id":       item.ID,
+		"name":     item.Name,
+		"category": item.Category,
+		"runtime": map[string]any{
+			"type":    item.RuntimeType,
+			"version": item.RuntimeVersion,
+		},
+		"source": map[string]any{
+			"type":    item.SourceType,
+			"package": item.SourcePackage,
+			"version": item.SourceVersion,
+			"url":     item.SourceURL,
+		},
+		"install": map[string]any{
+			"strategy": item.InstallStrategy,
+			"metadata": decodeJSONObject(item.InstallMetadataJSON),
+		},
+		"launch": map[string]any{
+			"command":     item.LaunchCommand,
+			"args":        decodeJSONArray(item.LaunchArgsJSON),
+			"working_dir": item.LaunchWorkingDir,
+			"entry_point": item.LaunchEntryPoint,
+		},
+		"shared_install":               item.SharedInstall,
+		"supports_multi_project":       item.SupportsMultiProject,
 		"transport":                    item.Transport,
 		"mcp_url":                      item.MCPURL,
 		"command":                      item.Command,
@@ -568,15 +875,81 @@ func buildInstalledIntegration(projectID uint, item models.IntegrationCatalogIte
 	return server, integration, nil
 }
 
+func applyCatalogConfigArgs(item models.IntegrationCatalogItem, config map[string]any, args []string) []string {
+	itemID := strings.TrimSpace(strings.ToLower(item.ID))
+	switch itemID {
+	case "filesystem":
+		rootPath := strings.TrimSpace(readConfigString(config["root_path"]))
+		if rootPath == "" {
+			rootPath = strings.TrimSpace(readConfigString(config["project_path"]))
+		}
+		if rootPath == "" {
+			rootPath = strings.TrimSpace(readConfigString(config["workspace_path"]))
+		}
+		if rootPath == "" || containsString(args, rootPath) {
+			return args
+		}
+		return append(args, rootPath)
+	default:
+		return args
+	}
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if strings.TrimSpace(value) == target {
+			return true
+		}
+	}
+	return false
+}
+
+func applyInstallDirTemplate(value, installDir string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || installDir == "" {
+		return value
+	}
+	return strings.ReplaceAll(value, "{install_dir}", installDir)
+}
+
+func managedPythonPath(installDir string) string {
+	if os.PathSeparator == '\\' {
+		return filepath.Join(installDir, "venv", "Scripts", "python.exe")
+	}
+	return filepath.Join(installDir, "venv", "bin", "python")
+}
+
 func mapCatalogItems(items []models.IntegrationCatalogItem) []catalogItemResponse {
 	response := make([]catalogItemResponse, 0, len(items))
 	for _, item := range items {
 		response = append(response, catalogItemResponse{
-			ID:                       item.ID,
-			Name:                     item.Name,
-			Category:                 item.Category,
-			Description:              item.Description,
-			Icon:                     item.Icon,
+			ID:          item.ID,
+			Name:        item.Name,
+			Category:    item.Category,
+			Description: item.Description,
+			Icon:        item.Icon,
+			Runtime: catalogRuntimeSpec{
+				Type:    item.RuntimeType,
+				Version: item.RuntimeVersion,
+			},
+			Source: catalogSourceSpec{
+				Type:    item.SourceType,
+				Package: item.SourcePackage,
+				Version: item.SourceVersion,
+				URL:     item.SourceURL,
+			},
+			Install: catalogInstallSpec{
+				Strategy: item.InstallStrategy,
+				Metadata: json.RawMessage(normalizedStringJSON(item.InstallMetadataJSON, "{}")),
+			},
+			Launch: catalogLaunchSpec{
+				Command:    item.LaunchCommand,
+				Args:       decodeJSONArray(item.LaunchArgsJSON),
+				WorkingDir: item.LaunchWorkingDir,
+				EntryPoint: item.LaunchEntryPoint,
+			},
+			SharedInstall:            item.SharedInstall,
+			SupportsMultiProject:     item.SupportsMultiProject,
 			Transport:                item.Transport,
 			MCPURL:                   item.MCPURL,
 			Command:                  item.Command,
@@ -636,6 +1009,34 @@ func mapInstalledIntegrations(items []models.InstalledIntegration) []installedIn
 	return response
 }
 
+func mapInstalledPackages(items []models.InstalledPackage) []installedPackageResponse {
+	response := make([]installedPackageResponse, 0, len(items))
+	for _, item := range items {
+		response = append(response, mapInstalledPackage(item, len(item.ProjectInstances)))
+	}
+	return response
+}
+
+func mapInstalledPackage(item models.InstalledPackage, projectUseCount int) installedPackageResponse {
+	return installedPackageResponse{
+		ID:              item.ID,
+		CatalogItemID:   item.CatalogItemID,
+		Name:            item.Name,
+		Version:         item.Version,
+		RuntimeType:     item.RuntimeType,
+		SourceType:      item.SourceType,
+		InstallStrategy: item.InstallStrategy,
+		InstallDir:      item.InstallDir,
+		EntryPoint:      item.EntryPoint,
+		Status:          item.Status,
+		LastError:       item.LastError,
+		InstalledAt:     formatServerHealthCheckedAt(item.InstalledAt),
+		ProjectUseCount: projectUseCount,
+		CreatedAt:       item.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedAt:       item.UpdatedAt.UTC().Format(time.RFC3339),
+	}
+}
+
 func catalogSettingsFromModel(settings *models.ProjectCatalogSettings) catalogSettingsResponse {
 	if settings == nil {
 		return catalogSettingsResponse{}
@@ -661,6 +1062,20 @@ func parseOptionalTime(raw string) *time.Time {
 	}
 	value := parsed.UTC()
 	return &value
+}
+
+func parseStringIDTail(rawPath, prefix string) (string, string, bool) {
+	trimmed := strings.Trim(strings.TrimPrefix(rawPath, prefix), "/")
+	parts := strings.Split(trimmed, "/")
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	id := strings.TrimSpace(parts[0])
+	tail := strings.TrimSpace(parts[1])
+	if id == "" || tail == "" {
+		return "", "", false
+	}
+	return id, tail, true
 }
 
 func normalizedCatalogAuthType(raw string) string {

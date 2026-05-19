@@ -3,204 +3,320 @@
   "generated_at": "2026-05-19T12:00:00Z",
   "items": [
     {
-      "id": "figma",
-      "name": "Figma MCP",
-      "category": "design",
-      "description": "Connect the official Figma remote MCP server using the server's own MCP authorization flow.",
-      "transport": "http_stream",
-      "mcp_url": "https://mcp.figma.com/mcp",
-      "auth_type": "mcp_discovery",
-      "config_schema": {
-        "type": "object",
-        "properties": {}
-      },
-      "capabilities": [
-        "mcp-auth",
-        "design",
-        "remote"
-      ],
-      "tags": [
-        "figma",
-        "mcp-auth"
-      ],
-      "website": "https://www.figma.com/",
-      "docs_url": "https://www.figma.com/developers/api",
-      "enabled": true,
-      "version": "1.0.0"
-    },
-//    {
-//      "id": "gmail",
-//      "name": "Gmail MCP",
-//      "category": "communication",
-//      "description": "Gmail integration using Google OAuth.",
-//      "transport": "http_stream",
-//      "mcp_url": "https://YOUR-MCP-HOST.example/mcp/gmail",
-//      "auth_type": "oauth2",
-//      "auth_provider": "google",
-//      "oauth_authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
-//      "oauth_token_url": "https://oauth2.googleapis.com/token",
-//      "oauth_use_pkce": true,
-//      "oauth_client_auth_method": "none",
-//      "oauth_scope_delimiter": " ",
-//      "oauth_authorize_params": {
-//        "access_type": "offline",
-//        "prompt": "consent"
-//      },
-//      "oauth_token_params": {},
-//      "default_oauth_scopes": [
-//        "https://www.googleapis.com/auth/gmail.readonly"
-//      ],
-//      "config_schema": {
-//        "type": "object",
-//        "properties": {
-//          "oauth_client_id": {
-//            "type": "string",
-//            "title": "Google OAuth Client ID"
-//          },
-//          "oauth_scopes": {
-//            "type": "array",
-//            "title": "Scopes",
-//            "items": {
-//              "type": "string"
-//            },
-//            "default": [
-//              "https://www.googleapis.com/auth/gmail.readonly"
-//            ]
-//          }
-//        },
-//        "required": [
-//          "oauth_client_id"
-//        ]
-//      },
-//      "capabilities": [
-//        "oauth",
-//        "gmail",
-//        "remote"
-//      ],
-//      "tags": [
-//        "google",
-//        "gmail",
-//        "oauth"
-//      ],
-//      "website": "https://workspace.google.com/products/gmail/",
-//      "docs_url": "https://developers.google.com/gmail/api",
-//      "enabled": true,
-//      "version": "1.0.0"
-//    },
-    {
-      "id": "google-calendar",
-      "name": "Google Calendar MCP",
-      "category": "productivity",
-      "description": "Google Calendar integration using Google OAuth.",
-      "transport": "http_stream",
-      "mcp_url": "https://calendarmcp.googleapis.com/mcp/v1",
-      "auth_type": "oauth2",
-      "auth_provider": "google",
-      "oauth_authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
-      "oauth_token_url": "https://oauth2.googleapis.com/token",
-      "oauth_use_pkce": true,
-      "oauth_client_auth_method": "none",
-      "oauth_scope_delimiter": " ",
-      "oauth_authorize_params": {
-        "access_type": "offline",
-        "prompt": "consent"
-      },
-      "oauth_token_params": {},
-      "default_oauth_scopes": [
-        "https://www.googleapis.com/auth/calendar.readonly"
-      ],
-      "config_schema": {
-        "type": "object",
-        "properties": {
-          "oauth_client_id": {
-            "type": "string",
-            "title": "Google OAuth Client ID"
-          },
-          "oauth_scopes": {
-            "type": "array",
-            "title": "Scopes",
-            "items": {
-              "type": "string"
-            },
-            "default": [
-              "https://www.googleapis.com/auth/calendar.readonly"
-            ]
-          }
-        },
-        "required": [
-          "oauth_client_id"
-        ]
-      },
-      "capabilities": [
-        "oauth",
-        "calendar",
-        "remote"
-      ],
-      "tags": [
-        "google",
-        "calendar",
-        "oauth"
-      ],
-      "website": "https://workspace.google.com/products/calendar/",
-      "docs_url": "https://developers.google.com/workspace/calendar/api",
-      "enabled": true,
-      "version": "1.0.0"
-    },
-    {
-      "id": "github",
-      "name": "GitHub MCP",
+      "id": "filesystem",
+      "name": "Filesystem MCP",
       "category": "developer-tools",
-      "description": "GitHub integration using OAuth.",
-      "transport": "http_stream",
-      "mcp_url": "https://api.githubcopilot.com/mcp/",
-      "auth_type": "oauth2",
-      "auth_provider": "github",
-      "oauth_authorize_url": "https://github.com/login/oauth/authorize",
-      "oauth_token_url": "https://github.com/login/oauth/access_token",
-      "oauth_use_pkce": true,
-      "oauth_client_auth_method": "none",
-      "oauth_scope_delimiter": " ",
-      "oauth_authorize_params": {},
-      "oauth_token_params": {},
-      "default_oauth_scopes": [
-        "read:user",
-        "repo"
+      "description": "Official filesystem MCP server for working with local directories.",
+      "runtime": {
+        "type": "node",
+        "version": ">=20"
+      },
+      "source": {
+        "type": "npm",
+        "package": "@modelcontextprotocol/server-filesystem",
+        "version": "latest",
+        "url": ""
+      },
+      "install": {
+        "strategy": "npm",
+        "metadata": {
+          "registry": "https://registry.npmjs.org"
+        }
+      },
+      "launch": {
+        "command": "node",
+        "args": [
+          "dist/index.js"
+        ],
+        "working_dir": "{install_dir}",
+        "entry_point": "dist/index.js"
+      },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "dist/index.js"
       ],
+      "env": [],
+      "env_passthrough": [],
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
       "config_schema": {
         "type": "object",
         "properties": {
-          "oauth_client_id": {
+          "root_path": {
             "type": "string",
-            "title": "GitHub OAuth Client ID"
-          },
-          "oauth_scopes": {
-            "type": "array",
-            "title": "Scopes",
-            "items": {
-              "type": "string"
-            },
-            "default": [
-              "read:user",
-              "repo"
-            ]
+            "title": "Root path",
+            "default": "C:/workspace"
           }
         },
         "required": [
-          "oauth_client_id"
+          "root_path"
         ]
       },
       "capabilities": [
-        "oauth",
-        "github",
-        "remote"
+        "filesystem",
+        "local",
+        "stdio"
       ],
       "tags": [
-        "github",
-        "oauth",
-        "git"
+        "official",
+        "filesystem",
+        "node"
       ],
-      "website": "https://github.com/",
-      "docs_url": "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps",
+      "website": "https://modelcontextprotocol.io",
+      "docs_url": "https://modelcontextprotocol.io",
+      "enabled": true,
+      "version": "latest"
+    },
+    {
+      "id": "sqlite",
+      "name": "SQLite MCP",
+      "category": "databases",
+      "description": "Package-backed SQLite MCP server for local database inspection.",
+      "runtime": {
+        "type": "python",
+        "version": ">=3.11"
+      },
+      "source": {
+        "type": "python",
+        "package": "mcp-server-sqlite",
+        "version": "latest",
+        "url": ""
+      },
+      "install": {
+        "strategy": "python_venv",
+        "metadata": {}
+      },
+      "launch": {
+        "command": "python",
+        "args": [
+          "-m",
+          "mcp_server_sqlite"
+        ],
+        "working_dir": "{install_dir}",
+        "entry_point": "mcp_server_sqlite"
+      },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "python",
+      "args": [
+        "-m",
+        "mcp_server_sqlite"
+      ],
+      "env": [],
+      "env_passthrough": [],
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "database_path": {
+            "type": "string",
+            "title": "Database path",
+            "default": "C:/data/app.db"
+          }
+        },
+        "required": [
+          "database_path"
+        ]
+      },
+      "capabilities": [
+        "sqlite",
+        "database",
+        "local"
+      ],
+      "tags": [
+        "sqlite",
+        "python",
+        "local"
+      ],
+      "website": "https://sqlite.org",
+      "docs_url": "https://sqlite.org/docs.html",
+      "enabled": true,
+      "version": "latest"
+    },
+    {
+      "id": "mysql",
+      "name": "MySQL MCP",
+      "category": "databases",
+      "description": "Package-backed MySQL MCP server for reusable project connections.",
+      "runtime": {
+        "type": "node",
+        "version": ">=20"
+      },
+      "source": {
+        "type": "npm",
+        "package": "@example/mysql-mcp",
+        "version": "1.0.0",
+        "url": ""
+      },
+      "install": {
+        "strategy": "npm",
+        "metadata": {
+          "registry": "https://registry.npmjs.org"
+        }
+      },
+      "launch": {
+        "command": "node",
+        "args": [
+          "dist/index.js"
+        ],
+        "working_dir": "{install_dir}",
+        "entry_point": "dist/index.js"
+      },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "dist/index.js"
+      ],
+      "env": [],
+      "env_passthrough": [],
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "mysql_host": {
+            "type": "string",
+            "title": "Host",
+            "default": "127.0.0.1"
+          },
+          "mysql_port": {
+            "type": "string",
+            "title": "Port",
+            "default": "3306"
+          },
+          "mysql_user": {
+            "type": "string",
+            "title": "User",
+            "default": "root"
+          },
+          "mysql_password": {
+            "type": "string",
+            "title": "Password"
+          },
+          "mysql_database": {
+            "type": "string",
+            "title": "Database"
+          }
+        },
+        "required": [
+          "mysql_host",
+          "mysql_user"
+        ]
+      },
+      "capabilities": [
+        "mysql",
+        "database",
+        "local"
+      ],
+      "tags": [
+        "mysql",
+        "node",
+        "shared-install"
+      ],
+      "website": "https://www.mysql.com",
+      "docs_url": "https://dev.mysql.com/doc/",
+      "enabled": true,
+      "version": "1.0.0"
+    },
+    {
+      "id": "postgresql",
+      "name": "PostgreSQL MCP",
+      "category": "databases",
+      "description": "Package-backed PostgreSQL MCP server for local and shared project setups.",
+      "runtime": {
+        "type": "node",
+        "version": ">=20"
+      },
+      "source": {
+        "type": "npm",
+        "package": "@example/postgres-mcp",
+        "version": "1.0.0",
+        "url": ""
+      },
+      "install": {
+        "strategy": "npm",
+        "metadata": {
+          "registry": "https://registry.npmjs.org"
+        }
+      },
+      "launch": {
+        "command": "node",
+        "args": [
+          "dist/index.js"
+        ],
+        "working_dir": "{install_dir}",
+        "entry_point": "dist/index.js"
+      },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "dist/index.js"
+      ],
+      "env": [],
+      "env_passthrough": [],
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "postgres_host": {
+            "type": "string",
+            "title": "Host",
+            "default": "127.0.0.1"
+          },
+          "postgres_port": {
+            "type": "string",
+            "title": "Port",
+            "default": "5432"
+          },
+          "postgres_user": {
+            "type": "string",
+            "title": "User",
+            "default": "postgres"
+          },
+          "postgres_password": {
+            "type": "string",
+            "title": "Password"
+          },
+          "postgres_database": {
+            "type": "string",
+            "title": "Database"
+          }
+        },
+        "required": [
+          "postgres_host",
+          "postgres_user"
+        ]
+      },
+      "capabilities": [
+        "postgresql",
+        "database",
+        "local"
+      ],
+      "tags": [
+        "postgresql",
+        "node",
+        "shared-install"
+      ],
+      "website": "https://www.postgresql.org",
+      "docs_url": "https://www.postgresql.org/docs/",
       "enabled": true,
       "version": "1.0.0"
     }

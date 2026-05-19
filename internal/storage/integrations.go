@@ -52,6 +52,20 @@ func (s *Store) UpsertCatalogItems(ctx context.Context, items []models.Integrati
 					"category",
 					"description",
 					"icon",
+					"runtime_type",
+					"runtime_version",
+					"source_type",
+					"source_package",
+					"source_version",
+					"source_url",
+					"install_strategy",
+					"install_metadata_json",
+					"launch_command",
+					"launch_args_json",
+					"launch_working_dir",
+					"launch_entry_point",
+					"shared_install",
+					"supports_multi_project",
 					"transport",
 					"mcp_url",
 					"command",
@@ -150,7 +164,23 @@ func (s *Store) InstallCatalogIntegration(
 	projectID uint,
 	server *models.MCPServer,
 	integration *models.InstalledIntegration,
-	makePrimary bool,
+) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(server).Error; err != nil {
+			return err
+		}
+		integration.ProjectID = projectID
+		integration.ServerID = &server.ID
+		return tx.Create(integration).Error
+	})
+}
+
+func (s *Store) AddInstalledPackageToProject(
+	ctx context.Context,
+	projectID uint,
+	server *models.MCPServer,
+	integration *models.InstalledIntegration,
+	instance *models.ProjectPackageInstance,
 ) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(server).Error; err != nil {
@@ -162,15 +192,12 @@ func (s *Store) InstallCatalogIntegration(
 			return err
 		}
 
-		if makePrimary {
-			return tx.Model(&models.Project{}).
-				Where("id = ?", projectID).
-				Update("primary_server_id", server.ID).Error
+		instance.ProjectID = projectID
+		instance.ServerID = &server.ID
+		if err := tx.Create(instance).Error; err != nil {
+			return err
 		}
-
-		return tx.Model(&models.Project{}).
-			Where("id = ? AND primary_server_id IS NULL", projectID).
-			Update("primary_server_id", server.ID).Error
+		return nil
 	})
 }
 

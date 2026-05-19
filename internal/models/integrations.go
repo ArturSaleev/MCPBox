@@ -4,6 +4,14 @@ import "time"
 
 const (
 	IntegrationAuthTypeBearer = "bearer"
+	PackageStatusNotInstalled = "not_installed"
+	PackageStatusInstalling   = "installing"
+	PackageStatusInstalled    = "installed"
+	PackageStatusFailed       = "failed"
+	InstanceStatusNotAdded    = "not_added"
+	InstanceStatusConfigReady = "config_ready"
+	InstanceStatusReady       = "ready"
+	InstanceStatusError       = "error"
 )
 
 type ProjectCatalogSettings struct {
@@ -25,6 +33,20 @@ type IntegrationCatalogItem struct {
 	Category                 string     `gorm:"size:128" json:"category"`
 	Description              string     `gorm:"type:text" json:"description"`
 	Icon                     string     `gorm:"size:2048" json:"icon"`
+	RuntimeType              string     `gorm:"column:runtime_type;size:64" json:"runtime_type"`
+	RuntimeVersion           string     `gorm:"column:runtime_version;size:64" json:"runtime_version"`
+	SourceType               string     `gorm:"column:source_type;size:64" json:"source_type"`
+	SourcePackage            string     `gorm:"column:source_package;size:255" json:"source_package"`
+	SourceVersion            string     `gorm:"column:source_version;size:64" json:"source_version"`
+	SourceURL                string     `gorm:"column:source_url;size:2048" json:"source_url"`
+	InstallStrategy          string     `gorm:"column:install_strategy;size:64" json:"install_strategy"`
+	InstallMetadataJSON      string     `gorm:"column:install_metadata_json;type:text" json:"install_metadata"`
+	LaunchCommand            string     `gorm:"column:launch_command;type:text" json:"launch_command"`
+	LaunchArgsJSON           string     `gorm:"column:launch_args_json;type:text" json:"launch_args"`
+	LaunchWorkingDir         string     `gorm:"column:launch_working_dir;size:1024" json:"launch_working_dir"`
+	LaunchEntryPoint         string     `gorm:"column:launch_entry_point;size:2048" json:"launch_entry_point"`
+	SharedInstall            bool       `gorm:"column:shared_install;not null;default:true" json:"shared_install"`
+	SupportsMultiProject     bool       `gorm:"column:supports_multi_project;not null;default:true" json:"supports_multi_project"`
 	Transport                string     `gorm:"size:32;not null" json:"transport"`
 	MCPURL                   string     `gorm:"column:mcp_url;size:2048" json:"mcp_url"`
 	Command                  string     `gorm:"column:command;type:text" json:"command"`
@@ -78,4 +100,36 @@ type InstalledIntegration struct {
 	LastSyncedAt     *time.Time `gorm:"column:last_synced_at" json:"last_synced_at,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
+}
+
+type InstalledPackage struct {
+	ID               uint                     `gorm:"primaryKey" json:"id"`
+	CatalogItemID    string                   `gorm:"column:catalog_item_id;size:255;index;not null" json:"catalog_item_id"`
+	Name             string                   `gorm:"size:255;not null" json:"name"`
+	Version          string                   `gorm:"size:64;not null" json:"version"`
+	RuntimeType      string                   `gorm:"column:runtime_type;size:64;not null" json:"runtime_type"`
+	SourceType       string                   `gorm:"column:source_type;size:64;not null" json:"source_type"`
+	InstallStrategy  string                   `gorm:"column:install_strategy;size:64;not null" json:"install_strategy"`
+	InstallDir       string                   `gorm:"column:install_dir;size:2048;not null" json:"install_dir"`
+	EntryPoint       string                   `gorm:"column:entry_point;size:2048" json:"entry_point"`
+	Status           string                   `gorm:"size:32;not null;default:'not_installed'" json:"status"`
+	LastError        string                   `gorm:"column:last_error;type:text" json:"last_error"`
+	InstalledAt      *time.Time               `gorm:"column:installed_at" json:"installed_at,omitempty"`
+	ProjectInstances []ProjectPackageInstance `json:"project_instances,omitempty"`
+	CreatedAt        time.Time                `json:"created_at"`
+	UpdatedAt        time.Time                `json:"updated_at"`
+}
+
+type ProjectPackageInstance struct {
+	ID                 uint             `gorm:"primaryKey" json:"id"`
+	ProjectID          uint             `gorm:"column:project_id;index;not null" json:"project_id"`
+	InstalledPackageID uint             `gorm:"column:installed_package_id;index;not null" json:"installed_package_id"`
+	ServerID           *uint            `gorm:"column:server_id;index" json:"server_id,omitempty"`
+	CatalogItemID      string           `gorm:"column:catalog_item_id;size:255;index;not null" json:"catalog_item_id"`
+	Name               string           `gorm:"size:255;not null" json:"name"`
+	Status             string           `gorm:"size:32;not null;default:'not_added'" json:"status"`
+	ConfigJSON         string           `gorm:"column:config_json;type:text" json:"config_json"`
+	InstalledPackage   InstalledPackage `gorm:"foreignKey:InstalledPackageID" json:"installed_package,omitempty"`
+	CreatedAt          time.Time        `json:"created_at"`
+	UpdatedAt          time.Time        `json:"updated_at"`
 }
