@@ -1,38 +1,38 @@
 # MCPBox Developer Guide
 
-English documentation. Russian version: [DEVELOPER-ru.md](./DEVELOPER-ru.md)
+Russian version: [DEVELOPER-ru.md](./DEVELOPER-ru.md)
 
 ## Overview
 
 MCPBox is a Go-based control plane for MCP servers.
 
-It groups MCP servers by project, stores configuration in SQLite, launches local `STDIO` MCP servers, proxies remote `HTTP streaming` MCP servers, provides an embedded React admin UI, and exposes one MCP URL per project.
+It groups MCP servers by project, stores configuration in SQLite, launches local `stdio` MCP processes, proxies remote `HTTP streaming` MCP servers, serves an embedded React admin UI, and exposes one MCP URL per project.
 
-At the current stage MCPBox is:
-- a control plane for MCP servers;
-- a project-based organizer for local and remote MCP endpoints;
-- a single MCP endpoint per project;
-- an operator UI for project lifecycle, server lifecycle, logging, and inspection.
+Today MCPBox is:
+- a control plane for MCP servers
+- a project-based organizer for local and remote MCP backends
+- an aggregation endpoint for enabled servers inside a project
+- an operator UI for project lifecycle, server lifecycle, inspection, health checks, and logging
 
-At the current stage MCPBox is not:
-- a multi-user platform with authentication and roles;
-- a full observability stack;
-- an aggregated multi-server MCP router that merges multiple backends behind one intelligent session.
+Today MCPBox is not:
+- a multi-user platform with auth and roles
+- a full observability platform
+- a distributed MCP orchestration system across many hosts
 
 ## Core Model
 
-- `Project`: a logical workspace group of MCP servers for one client, team, or environment.
-- `MCP Server`: either a local `STDIO` server launched by MCPBox or a remote `HTTP streaming` server.
-- `Primary Server`: the server inside a project that backs the project's MCP endpoint.
-- `Catalog Item`: an integration definition synchronized from an external JSON manifest and stored in SQLite.
-- `Installed Integration`: a project-level record that links a catalog item to a concrete `MCPServer`.
+- `Project`: a logical workspace grouping MCP servers for one client, team, or environment
+- `MCP Server`: either a local `stdio` server launched by MCPBox or a remote `HTTP streaming` server
+- `Catalog Item`: an integration definition synchronized from an external JSON manifest
+- `Installed Integration`: a project-level record that links a catalog item to a concrete `MCPServer`
 
 Important behavior:
-- each project has exactly one MCP URL;
-- that MCP URL always uses the explicitly selected primary server;
-- if no primary server is selected, the MCP endpoint is not ready;
-- if a project is paused, MCP connections are blocked;
-- if a server is disabled, it cannot be started or used as the primary server.
+- each project has exactly one MCP URL
+- the project URL is `/mcp/{project_token}`
+- the project endpoint aggregates all enabled servers in that project
+- if a project is paused, new MCP connections are blocked
+- disabled servers are excluded from the project endpoint
+- local `stdio` servers can be auto-started at application boot
 
 ## Current Features
 
@@ -40,34 +40,37 @@ Important behavior:
 
 - Go HTTP API
 - SQLite storage through GORM
-- local `STDIO` MCP process orchestration
-- remote `HTTP streaming` MCP proxy support
+- orchestration for local `stdio` MCP processes
+- proxy support for remote `HTTP streaming` MCP servers
 - project-level `/mcp/{project_token}` endpoint
 - synchronous JSON-RPC request/response bridge for HTTP MCP clients
 - legacy SSE compatibility mode for older MCP clients
-- explicit primary server selection
+- aggregated `tools`, `resources`, and `prompts` listing across enabled project servers
+- forwarding of tool, prompt, and resource calls to the correct backing server
 - audit logging for control actions and MCP traffic
 - project pause/resume
 - server enable/disable
-- `STDIO` server inspection
-- server health verification on create, update, start, and manual check
+- local server inspection
+- health verification on create, update, start, and manual check
 - catalog sync from external JSON manifests
-- installed integrations persisted alongside regular MCP servers
+- installed integrations stored alongside regular MCP servers
+- embedded Ollama launcher powered by `github.com/mark3labs/mcphost/sdk`
 
 ### Frontend
 
 - embedded React admin UI
 - project list and project overview
 - modal create-project flow
-- modal add-server flow for `STDIO` and `HTTP streaming`
+- modal add-server flow for `stdio` and `HTTP streaming`
 - Market tab for catalog sync and integration install
 - project MCP URL display
 - start/stop controls for local servers
-- primary server selection
-- OAuth connect/disconnect flow remains available on server cards, but is no longer the main add-remote path
+- health-check status and manual `Check` action
 - audit log console with project filtering
 - auto-refreshing log view
-- `Info` modal for `STDIO` servers
+- `Info` modal for `stdio` servers
+- local Ollama status detection and model picker
+- one-click `Launch Ollama` action for eligible projects
 - English and Russian localization
 
 ## Transport Model
@@ -87,109 +90,121 @@ POST /connect/{project_token}
 ```
 
 Current transport behavior:
-- main mode: `POST /mcp/{project_token}` without `sessionId` works as synchronous HTTP JSON-RPC;
-- legacy mode: `GET /mcp/{project_token}` opens an SSE stream and returns an `endpoint` event;
-- legacy follow-up requests: `POST /mcp/{project_token}?sessionId=...`;
-- remote `HTTP streaming` primary servers are proxied to upstream;
-- paused projects and disabled primary servers are blocked before transport is opened.
+- `POST /mcp/{project_token}` without `sessionId` works as synchronous HTTP JSON-RPC
+- `GET /mcp/{project_token}` opens the legacy SSE flow and returns an `endpoint` event
+- follow-up SSE requests use `POST /mcp/{project_token}?sessionId=...`
+- paused projects are blocked before transport is opened
+- only enabled servers participate in the project endpoint
+- MCPBox answers top-level capability discovery itself, then fans out list and call operations to project servers
 
 Why this matters:
-- LM Studio expects synchronous HTTP request/response for calls like `initialize` and `tools/list`;
-- older SSE-based MCP clients still need the legacy session flow;
-- MCPBox supports both without requiring separate project URLs.
+- LM Studio expects synchronous HTTP request/response for calls such as `initialize` and `tools/list`
+- older SSE-based clients still need the legacy session model
+- MCPBox supports both without requiring separate project URLs
 
-## `STDIO` Server Inspection
+## Aggregation Behavior
 
-For local `STDIO` servers MCPBox can inspect live MCP capabilities.
+`/mcp/{project_token}` is an aggregation endpoint, not a single-primary-server route.
 
-The `Info` action in the UI is available only for `STDIO` servers. It can show:
-- server metadata from `initialize`;
-- negotiated MCP capabilities;
-- exposed `tools`;
-- exposed `resources`;
-- exposed `prompts`;
-- nearby `README.md` if MCPBox finds one next to the configured local path.
+Current behavior:
+- `initialize` is answered by MCPBox itself
+- `tools/list`, `resources/list`, and `prompts/list` combine results from enabled project servers
+- MCPBox adds stable aliases when needed so duplicate names from different servers can coexist
+- tool calls, prompt fetches, and resource reads are routed back to the originating server
+
+This is why one project can present several MCP backends through one URL while keeping client configuration stable.
+
+## Local `stdio` Inspection
+
+For local `stdio` servers MCPBox can inspect live MCP capabilities.
+
+The `Info` action in the UI is available only for `stdio` servers. It can show:
+- server metadata from `initialize`
+- negotiated MCP capabilities
+- exposed `tools`
+- exposed `resources`
+- exposed `prompts`
+- nearby `README.md` if MCPBox finds one next to the configured local path
 
 Remote `HTTP streaming` servers intentionally do not expose this UI action.
 
 ## Server Health Checks
 
-MCPBox now verifies MCP server operability before the user discovers problems through an AI client.
+MCPBox verifies MCP server operability before users discover problems through an AI client.
 
 Current behavior:
-- when a server is created, MCPBox runs a health check and stores the result;
-- when a server is edited, MCPBox re-checks the updated configuration;
-- when a local `STDIO` server is started manually, start is treated as successful only if MCP health verification passes;
-- the UI exposes a manual `Check` action for both local and remote servers.
+- when a server is created, MCPBox runs a health check and stores the result
+- when a server is edited, MCPBox re-checks the updated configuration
+- when a local `stdio` server is started manually, start is treated as successful only if MCP health verification passes
+- the UI exposes a manual `Check` action for both local and remote servers
 
 Current verification strategy:
-- local `STDIO` servers are checked through a real MCP handshake: `initialize`, `notifications/initialized`, and capability discovery calls such as `tools/list`, `resources/list`, and `prompts/list` when supported;
-- remote `HTTP streaming` servers are checked through an HTTP `initialize` request to the configured MCP URL;
-- the last health state, error text, and timestamp are persisted in SQLite and shown in the admin UI.
+- local `stdio` servers are checked through a real MCP handshake: `initialize`, `notifications/initialized`, and capability discovery calls such as `tools/list`, `resources/list`, and `prompts/list` when supported
+- remote `HTTP streaming` servers are checked through an HTTP `initialize` request to the configured MCP URL
+- the last health state, error text, and timestamp are persisted in SQLite and shown in the admin UI
 
-## OAuth for Remote MCP Servers
+## Catalog And Integrations
 
-OAuth is still supported, but it is no longer the primary UX for adding remote integrations.
+MCPBox can synchronize an external catalog manifest into SQLite and let users install those entries into projects.
 
-Current migration direction:
-- everyday remote integrations should come from `Market / Catalog`;
-- the external manifest is synced into SQLite and shown in the UI;
-- installing a catalog item creates an `Installed Integration` and a linked `MCPServer`;
-- the existing custom remote server flow remains available for manual endpoints;
-- `/mcp/{project_token}` is unchanged because installed integrations still resolve to regular project servers.
+Relevant API routes:
 
-MCPBox now includes a built-in OAuth 2 flow for remote `HTTP streaming` MCP servers.
+```http
+GET /api/catalog/items
+GET /api/catalog/items?enabled_only=1
+POST /api/catalog/sync
+POST /api/projects/{id}/integrations
+```
+
+Installed catalog items create regular project-linked `MCPServer` records, so the project endpoint remains `/mcp/{project_token}` with no special transport case.
+
+## Ollama Integration
+
+MCPBox includes an embedded local Ollama launcher for one-click MCP testing.
 
 Current behavior:
-- OAuth is configured per remote MCP server;
-- MCPBox opens the system browser for user login and consent;
-- the OAuth callback is handled by MCPBox itself;
-- access tokens and refresh tokens are stored locally in SQLite;
-- proxied upstream MCP requests automatically receive the bearer token;
-- access tokens are refreshed on demand when the server has a refresh token and the token is near expiry.
+- the UI checks `GET /api/ollama/status`
+- the button is shown only when `ollama` is installed
+- the status response includes discovered local models and a default model
+- project launch uses `POST /api/projects/{id}/launch-ollama`
+- MCPBox writes a temporary `mcphost` config pointing back to the current project endpoint
+- MCPBox opens a new terminal session and runs its own `ollama-chat` subcommand
+- the `ollama-chat` subcommand uses `github.com/mark3labs/mcphost/sdk`, so no separate `mcphost` binary is required
 
-Why browser-based and not WebView:
-- Figma explicitly requires a real browser for OAuth and does not support embedded WebView flows;
-- browser-based auth also works better with MFA, SSO, passkeys, and enterprise login policies.
+Practical requirement:
+- `ollama` must still be installed locally, because MCPBox launches a local Ollama-backed session rather than bundling the model runtime itself
 
-Important notes:
-- MCPBox is acting as the OAuth client for the remote MCP provider;
-- for providers like Figma, you still need to create and configure your own OAuth app;
-- the callback URL must point back to MCPBox, for example `http://127.0.0.1:38180/oauth/callback`;
-- changing OAuth configuration on a server clears previously stored tokens for safety.
+## Startup Behavior
 
-### Figma Example
+At application startup MCPBox loads all projects from storage and decides which local servers should be started automatically.
 
-Typical Figma remote MCP configuration inside MCPBox:
-- MCP URL: `https://mcp.figma.com/mcp`
-- Auth type: `oauth2`
-- Provider preset: `figma`
-- Redirect URL in your Figma OAuth app: `http://127.0.0.1:38180/oauth/callback`
+Current rule:
+- if a project is not paused and has at least one enabled `stdio` server with `auto_start=true`, MCPBox starts all enabled `stdio` servers in that project
 
-After the server is saved:
-1. Click `Connect OAuth` in the server card.
-2. Complete the login in your browser.
-3. Return to MCPBox after the popup confirms the connection.
+This is intentionally project-oriented behavior, not first-server-only behavior.
 
-## Logging and Control
+## Logging And Control
 
 MCPBox includes an audit trail intended for operational control.
 
 Currently it logs events such as:
-- project creation;
-- server creation;
-- primary server changes;
-- project pause/resume;
-- server start/stop;
-- server enable/disable;
-- MCP connection attempts;
-- forwarded JSON-RPC payloads.
+- project creation
+- server creation
+- project pause/resume
+- server start/stop
+- server enable/disable
+- MCP connection attempts
+- forwarded JSON-RPC payloads
+- health-check activity
+- Ollama launch actions
 
-SQL query logging from GORM is disabled by default so normal MCP traffic does not flood the console.
+Operational note:
+- common informational stderr lines from Filesystem-style MCP servers are filtered so they do not appear as misleading access errors
+- SQL query logging from GORM is disabled by default so ordinary MCP traffic does not flood the console
 
 ## Requirements
 
-- Go `1.25+`
+- Go `1.26+`
 - Node.js and npm for building the embedded UI
 - Windows, Linux, or macOS
 
@@ -198,11 +213,13 @@ No external database is required. MCPBox creates a local SQLite file by default.
 ## Project Structure
 
 ```text
-main.go                      Application entry point
+main.go                      application entry point and startup orchestration
 internal/models              GORM models
 internal/storage             SQLite storage and queries
 internal/orchestrator        MCP process lifecycle, inspection, stdio bridge
-internal/httpapi             HTTP API, MCP endpoint, embedded UI
+internal/httpapi             HTTP API, MCP endpoint, embedded UI, Ollama launch API
+internal/ollamahost          embedded Ollama chat host built on mcphost/sdk
+internal/installer           local package installation service
 html                         React + Vite source for the embedded admin UI
 ```
 
@@ -236,13 +253,13 @@ Run from source:
 go run .
 ```
 
-On Windows:
+Run the embedded local Ollama host directly:
 
-```powershell
-.\MCPBox.exe
+```bash
+go run . ollama-chat --config /path/to/project.yml --model llama3.2
 ```
 
-When MCPBox starts successfully, it opens the local UI in the browser automatically and prints:
+When MCPBox starts successfully, it opens the local UI automatically and prints:
 - `http://127.0.0.1:<port>/`
 - local IPv4 URLs such as `http://192.168.x.x:<port>/`
 
@@ -258,353 +275,3 @@ Examples:
 ```bash
 go run . -port 39000
 ```
-
-```powershell
-$env:MCPBOX_PORT=39000
-.\MCPBox.exe
-```
-
-## Local Data
-
-By default MCPBox creates:
-
-```text
-mcpbox.db
-```
-
-This file is local runtime data and should not be committed.
-
-## Client Integration
-
-Typical flow:
-
-1. Start MCPBox.
-2. Create a project in the UI.
-3. Add at least one MCP server to the project.
-4. Select a primary server.
-5. Copy the project's MCP URL from the UI.
-
-Example MCP URL:
-
-```text
-http://127.0.0.1:38180/mcp/<project_token>
-```
-
-Important:
-- the project must have a primary server before the endpoint is ready;
-- if the project is paused, client access is blocked;
-- if the primary server is disabled, the MCP path will fail;
-- `/mcp/{project_token}` is the main endpoint;
-- `/connect/{project_token}` is a backward-compatible alias only.
-
-### Codex
-
-CLI example:
-
-```bash
-codex mcp add mcpbox --url http://127.0.0.1:38180/mcp/<project_token>
-```
-
-Direct config example:
-
-```toml
-[mcp_servers.mcpbox]
-url = "http://127.0.0.1:38180/mcp/<project_token>"
-```
-
-### Claude Code
-
-CLI example:
-
-```bash
-claude mcp add --transport sse mcpbox http://127.0.0.1:38180/mcp/<project_token>
-```
-
-Project config example:
-
-```json
-{
-  "mcpServers": {
-    "mcpbox": {
-      "type": "sse",
-      "url": "http://127.0.0.1:38180/mcp/<project_token>"
-    }
-  }
-}
-```
-
-### LM Studio
-
-LM Studio works with MCPBox through the main HTTP MCP URL.
-
-Example config:
-
-```json
-{
-  "mcpServers": {
-    "mcpbox": {
-      "url": "http://127.0.0.1:38180/mcp/<project_token>"
-    }
-  }
-}
-```
-
-Important notes for LM Studio:
-- no `Authorization` header is required unless MCPBox is placed behind a separate auth layer;
-- `POST /mcp/{project_token}` returns the actual JSON-RPC result synchronously;
-- this is what allows `initialize`, `tools/list`, and similar calls to work correctly.
-
-### Generic MCP Clients
-
-For clients that accept JSON config, the typical pattern is:
-
-```json
-{
-  "mcpServers": {
-    "mcpbox": {
-      "url": "http://127.0.0.1:38180/mcp/<project_token>"
-    }
-  }
-}
-```
-
-## HTTP API
-
-### Health
-
-```http
-GET /healthz
-```
-
-### Projects
-
-Create project:
-
-```http
-POST /api/projects
-Content-Type: application/json
-```
-
-```json
-{
-  "name": "My Project",
-  "description": "My MCP environment"
-}
-```
-
-List projects:
-
-```http
-GET /api/projects
-```
-
-Get project status:
-
-```http
-GET /api/projects/{id}/status
-```
-
-Set primary server:
-
-```http
-POST /api/projects/{id}/primary-server
-Content-Type: application/json
-```
-
-```json
-{
-  "server_id": 2
-}
-```
-
-Pause project:
-
-```http
-POST /api/projects/{id}/pause
-```
-
-Resume project:
-
-```http
-POST /api/projects/{id}/resume
-```
-
-Install integration into a project:
-
-```http
-POST /api/projects/{id}/integrations
-Content-Type: application/json
-```
-
-```json
-{
-  "catalog_item_id": "notion",
-  "name": "Notion MCP",
-  "make_primary": false,
-  "config": {}
-}
-```
-
-### Catalog / Market
-
-List catalog items stored in SQLite:
-
-```http
-GET /api/catalog/items
-GET /api/catalog/items?enabled_only=1
-```
-
-Manually sync catalog from external manifest URL:
-
-```http
-POST /api/catalog/sync
-Content-Type: application/json
-```
-
-```json
-{
-  "url": "https://webeasy.kz/mcpbox/catalog.json"
-}
-```
-
-Current manifest shape:
-
-```json
-{
-  "schema_version": "2026-05-18",
-  "generated_at": "2026-05-18T10:00:00Z",
-  "items": [
-    {
-      "id": "notion",
-      "name": "Notion MCP",
-      "category": "productivity",
-      "description": "Remote Notion integration",
-      "icon": "https://example.com/notion.svg",
-      "transport": "http_stream",
-      "mcp_url": "https://api.example.com/mcp/notion",
-      "auth_type": "none",
-      "auth_provider": "",
-      "config_schema": {},
-      "capabilities": ["tools", "resources"],
-      "tags": ["docs", "notes"],
-      "website": "https://example.com",
-      "docs_url": "https://example.com/docs",
-      "enabled": true,
-      "version": "1.0.0"
-    }
-  ]
-}
-```
-
-### MCP Servers
-
-Add `STDIO` server:
-
-```http
-POST /api/projects/{id}/servers
-Content-Type: application/json
-```
-
-```json
-{
-  "name": "Filesystem Server",
-  "transport": "stdio",
-  "command": "npx",
-  "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path"],
-  "env_vars": [],
-  "env_passthrough": ["OPENAI_API_KEY"],
-  "working_dir": "",
-  "auto_start": true
-}
-```
-
-Add remote `HTTP streaming` server:
-
-```json
-{
-  "name": "Remote MCP",
-  "transport": "http_stream",
-  "url": "https://mcp.example.com/mcp",
-  "bearer_token_env_var": "MCP_BEARER_TOKEN",
-  "headers": [],
-  "header_env_vars": []
-}
-```
-
-Start server:
-
-```http
-POST /api/servers/{id}/start
-```
-
-Stop server:
-
-```http
-POST /api/servers/{id}/stop
-```
-
-Disable server:
-
-```http
-POST /api/servers/{id}/disable
-```
-
-Enable server:
-
-```http
-POST /api/servers/{id}/enable
-```
-
-Manual server health check:
-
-```http
-POST /api/servers/{id}/check
-```
-
-Start OAuth authorization for a remote server:
-
-```http
-POST /api/servers/{id}/oauth-start
-```
-
-Disconnect OAuth for a remote server:
-
-```http
-POST /api/servers/{id}/oauth-disconnect
-```
-
-Inspect local `STDIO` server:
-
-```http
-GET /api/servers/{id}/inspect
-```
-
-OAuth callback handled by MCPBox:
-
-```http
-GET /oauth/callback
-```
-
-### Logs
-
-List audit logs:
-
-```http
-GET /api/logs
-```
-
-Filter logs by project:
-
-```http
-GET /api/logs?project_id={id}
-```
-
-## Known Limitations
-
-At the current stage MCPBox does not yet provide:
-- authentication and authorization;
-- user and role management;
-- automatic multi-server routing inside one project;
-- advanced metrics dashboards;
-- historical analytics beyond the stored audit log;
-- service installers for OS-level background execution.

@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
+  Bot,
   CheckCircle2,
   Copy,
   FolderKanban,
@@ -229,6 +230,19 @@ type AuditLog = {
 
 type ApiError = {
   error: string;
+};
+
+type OllamaLaunchResponse = {
+  project_id: number;
+  model: string;
+  config_path: string;
+  command_preview: string;
+};
+
+type OllamaStatus = {
+  installed: boolean;
+  models: string[];
+  default_model: string;
 };
 
 type CatalogConfigField = {
@@ -499,6 +513,16 @@ function normalizeInstallConfig(
   return config;
 }
 
+function OllamaIcon({ className }: { className?: string }) {
+  return (
+    <span
+      className={`inline-flex items-center justify-center rounded-md border border-current/20 bg-current/10 ${className ?? ''}`}
+    >
+      <Bot className="h-[0.9em] w-[0.9em]" />
+    </span>
+  );
+}
+
 export default function App() {
   const [view, setView] = useState<'projects' | 'market' | 'logs'>('projects');
   const [language, setLanguage] = useState<Language>(detectInitialLanguage);
@@ -523,6 +547,8 @@ export default function App() {
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [catalogSettings, setCatalogSettings] = useState<CatalogSettings | null>(null);
   const [installedPackages, setInstalledPackages] = useState<InstalledPackage[]>([]);
+  const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null);
+  const [selectedOllamaModel, setSelectedOllamaModel] = useState('');
   const [catalogURL, setCatalogURL] = useState('https://webeasy.kz/mcpbox/catalog.json');
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogSyncing, setCatalogSyncing] = useState(false);
@@ -535,6 +561,7 @@ export default function App() {
   const [installDialogProjectId, setInstallDialogProjectId] = useState<number | null>(null);
   const [installDialogValues, setInstallDialogValues] = useState<Record<string, string>>({});
   const [busyProjectId, setBusyProjectId] = useState<number | null>(null);
+  const [launchingOllamaProjectId, setLaunchingOllamaProjectId] = useState<number | null>(null);
   const [busyServerId, setBusyServerId] = useState<number | null>(null);
   const [inspectOpen, setInspectOpen] = useState(false);
   const [inspectingServerId, setInspectingServerId] = useState<number | null>(null);
@@ -596,6 +623,10 @@ export default function App() {
   }));
   const installDialogProject =
     projectOptions.find((project) => project.project_id === installDialogProjectId) ?? null;
+  const shouldShowOllamaControls = ollamaStatus?.installed ?? false;
+  const canLaunchOllama =
+    !!selectedOllamaModel &&
+    (ollamaStatus?.models.length ?? 0) > 0;
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -653,8 +684,24 @@ export default function App() {
   }, [logsCurrentProjectOnly, selectedProjectId]);
 
   useEffect(() => {
-    void Promise.all([loadProjects(true), loadCatalog(true), loadInstalledPackages()]);
+    void Promise.all([loadProjects(true), loadCatalog(true), loadInstalledPackages(), loadOllamaStatus()]);
   }, []);
+
+  useEffect(() => {
+    if (!ollamaStatus?.installed) {
+      setSelectedOllamaModel('');
+      return;
+    }
+
+    if (
+      selectedOllamaModel &&
+      ollamaStatus.models.includes(selectedOllamaModel)
+    ) {
+      return;
+    }
+
+    setSelectedOllamaModel(ollamaStatus.default_model || ollamaStatus.models[0] || '');
+  }, [ollamaStatus, selectedOllamaModel]);
 
   useEffect(() => {
     if (view === 'logs') {
@@ -776,6 +823,18 @@ export default function App() {
       if (initial) {
         setCatalogLoading(false);
       }
+    }
+  }
+
+  async function loadOllamaStatus() {
+    try {
+      const nextStatus = await apiRequest<OllamaStatus>(
+        '/api/ollama/status',
+        messages.requestFailed,
+      );
+      setOllamaStatus(nextStatus);
+    } catch {
+      setOllamaStatus(null);
     }
   }
 
@@ -1188,6 +1247,26 @@ export default function App() {
     }
   }
 
+  async function launchProjectOllama(projectId: number) {
+    setLaunchingOllamaProjectId(projectId);
+    setActionError(null);
+
+    try {
+      await apiRequest<OllamaLaunchResponse>(
+        `/api/projects/${projectId}/launch-ollama`,
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({ model: selectedOllamaModel }),
+        },
+      );
+    } catch (submitError) {
+      setActionError(submitError instanceof Error ? submitError.message : messages.launchOllamaError);
+    } finally {
+      setLaunchingOllamaProjectId(null);
+    }
+  }
+
   async function copyConnectURL() {
     if (!selectedProject?.connect_url) {
       return;
@@ -1576,7 +1655,7 @@ export default function App() {
                   </SelectContent>
                 </Select>
                 <button
-                  onClick={() => void loadProjects()}
+                  onClick={() => void Promise.all([loadProjects(), loadOllamaStatus()])}
                   className="rounded-md border border-border bg-card p-2 transition-colors hover:bg-accent"
                   aria-label="Refresh projects"
                 >
@@ -1947,7 +2026,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className={`mt-6 grid gap-4 ${catalogURLVisible ? 'lg:grid-cols-[minmax(0,1fr)_auto]' : 'lg:grid-cols-[auto]'}`}>
+                <div className={`mt-6 grid gap-4 ${catalogURLVisible ? 'lg:grid-cols-[minmax(0,1fr)]' : 'lg:grid-cols-[auto]'}`}>
                   {catalogURLVisible ? (
                     <label className="block space-y-2">
                       <span className="text-sm text-muted-foreground">{labels.externalManifestUrl}</span>
@@ -1959,18 +2038,6 @@ export default function App() {
                       />
                     </label>
                   ) : null}
-                  <button
-                    onClick={() => void syncCatalog()}
-                    disabled={catalogSyncing}
-                    className="inline-flex h-11 items-center justify-center gap-2 self-end rounded-md bg-electric-blue px-5 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    {catalogSyncing ? (
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-4 w-4" />
-                    )}
-                    {labels.syncCatalog}
-                  </button>
                 </div>
 
                 {catalogURLVisible ? (
@@ -1992,23 +2059,42 @@ export default function App() {
                 </div>
               ) : null}
 
-              <div className="flex flex-wrap gap-2">
-                {catalogCategories.map((category) => (
-                  <button
-                    key={`catalog-category-${category}`}
-                    onClick={() => setSelectedCatalogCategory(category)}
-                    className={`inline-flex h-9 items-center justify-center rounded-full border px-4 text-sm font-medium transition-colors ${
-                      selectedCatalogCategory === category
-                        ? 'border-electric-blue bg-electric-blue text-white'
-                        : 'border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground'
-                    }`}
-                  >
-                    {category === 'all' ? labels.allCategories : category}
-                  </button>
-                ))}
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap gap-2">
+                  {catalogCategories.map((category) => (
+                    <button
+                      key={`catalog-category-${category}`}
+                      onClick={() => setSelectedCatalogCategory(category)}
+                      className={`inline-flex h-9 items-center justify-center rounded-full border px-4 text-sm font-medium transition-colors ${
+                        selectedCatalogCategory === category
+                          ? 'border-electric-blue bg-electric-blue text-white'
+                          : 'border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground'
+                      }`}
+                    >
+                      {category === 'all' ? labels.allCategories : category}
+                    </button>
+                  ))}
+                </div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => void syncCatalog()}
+                      disabled={catalogSyncing}
+                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-70"
+                      aria-label={labels.syncCatalog}
+                    >
+                      {catalogSyncing ? (
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4" />
+                      )}
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent>{labels.syncCatalog}</TooltipContent>
+                </Tooltip>
               </div>
 
-              <div className="grid gap-4 xl:grid-cols-2">
+              <div className="grid gap-4">
                 {filteredCatalogItems.map((item) => {
                   const packageInstalling = installingCatalogItemId === item.id;
                   const addingToProject = addingCatalogItemId === item.id;
@@ -2024,52 +2110,77 @@ export default function App() {
                   return (
                     <div key={item.id} className="rounded-2xl border border-border bg-card p-5">
                       <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
                             <h3 className="text-lg font-semibold">{item.name}</h3>
-                            <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
-                              {transportLabel}
-                            </span>
-                            <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
-                              {authLabel}
-                            </span>
-                            <span className={`rounded-full border px-2 py-1 text-xs ${packageInstalled ? 'border-status-running/30 bg-status-running/12 text-status-running' : 'border-border bg-muted text-muted-foreground'}`}>
-                              {packageInstalled ? labels.packageInstalled : labels.packageNotInstalled}
-                            </span>
-                            {selectedProject ? (
-                              <span className={`rounded-full border px-2 py-1 text-xs ${addedToProject ? 'border-electric-blue/30 bg-electric-blue/12 text-electric-blue' : 'border-border bg-muted text-muted-foreground'}`}>
-                                {addedToProject ? labels.addedToProject : labels.notInProject}
+                            <div className="flex flex-wrap justify-end gap-2">
+                              <button
+                                onClick={() => void installCatalogPackage(item)}
+                                disabled={packageInstalling || packageInstalled || !item.enabled}
+                                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-electric-blue bg-electric-blue/10 px-4 text-sm font-medium text-electric-blue transition-colors hover:bg-electric-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {packageInstalling ? (
+                                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Plus className="h-4 w-4" />
+                                )}
+                                {packageInstalled ? labels.packageInstalled : labels.installPackage}
+                              </button>
+                              <button
+                                onClick={() => void installCatalogItem(item)}
+                                disabled={projects.length === 0 || addingToProject || !packageInstalled || addedToProject || !item.enabled}
+                                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {addingToProject ? (
+                                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Plus className="h-4 w-4" />
+                                )}
+                                {addedToProject ? labels.addedToProject : labels.addToProject}
+                              </button>
+                            </div>
+                          </div>
+                          <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
+                                {transportLabel}
                               </span>
-                            ) : null}
+                              <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
+                                {authLabel}
+                              </span>
+                              <span className={`rounded-full border px-2 py-1 text-xs ${packageInstalled ? 'border-status-running/30 bg-status-running/12 text-status-running' : 'border-border bg-muted text-muted-foreground'}`}>
+                                {packageInstalled ? labels.packageInstalled : labels.packageNotInstalled}
+                              </span>
+                              {selectedProject ? (
+                                <span className={`rounded-full border px-2 py-1 text-xs ${addedToProject ? 'border-electric-blue/30 bg-electric-blue/12 text-electric-blue' : 'border-border bg-muted text-muted-foreground'}`}>
+                                  {addedToProject ? labels.addedToProject : labels.notInProject}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="flex flex-wrap items-center justify-end gap-3 text-sm">
+                              {item.docs_url ? (
+                                <a
+                                  className="text-electric-blue underline-offset-4 hover:underline"
+                                  href={item.docs_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {labels.docs}
+                                </a>
+                              ) : null}
+                              {item.website ? (
+                                <a
+                                  className="text-electric-blue underline-offset-4 hover:underline"
+                                  href={item.website}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {labels.website}
+                                </a>
+                              ) : null}
+                            </div>
                           </div>
                           <div className="mt-1 text-sm text-electric-blue">{item.category || labels.generalCategory}</div>
-                        </div>
-
-                        <div className="flex flex-col gap-2">
-                          <button
-                            onClick={() => void installCatalogPackage(item)}
-                            disabled={packageInstalling || packageInstalled || !item.enabled}
-                            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-electric-blue bg-electric-blue/10 px-4 text-sm font-medium text-electric-blue transition-colors hover:bg-electric-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {packageInstalling ? (
-                              <LoaderCircle className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Plus className="h-4 w-4" />
-                            )}
-                            {packageInstalled ? labels.packageInstalled : labels.installPackage}
-                          </button>
-                          <button
-                            onClick={() => void installCatalogItem(item)}
-                            disabled={projects.length === 0 || addingToProject || !packageInstalled || addedToProject || !item.enabled}
-                            className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {addingToProject ? (
-                              <LoaderCircle className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Plus className="h-4 w-4" />
-                            )}
-                            {addedToProject ? labels.addedToProject : labels.addToProject}
-                          </button>
                         </div>
                       </div>
 
@@ -2111,29 +2222,6 @@ export default function App() {
                           ))}
                         </div>
                       ) : null}
-
-                      <div className="mt-4 flex flex-wrap gap-3 text-sm">
-                        {item.docs_url ? (
-                          <a
-                            className="text-electric-blue underline-offset-4 hover:underline"
-                            href={item.docs_url}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {labels.docs}
-                          </a>
-                        ) : null}
-                        {item.website ? (
-                          <a
-                            className="text-electric-blue underline-offset-4 hover:underline"
-                            href={item.website}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            {labels.website}
-                          </a>
-                        ) : null}
-                      </div>
                     </div>
                   );
                 })}
@@ -2336,7 +2424,45 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="flex justify-end">
+                  <div className="flex flex-wrap justify-end gap-3">
+                    {shouldShowOllamaControls ? (
+                      <>
+                        <div className="min-w-[220px]">
+                          <Select
+                            value={selectedOllamaModel || undefined}
+                            onValueChange={setSelectedOllamaModel}
+                          >
+                            <SelectTrigger className="h-11 rounded-xl border-border bg-background">
+                              <SelectValue placeholder={labels.ollamaModel} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {ollamaStatus?.models.map((model) => (
+                                <SelectItem key={`ollama-model-${model}`} value={model}>
+                                  {model}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <button
+                          onClick={() => void launchProjectOllama(selectedProject.project_id)}
+                          disabled={
+                            launchingOllamaProjectId === selectedProject.project_id ||
+                            !selectedProject.connection_ready ||
+                            selectedProject.is_paused ||
+                            !canLaunchOllama
+                          }
+                          className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          {launchingOllamaProjectId === selectedProject.project_id ? (
+                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <OllamaIcon className="h-5 w-5" />
+                          )}
+                          {labels.launchOllama}
+                        </button>
+                      </>
+                    ) : null}
                     <button
                       onClick={() =>
                         void setProjectPaused(selectedProject.project_id, !selectedProject.is_paused)
@@ -2373,6 +2499,9 @@ export default function App() {
                       Delete
                     </button>
                   </div>
+                  {shouldShowOllamaControls && (ollamaStatus?.models.length ?? 0) === 0 ? (
+                    <p className="text-sm text-muted-foreground">{messages.noOllamaModels}</p>
+                  ) : null}
                 </div>
               </section>
 

@@ -31,6 +31,7 @@ type Server struct {
 	store              *storage.Store
 	registry           *orchestrator.Registry
 	installer          *installer.Service
+	terminalLauncher   func(cwd, shellCommand string) error
 	mux                *http.ServeMux
 	sessionMu          sync.RWMutex
 	sessions           map[string]connectSession
@@ -183,6 +184,7 @@ func NewServerWithInstaller(store *storage.Store, registry *orchestrator.Registr
 		store:              store,
 		registry:           registry,
 		installer:          packageInstaller,
+		terminalLauncher:   launchTerminalSession,
 		mux:                http.NewServeMux(),
 		sessions:           make(map[string]connectSession),
 		oauth:              make(map[string]oauthSession),
@@ -200,6 +202,7 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("GET /api/logs", s.handleListLogs)
+	s.mux.HandleFunc("GET /api/ollama/status", s.handleOllamaStatus)
 	s.mux.HandleFunc("GET /api/packages", s.handleInstalledPackageList)
 	s.mux.HandleFunc("GET /api/catalog/items", s.handleCatalogList)
 	s.mux.HandleFunc("POST /api/catalog/items/", s.handleCatalogItemAction)
@@ -351,6 +354,8 @@ func (s *Server) handleProjectAction(w http.ResponseWriter, r *http.Request) {
 		s.handleAddServer(w, r, projectID)
 	case "integrations":
 		s.handleProjectInstallIntegration(w, r, projectID)
+	case "launch-ollama":
+		s.handleLaunchProjectOllama(w, r, *project)
 	case "pause":
 		s.handleSetProjectPaused(w, r, projectID, true)
 	case "resume":

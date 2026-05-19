@@ -11,8 +11,10 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 
 	"MCPBox/internal/models"
 )
@@ -273,7 +275,7 @@ func (r *ServerRunner) Stop(ctx context.Context) error {
 }
 
 func (r *ServerRunner) waitProcess() {
-	err := r.cmd.Wait()
+	err := normalizeProcessExitError(r.cmd.Wait())
 
 	r.mu.Lock()
 	r.running = false
@@ -314,7 +316,12 @@ func (r *ServerRunner) consumeStderr(stderr io.Reader) {
 	scanner.Buffer(make([]byte, 0, 32*1024), scannerBufferSize)
 
 	for scanner.Scan() {
-		log.Printf("server %d stderr: %s", r.server.ID, scanner.Text())
+		line := scanner.Text()
+		if isBenignServerStderr(line) {
+			log.Printf("server %d info: %s", r.server.ID, line)
+			continue
+		}
+		log.Printf("server %d stderr: %s", r.server.ID, line)
 	}
 
 	if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
@@ -432,6 +439,53 @@ func commandEnv(server models.MCPServer) ([]string, error) {
 	}
 
 	return env, nil
+}
+
+func isBenignServerStderr(line string) bool {
+	normalized := strings.TrimSpace(line)
+	if normalized == "" {
+		return true
+	}
+
+	benignPrefixes := []string{
+		"Secure MCP Filesystem Server running on stdio",
+		"Client does not support MCP Roots, using allowed directories set from server args:",
+	}
+
+	for _, prefix := range benignPrefixes {
+		if strings.HasPrefix(normalized, prefix) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func normalizeProcessExitError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, context.Canceled) {
+		return nil
+	}
+
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return err
+	}
+
+	if runtime.GOOS != "windows" {
+		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
+			if status.Signaled() {
+				switch status.Signal() {
+				case os.Interrupt, syscall.SIGTERM, syscall.SIGKILL:
+					return nil
+				}
+			}
+		}
+	}
+
+	return err
 }
 
 func jsonRPCID(payload []byte) (string, bool, error) {

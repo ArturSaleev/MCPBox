@@ -47,6 +47,8 @@ type Dictionary = {
     logs: string;
     auditLogs: string;
     refresh: string;
+    launchOllama: string;
+    ollamaModel: string;
     pauseProject: string;
     resumeProject: string;
     paused: string;
@@ -177,6 +179,8 @@ type Dictionary = {
     addPackageDialogTitle: (name: string) => string;
     addPackageDialogFallbackTitle: string;
     addPackageDialogDescription: string;
+    launchOllamaError: string;
+    noOllamaModels: string;
   };
 };
 
@@ -231,6 +235,8 @@ export const dictionaries: Record<Language, Dictionary> = {
       logs: 'Logs',
       auditLogs: 'Audit Logs',
       refresh: 'Refresh',
+      launchOllama: 'Launch Ollama',
+      ollamaModel: 'Ollama model',
       pauseProject: 'Pause project',
       resumeProject: 'Resume project',
       paused: 'Paused',
@@ -373,6 +379,8 @@ export const dictionaries: Record<Language, Dictionary> = {
       addPackageDialogFallbackTitle: 'Add package to project',
       addPackageDialogDescription:
         'Choose a project and configure the selected package instance before adding it.',
+      launchOllamaError: 'Failed to launch Ollama terminal.',
+      noOllamaModels: 'No local Ollama models found.',
     },
   },
   ru: {
@@ -422,6 +430,8 @@ export const dictionaries: Record<Language, Dictionary> = {
       logs: 'Логи',
       auditLogs: 'Журнал аудита',
       refresh: 'Обновить',
+      launchOllama: 'Запустить Ollama',
+      ollamaModel: 'Модель Ollama',
       pauseProject: 'Приостановить проект',
       resumeProject: 'Возобновить проект',
       paused: 'Приостановлен',
@@ -567,6 +577,8 @@ export const dictionaries: Record<Language, Dictionary> = {
       addPackageDialogFallbackTitle: 'Добавить пакет в проект',
       addPackageDialogDescription:
         'Настройте выбранный экземпляр пакета перед добавлением в текущий проект.',
+      launchOllamaError: 'Не удалось запустить терминал Ollama.',
+      noOllamaModels: 'Локальные модели Ollama не найдены.',
     },
   },
 };

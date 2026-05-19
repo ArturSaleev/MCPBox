@@ -1,13 +1,25 @@
+# IDE / editor
 .idea/
-.gocache/
 .vscode/
-dist/
-!internal/httpapi/ui/dist/
-!internal/httpapi/ui/dist/**
+.DS_Store
+*.swp
+
+# Frontend dependencies
 node_modules/
 html/node_modules/
-.DS_Store
 
+# Build caches
+.gocache/
+dist/
+
+# Embedded frontend build output must stay tracked
+!internal/httpapi/ui/dist/
+!internal/httpapi/ui/dist/**
+
+# Local runtime data
+package_store/
+release/
+mcpbox.db
 *.db
 *.db-shm
 *.db-wal
@@ -16,11 +28,13 @@ html/node_modules/
 *.log
 *.tmp
 *.bak
-*.swp
 .env
 .env.*
-mcpbox.db
+
+# Local build artifacts
 *.exe
 *.dll
 *.so
 *.dylib
+*.test
+coverage.out

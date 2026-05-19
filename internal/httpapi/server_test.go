@@ -4,10 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"MCPBox/internal/installer"
@@ -292,6 +297,257 @@ func TestProjectConnectToolsListUsesStandardInputSchemaField(t *testing.T) {
 	if bytes.Contains(response.Body.Bytes(), []byte(`"input_schema"`)) {
 		t.Fatalf("response body still contains input_schema: %s", response.Body.String())
 	}
+}
+
+func TestOllamaStatusEndpoint(t *testing.T) {
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	originalLookPath := execLookPath
+	originalCommand := execCommand
+	execLookPath = func(file string) (string, error) {
+		switch file {
+		case "ollama":
+			return "/usr/local/bin/ollama", nil
+		default:
+			return "", errors.New("unexpected binary lookup")
+		}
+	}
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		commandArgs := append([]string{"-test.run=TestHelperProcess", "--", name}, args...)
+		cmd := exec.Command(os.Args[0], commandArgs...)
+		cmd.Env = append(os.Environ(), "GO_WANT_HELPER_PROCESS=1")
+		return cmd
+	}
+	defer func() {
+		execLookPath = originalLookPath
+		execCommand = originalCommand
+	}()
+
+	request := httptest.NewRequest(http.MethodGet, "/api/ollama/status", nil)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	var payload ollamaStatusResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if !payload.Installed {
+		t.Fatal("Installed = false, want true")
+	}
+	if len(payload.Models) != 2 {
+		t.Fatalf("len(payload.Models) = %d, want 2", len(payload.Models))
+	}
+	if payload.DefaultModel != "llama3.2:latest" {
+		t.Fatalf("DefaultModel = %q", payload.DefaultModel)
+	}
+}
+
+func TestLaunchProjectOllamaCreatesConfigAndOpensTerminal(t *testing.T) {
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	project := &models.Project{Name: "Workspace", RootPath: t.TempDir()}
+	if err := store.CreateProject(context.Background(), project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if err := store.AddServer(context.Background(), &models.MCPServer{
+		ProjectID: project.ID,
+		Name:      "Filesystem",
+		Transport: models.ServerTransportHTTPStream,
+		URL:       "http://127.0.0.1:8999/mcp",
+		IsEnabled: true,
+	}); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	var launchedCWD string
+	var launchedCommand string
+	api.terminalLauncher = func(cwd, shellCommand string) error {
+		launchedCWD = cwd
+		launchedCommand = shellCommand
+		return nil
+	}
+
+	originalLookPath := execLookPath
+	originalExecutable := osExecutable
+	execLookPath = func(file string) (string, error) {
+		if file == "ollama" {
+			return "/usr/local/bin/ollama", nil
+		}
+		return "", errors.New("unexpected binary lookup")
+	}
+	osExecutable = func() (string, error) {
+		return "/Applications/MCPBox.app/Contents/MacOS/MCPBox", nil
+	}
+	defer func() {
+		execLookPath = originalLookPath
+		osExecutable = originalExecutable
+	}()
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/projects/"+jsonNumber(project.ID)+"/launch-ollama",
+		bytes.NewBufferString(`{"model":"qwen2.5:14b"}`),
+	)
+	request.Host = "mcpbox.local:38180"
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	if launchedCWD != project.RootPath {
+		t.Fatalf("launched cwd = %q, want %q", launchedCWD, project.RootPath)
+	}
+	if !strings.Contains(launchedCommand, "ollama-chat --config") {
+		t.Fatalf("launch command = %q", launchedCommand)
+	}
+	if !strings.Contains(launchedCommand, "--model 'qwen2.5:14b'") {
+		t.Fatalf("launch command = %q", launchedCommand)
+	}
+
+	var payload ollamaLaunchResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.Model != "qwen2.5:14b" {
+		t.Fatalf("payload.Model = %q", payload.Model)
+	}
+	if payload.ConfigPath == "" {
+		t.Fatal("ConfigPath is empty")
+	}
+
+	configBytes, err := os.ReadFile(payload.ConfigPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", payload.ConfigPath, err)
+	}
+	config := string(configBytes)
+	if !strings.Contains(config, "url: http://mcpbox.local:38180/mcp/"+project.Token) {
+		t.Fatalf("config = %q", config)
+	}
+}
+
+func TestLaunchProjectOllamaRequiresModel(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	project := &models.Project{Name: "Workspace"}
+	if err := store.CreateProject(context.Background(), project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if err := store.AddServer(context.Background(), &models.MCPServer{
+		ProjectID: project.ID,
+		Name:      "Filesystem",
+		Transport: models.ServerTransportHTTPStream,
+		URL:       "http://127.0.0.1:8999/mcp",
+		IsEnabled: true,
+	}); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/projects/"+jsonNumber(project.ID)+"/launch-ollama",
+		bytes.NewBufferString(`{}`),
+	)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), "ollama model is required") {
+		t.Fatalf("body = %s", response.Body.String())
+	}
+}
+
+func TestLaunchProjectOllamaRejectsPausedProject(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	project := &models.Project{Name: "Workspace", IsPaused: true}
+	if err := store.CreateProject(context.Background(), project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if err := store.AddServer(context.Background(), &models.MCPServer{
+		ProjectID: project.ID,
+		Name:      "Filesystem",
+		Transport: models.ServerTransportHTTPStream,
+		URL:       "http://127.0.0.1:8999/mcp",
+		IsEnabled: true,
+	}); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/projects/"+jsonNumber(project.ID)+"/launch-ollama",
+		bytes.NewBufferString(`{}`),
+	)
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), "project is paused") {
+		t.Fatalf("body = %s", response.Body.String())
+	}
+}
+
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
+	}
+
+	args := os.Args
+	separator := -1
+	for index, arg := range args {
+		if arg == "--" {
+			separator = index
+			break
+		}
+	}
+	if separator == -1 || separator+2 >= len(args) {
+		os.Exit(2)
+	}
+
+	name := args[separator+1]
+	commandArgs := args[separator+2:]
+	if name == "/usr/local/bin/ollama" && len(commandArgs) == 1 && commandArgs[0] == "list" {
+		fmt.Fprint(os.Stdout, "NAME            ID              SIZE      MODIFIED\nllama3.2:latest abc123          2.0 GB    now\nqwen2.5:14b     def456          9.1 GB    now\n")
+		os.Exit(0)
+	}
+
+	os.Exit(1)
 }
 
 func jsonNumber(value uint) string {
