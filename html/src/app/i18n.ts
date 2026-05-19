@@ -12,7 +12,6 @@ type Dictionary = {
     projectOverview: string;
     servers: string;
     running: string;
-    primary: string;
     connectionEndpoint: string;
     addServer: string;
     serverName: string;
@@ -26,11 +25,8 @@ type Dictionary = {
     copyUrl: string;
     noProjectSelected: string;
     ready: string;
-    primaryRequired: string;
     notSelected: string;
     notSpecified: string;
-    primaryServer: string;
-    setAsPrimary: string;
     stop: string;
     start: string;
     language: string;
@@ -51,6 +47,8 @@ type Dictionary = {
     logs: string;
     auditLogs: string;
     refresh: string;
+    launchOllama: string;
+    ollamaModel: string;
     pauseProject: string;
     resumeProject: string;
     paused: string;
@@ -84,6 +82,37 @@ type Dictionary = {
     noResources: string;
     noPrompts: string;
     inspectServer: string;
+    health: string;
+    healthy: string;
+    failed: string;
+    unknown: string;
+    lastCheck: string;
+    check: string;
+    oauth: string;
+    connected: string;
+    notConnected: string;
+    oauthConnected: string;
+    market: string;
+    integrations: string;
+    catalog: string;
+    catalogItems: string;
+    installed: string;
+    lastSync: string;
+    externalManifestUrl: string;
+    syncCatalog: string;
+    allCategories: string;
+    command: string;
+    endpoint: string;
+    docs: string;
+    website: string;
+    generalCategory: string;
+    mcpDiscovery: string;
+    installPackage: string;
+    packageInstalled: string;
+    packageNotInstalled: string;
+    addToProject: string;
+    addedToProject: string;
+    notInProject: string;
   };
   messages: {
     loadingProjects: string;
@@ -113,7 +142,6 @@ type Dictionary = {
     createProjectError: string;
     loadProjectsError: string;
     addServerError: string;
-    updatePrimaryError: string;
     startServerError: string;
     stopServerError: string;
     setProjectPausedError: string;
@@ -127,7 +155,32 @@ type Dictionary = {
     popularityDescription: string;
     inspectDescription: string;
     inspectServerError: string;
+    checkServerError: string;
     requestFailed: (status: number) => string;
+    marketDescription: string;
+    notSynced: string;
+    advancedModeEnabled: string;
+    selectProjectBeforeInstall: string;
+    noDescriptionProvided: string;
+    upstreamAuthNotice: string;
+    noValue: string;
+    workingDirectoryValue: (path: string) => string;
+    autoStartAfterInstall: string;
+    syncManifestToPopulateCatalog: string;
+    noIntegrationsInCategory: string;
+    installIntegrationTitle: (name: string) => string;
+    installIntegrationFallbackTitle: string;
+    installIntegrationDescription: string;
+    oneValuePerLine: string;
+    installIntegrationAction: string;
+    loadPackagesError: string;
+    installPackageError: string;
+    addPackageToProjectError: string;
+    addPackageDialogTitle: (name: string) => string;
+    addPackageDialogFallbackTitle: string;
+    addPackageDialogDescription: string;
+    launchOllamaError: string;
+    noOllamaModels: string;
   };
 };
 
@@ -147,7 +200,6 @@ export const dictionaries: Record<Language, Dictionary> = {
       projectOverview: 'Project Overview',
       servers: 'Servers',
       running: 'Running',
-      primary: 'Primary',
       connectionEndpoint: 'Connection Endpoint',
       addServer: 'Add MCP Server',
       serverName: 'Server name',
@@ -161,11 +213,8 @@ export const dictionaries: Record<Language, Dictionary> = {
       copyUrl: 'Copy URL',
       noProjectSelected: 'No project selected',
       ready: 'Ready',
-      primaryRequired: 'Primary server required',
       notSelected: 'Not selected',
       notSpecified: 'Not specified',
-      primaryServer: 'Primary server',
-      setAsPrimary: 'Set as primary',
       stop: 'Stop',
       start: 'Start',
       language: 'Language',
@@ -186,6 +235,8 @@ export const dictionaries: Record<Language, Dictionary> = {
       logs: 'Logs',
       auditLogs: 'Audit Logs',
       refresh: 'Refresh',
+      launchOllama: 'Launch Ollama',
+      ollamaModel: 'Ollama model',
       pauseProject: 'Pause project',
       resumeProject: 'Resume project',
       paused: 'Paused',
@@ -214,11 +265,42 @@ export const dictionaries: Record<Language, Dictionary> = {
       instructions: 'Instructions',
       protocolVersion: 'Protocol version',
       version: 'Version',
-      noReadme: 'README not found рядом with the local server path.',
+      noReadme: 'README not found near the local server path.',
       noTools: 'No tools exposed.',
       noResources: 'No resources exposed.',
       noPrompts: 'No prompts exposed.',
       inspectServer: 'Inspect server',
+      health: 'Health',
+      healthy: 'Healthy',
+      failed: 'Failed',
+      unknown: 'Unknown',
+      lastCheck: 'Last check',
+      check: 'Check',
+      oauth: 'OAuth',
+      connected: 'Connected',
+      notConnected: 'Not connected',
+      oauthConnected: 'OAuth connected',
+      market: 'Market',
+      integrations: 'Integrations',
+      catalog: 'Catalog',
+      catalogItems: 'Catalog items',
+      installed: 'Installed',
+      lastSync: 'Last sync',
+      externalManifestUrl: 'External manifest URL',
+      syncCatalog: 'Sync catalog',
+      allCategories: 'All categories',
+      command: 'Command',
+      endpoint: 'Endpoint',
+      docs: 'Docs',
+      website: 'Website',
+      generalCategory: 'general',
+      mcpDiscovery: 'mcp discovery',
+      installPackage: 'Install package',
+      packageInstalled: 'Package installed',
+      packageNotInstalled: 'Package not installed',
+      addToProject: 'Add to project',
+      addedToProject: 'Added to project',
+      notInProject: 'Not in project',
     },
     messages: {
       loadingProjects: 'Loading projects...',
@@ -226,14 +308,16 @@ export const dictionaries: Record<Language, Dictionary> = {
       projectHelper: 'A project is a logical group of MCP servers for one environment.',
       projectNamePlaceholder: 'Client Workspace',
       projectDescriptionPlaceholder: 'What this workspace group is for',
-      emptySelection: 'Create the first workspace on the left and it will become the control center for its MCP servers.',
-      emptySelectionBody: 'Create the first workspace on the left and it will become the control center for its MCP servers.',
+      emptySelection:
+        'Create the first workspace on the left and it will become the control center for its MCP servers.',
+      emptySelectionBody:
+        'Create the first workspace on the left and it will become the control center for its MCP servers.',
       overviewFallbackDescription: 'Workspace group for MCP clients and tools.',
-      connectionDescription: 'All clients in this workspace connect through the project token and the primary server.',
-      connectionWarning: (token: string) =>
-        `To use /mcp/${token}, assign a primary server first.`,
+      connectionDescription:
+        'All clients in this workspace connect through the project token and can access all enabled MCP servers in the project.',
+      connectionWarning: (token: string) => `To use /mcp/${token}, add and enable at least one MCP server.`,
       addServerDescription:
-        'The first server becomes primary automatically. Additional servers stay in the same workspace.',
+        'Add one or more MCP servers to expose them through the shared project endpoint.',
       serverNamePlaceholder: 'Filesystem Server',
       launchCommandPlaceholder: 'npx -y @modelcontextprotocol/server-filesystem /path',
       commandPlaceholder: 'uvx mcp-server or node dist/index.js',
@@ -243,7 +327,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       bearerTokenPlaceholder: 'MCP_BEARER_TOKEN',
       envPassthroughPlaceholder: 'OPENAI_API_KEY',
       serverControlDescription:
-        'Manage processes and choose the primary server for the MCP endpoint.',
+        'Manage the processes and availability of all MCP servers exposed through the project endpoint.',
       noServers: 'No servers have been added to this project yet.',
       workspaceGroupFallback: 'Workspace group for MCP clients',
       serverCount: (count: number) => `${count} servers`,
@@ -251,7 +335,6 @@ export const dictionaries: Record<Language, Dictionary> = {
       createProjectError: 'Failed to create project',
       loadProjectsError: 'Failed to load projects',
       addServerError: 'Failed to add server',
-      updatePrimaryError: 'Failed to update primary server',
       startServerError: 'Failed to start server',
       stopServerError: 'Failed to stop server',
       setProjectPausedError: 'Failed to update project state',
@@ -262,10 +345,42 @@ export const dictionaries: Record<Language, Dictionary> = {
       projectTag: (id: number) => `project #${id}`,
       serverTag: (id: number) => `server #${id}`,
       consoleDescription: 'Compact event stream for requests, connects, and control actions.',
-      popularityDescription: 'Who is receiving the most MCP traffic right now based on the current filter.',
-      inspectDescription: 'Live MCP inspection for this local STDIO server plus nearby README if found.',
+      popularityDescription:
+        'Who is receiving the most MCP traffic right now based on the current filter.',
+      inspectDescription:
+        'Live MCP inspection for this local STDIO server plus nearby README if found.',
       inspectServerError: 'Failed to inspect server',
+      checkServerError: 'Failed to verify server health',
       requestFailed: (status: number) => `Request failed with status ${status}`,
+      marketDescription:
+        'Sync the external integration manifest into SQLite and install selected items into the current project as linked MCP servers.',
+      notSynced: 'Not synced',
+      advancedModeEnabled: 'Advanced mode enabled. Press Cmd/Ctrl + Shift + U to hide.',
+      selectProjectBeforeInstall:
+        'Create or select a project before installing integrations.',
+      noDescriptionProvided: 'No description provided.',
+      upstreamAuthNotice:
+        'Authentication is handled by the upstream MCP server. After install, your MCP client should complete the sign-in flow when it connects through MCPBox.',
+      noValue: 'n/a',
+      workingDirectoryValue: (path: string) => `Working directory: ${path}`,
+      autoStartAfterInstall: 'Starts automatically after install',
+      syncManifestToPopulateCatalog: 'Sync the external manifest to populate the catalog.',
+      noIntegrationsInCategory: 'No integrations in this category yet.',
+      installIntegrationTitle: (name: string) => `Install ${name}`,
+      installIntegrationFallbackTitle: 'Install integration',
+      installIntegrationDescription:
+        'Fill in the required connection settings before adding this integration to the selected project.',
+      oneValuePerLine: 'One value per line',
+      installIntegrationAction: 'Install integration',
+      loadPackagesError: 'Failed to load packages',
+      installPackageError: 'Failed to install package',
+      addPackageToProjectError: 'Failed to add package to project',
+      addPackageDialogTitle: (name: string) => `Add ${name} to project`,
+      addPackageDialogFallbackTitle: 'Add package to project',
+      addPackageDialogDescription:
+        'Choose a project and configure the selected package instance before adding it.',
+      launchOllamaError: 'Failed to launch Ollama terminal.',
+      noOllamaModels: 'No local Ollama models found.',
     },
   },
   ru: {
@@ -280,7 +395,6 @@ export const dictionaries: Record<Language, Dictionary> = {
       projectOverview: 'Обзор проекта',
       servers: 'Серверы',
       running: 'Запущено',
-      primary: 'Основной',
       connectionEndpoint: 'Точка подключения',
       addServer: 'Добавить MCP-сервер',
       serverName: 'Название сервера',
@@ -294,11 +408,8 @@ export const dictionaries: Record<Language, Dictionary> = {
       copyUrl: 'Скопировать URL',
       noProjectSelected: 'Проект не выбран',
       ready: 'Готово',
-      primaryRequired: 'Нужен primary server',
       notSelected: 'Не выбран',
-      notSpecified: 'Не указана',
-      primaryServer: 'Primary server',
-      setAsPrimary: 'Сделать primary',
+      notSpecified: 'Не указано',
       stop: 'Остановить',
       start: 'Запустить',
       language: 'Язык',
@@ -307,7 +418,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       arguments: 'Аргументы',
       environmentVariables: 'Переменные окружения',
       environmentVariablePassthrough: 'Передача переменных окружения',
-      bearerTokenEnvironmentVariable: 'Переменная окружения токена Bearer',
+      bearerTokenEnvironmentVariable: 'Переменная окружения Bearer-токена',
       headers: 'Заголовки',
       headersFromEnvironmentVariables: 'Заголовки из переменных окружения',
       addArgument: 'Добавить аргумент',
@@ -319,6 +430,8 @@ export const dictionaries: Record<Language, Dictionary> = {
       logs: 'Логи',
       auditLogs: 'Журнал аудита',
       refresh: 'Обновить',
+      launchOllama: 'Запустить Ollama',
+      ollamaModel: 'Модель Ollama',
       pauseProject: 'Приостановить проект',
       resumeProject: 'Возобновить проект',
       paused: 'Приостановлен',
@@ -340,33 +453,66 @@ export const dictionaries: Record<Language, Dictionary> = {
       info: 'Инфо',
       serverInfo: 'Информация о сервере',
       capabilities: 'Возможности',
-      tools: 'Tools',
-      resources: 'Resources',
-      prompts: 'Prompts',
+      tools: 'Инструменты',
+      resources: 'Ресурсы',
+      prompts: 'Промпты',
       readme: 'README',
       instructions: 'Инструкции',
       protocolVersion: 'Версия протокола',
       version: 'Версия',
       noReadme: 'README рядом с локальным сервером не найден.',
-      noTools: 'Tools не найдены.',
-      noResources: 'Resources не найдены.',
-      noPrompts: 'Prompts не найдены.',
+      noTools: 'Инструменты не найдены.',
+      noResources: 'Ресурсы не найдены.',
+      noPrompts: 'Промпты не найдены.',
       inspectServer: 'Проверить сервер',
+      health: 'Состояние',
+      healthy: 'Исправен',
+      failed: 'Ошибка',
+      unknown: 'Неизвестно',
+      lastCheck: 'Последняя проверка',
+      check: 'Проверить',
+      oauth: 'OAuth',
+      connected: 'Подключен',
+      notConnected: 'Не подключен',
+      oauthConnected: 'OAuth подключен',
+      market: 'Маркет',
+      integrations: 'Интеграции',
+      catalog: 'Каталог',
+      catalogItems: 'Элементы каталога',
+      installed: 'Установлено',
+      lastSync: 'Последняя синхронизация',
+      externalManifestUrl: 'URL внешнего манифеста',
+      syncCatalog: 'Синхронизировать каталог',
+      allCategories: 'Все категории',
+      command: 'Команда',
+      endpoint: 'Endpoint',
+      docs: 'Документация',
+      website: 'Сайт',
+      generalCategory: 'общее',
+      mcpDiscovery: 'mcp discovery',
+      installPackage: 'Установить пакет',
+      packageInstalled: 'Пакет установлен',
+      packageNotInstalled: 'Пакет не установлен',
+      addToProject: 'Добавить в проект',
+      addedToProject: 'Добавлено в проект',
+      notInProject: 'Не в проекте',
     },
     messages: {
       loadingProjects: 'Загружаю проекты...',
       noProjects: 'Проектов пока нет. Создай первый workspace ниже.',
-      projectHelper: 'Проект — это логическая группа MCP-серверов для одного окружения.',
+      projectHelper: 'Проект это логическая группа MCP-серверов для одного окружения.',
       projectNamePlaceholder: 'Клиентский workspace',
       projectDescriptionPlaceholder: 'Для чего нужен этот workspace',
-      emptySelection: 'Создай первый workspace слева, и он станет центром управления своими MCP-серверами.',
-      emptySelectionBody: 'Создай первый workspace слева, и он станет центром управления своими MCP-серверами.',
+      emptySelection:
+        'Создай первый workspace слева, и он станет центром управления своими MCP-серверами.',
+      emptySelectionBody:
+        'Создай первый workspace слева, и он станет центром управления своими MCP-серверами.',
       overviewFallbackDescription: 'Логическая группа для MCP-клиентов и инструментов.',
-      connectionDescription: 'Все клиенты этого workspace подключаются через project token и primary server.',
-      connectionWarning: (token: string) =>
-        `Чтобы использовать /mcp/${token}, сначала назначь primary server.`,
+      connectionDescription:
+        'Все клиенты этого workspace подключаются через project token и получают доступ ко всем включённым MCP-серверам проекта.',
+      connectionWarning: (token: string) => `Чтобы использовать /mcp/${token}, добавьте и включите хотя бы один MCP-сервер.`,
       addServerDescription:
-        'Первый сервер автоматически становится primary. Остальные остаются в том же workspace.',
+        'Добавьте один или несколько MCP-серверов, чтобы опубликовать их через общий endpoint проекта.',
       serverNamePlaceholder: 'Filesystem Server',
       launchCommandPlaceholder: 'npx -y @modelcontextprotocol/server-filesystem /path',
       commandPlaceholder: 'uvx mcp-server или node dist/index.js',
@@ -376,7 +522,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       bearerTokenPlaceholder: 'MCP_BEARER_TOKEN',
       envPassthroughPlaceholder: 'OPENAI_API_KEY',
       serverControlDescription:
-        'Управляй процессами и выбирай primary server для MCP endpoint.',
+        'Управляй процессами и доступностью всех MCP-серверов, опубликованных через endpoint проекта.',
       noServers: 'В этом проекте пока нет серверов.',
       workspaceGroupFallback: 'Логическая группа для MCP-клиентов',
       serverCount: (count: number) => `${count} серверов`,
@@ -384,7 +530,6 @@ export const dictionaries: Record<Language, Dictionary> = {
       createProjectError: 'Не удалось создать проект',
       loadProjectsError: 'Не удалось загрузить проекты',
       addServerError: 'Не удалось добавить сервер',
-      updatePrimaryError: 'Не удалось обновить primary server',
       startServerError: 'Не удалось запустить сервер',
       stopServerError: 'Не удалось остановить сервер',
       setProjectPausedError: 'Не удалось обновить состояние проекта',
@@ -394,11 +539,46 @@ export const dictionaries: Record<Language, Dictionary> = {
       noLogs: 'Записей аудита пока нет.',
       projectTag: (id: number) => `проект #${id}`,
       serverTag: (id: number) => `сервер #${id}`,
-      consoleDescription: 'Компактный поток событий по запросам, подключениям и управляющим действиям.',
-      popularityDescription: 'Кто сейчас получает больше всего MCP-трафика в рамках текущего фильтра.',
-      inspectDescription: 'Живой MCP inspection для локального STDIO сервера и nearby README, если он найден.',
+      consoleDescription:
+        'Компактный поток событий по запросам, подключениям и управляющим действиям.',
+      popularityDescription:
+        'Кто сейчас получает больше всего MCP-трафика в рамках текущего фильтра.',
+      inspectDescription:
+        'Живой MCP inspection для локального STDIO сервера и nearby README, если он найден.',
       inspectServerError: 'Не удалось проинспектировать сервер',
+      checkServerError: 'Не удалось проверить сервер',
       requestFailed: (status: number) => `Запрос завершился со статусом ${status}`,
+      marketDescription:
+        'Синхронизируйте внешний манифест интеграций в SQLite и устанавливайте выбранные элементы в текущий проект как связанные MCP-серверы.',
+      notSynced: 'Не синхронизировано',
+      advancedModeEnabled:
+        'Расширенный режим включён. Нажмите Cmd/Ctrl + Shift + U, чтобы скрыть поле.',
+      selectProjectBeforeInstall:
+        'Выберите проект в боковой панели перед установкой интеграций.',
+      noDescriptionProvided: 'Описание отсутствует.',
+      upstreamAuthNotice:
+        'Аутентификация выполняется на стороне исходного MCP-сервера. После установки MCP-клиент должен завершить вход при подключении через MCPBox.',
+      noValue: 'n/a',
+      workingDirectoryValue: (path: string) => `Рабочая директория: ${path}`,
+      autoStartAfterInstall: 'Запускается автоматически после установки',
+      syncManifestToPopulateCatalog:
+        'Синхронизируйте внешний манифест, чтобы заполнить каталог.',
+      noIntegrationsInCategory: 'В этой категории пока нет интеграций.',
+      installIntegrationTitle: (name: string) => `Установить ${name}`,
+      installIntegrationFallbackTitle: 'Установка интеграции',
+      installIntegrationDescription:
+        'Заполните обязательные параметры подключения перед добавлением этой интеграции в выбранный проект.',
+      oneValuePerLine: 'По одному значению на строку',
+      installIntegrationAction: 'Установить',
+      loadPackagesError: 'Не удалось загрузить пакеты',
+      installPackageError: 'Не удалось установить пакет',
+      addPackageToProjectError: 'Не удалось добавить пакет в проект',
+      addPackageDialogTitle: (name: string) => `Добавить ${name} в проект`,
+      addPackageDialogFallbackTitle: 'Добавить пакет в проект',
+      addPackageDialogDescription:
+        'Настройте выбранный экземпляр пакета перед добавлением в текущий проект.',
+      launchOllamaError: 'Не удалось запустить терминал Ollama.',
+      noOllamaModels: 'Локальные модели Ollama не найдены.',
     },
   },
 };

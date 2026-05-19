@@ -1,0 +1,324 @@
+{
+  "schema_version": "2026-05-19",
+  "generated_at": "2026-05-19T12:00:00Z",
+  "items": [
+    {
+      "id": "filesystem",
+      "name": "Filesystem MCP",
+      "category": "developer-tools",
+      "description": "Official filesystem MCP server for working with local directories.",
+      "runtime": {
+        "type": "node",
+        "version": ">=20"
+      },
+      "source": {
+        "type": "npm",
+        "package": "@modelcontextprotocol/server-filesystem",
+        "version": "latest",
+        "url": ""
+      },
+      "install": {
+        "strategy": "npm",
+        "metadata": {
+          "registry": "https://registry.npmjs.org"
+        }
+      },
+      "launch": {
+        "command": "node",
+        "args": [
+          "dist/index.js"
+        ],
+        "working_dir": "{install_dir}",
+        "entry_point": "dist/index.js"
+      },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "dist/index.js"
+      ],
+      "env": [],
+      "env_passthrough": [],
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "root_path": {
+            "type": "string",
+            "title": "Root path",
+            "default": "C:/workspace"
+          }
+        },
+        "required": [
+          "root_path"
+        ]
+      },
+      "capabilities": [
+        "filesystem",
+        "local",
+        "stdio"
+      ],
+      "tags": [
+        "official",
+        "filesystem",
+        "node"
+      ],
+      "website": "https://modelcontextprotocol.io",
+      "docs_url": "https://modelcontextprotocol.io",
+      "enabled": true,
+      "version": "latest"
+    },
+    {
+      "id": "sqlite",
+      "name": "SQLite MCP",
+      "category": "databases",
+      "description": "Package-backed SQLite MCP server for local database inspection.",
+      "runtime": {
+        "type": "python",
+        "version": ">=3.11"
+      },
+      "source": {
+        "type": "python",
+        "package": "mcp-server-sqlite",
+        "version": "latest",
+        "url": ""
+      },
+      "install": {
+        "strategy": "python_venv",
+        "metadata": {}
+      },
+      "launch": {
+        "command": "python",
+        "args": [
+          "-m",
+          "mcp_server_sqlite"
+        ],
+        "working_dir": "{install_dir}",
+        "entry_point": "mcp_server_sqlite"
+      },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "python",
+      "args": [
+        "-m",
+        "mcp_server_sqlite"
+      ],
+      "env": [],
+      "env_passthrough": [],
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "database_path": {
+            "type": "string",
+            "title": "Database path",
+            "default": "C:/data/app.db"
+          }
+        },
+        "required": [
+          "database_path"
+        ]
+      },
+      "capabilities": [
+        "sqlite",
+        "database",
+        "local"
+      ],
+      "tags": [
+        "sqlite",
+        "python",
+        "local"
+      ],
+      "website": "https://sqlite.org",
+      "docs_url": "https://sqlite.org/docs.html",
+      "enabled": true,
+      "version": "latest"
+    },
+    {
+      "id": "mysql",
+      "name": "MySQL MCP",
+      "category": "databases",
+      "description": "Package-backed MySQL MCP server for reusable project connections.",
+      "runtime": {
+        "type": "node",
+        "version": ">=20"
+      },
+      "source": {
+        "type": "npm",
+        "package": "@example/mysql-mcp",
+        "version": "1.0.0",
+        "url": ""
+      },
+      "install": {
+        "strategy": "npm",
+        "metadata": {
+          "registry": "https://registry.npmjs.org"
+        }
+      },
+      "launch": {
+        "command": "node",
+        "args": [
+          "dist/index.js"
+        ],
+        "working_dir": "{install_dir}",
+        "entry_point": "dist/index.js"
+      },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "dist/index.js"
+      ],
+      "env": [],
+      "env_passthrough": [],
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "mysql_host": {
+            "type": "string",
+            "title": "Host",
+            "default": "127.0.0.1"
+          },
+          "mysql_port": {
+            "type": "string",
+            "title": "Port",
+            "default": "3306"
+          },
+          "mysql_user": {
+            "type": "string",
+            "title": "User",
+            "default": "root"
+          },
+          "mysql_password": {
+            "type": "string",
+            "title": "Password"
+          },
+          "mysql_database": {
+            "type": "string",
+            "title": "Database"
+          }
+        },
+        "required": [
+          "mysql_host",
+          "mysql_user"
+        ]
+      },
+      "capabilities": [
+        "mysql",
+        "database",
+        "local"
+      ],
+      "tags": [
+        "mysql",
+        "node",
+        "shared-install"
+      ],
+      "website": "https://www.mysql.com",
+      "docs_url": "https://dev.mysql.com/doc/",
+      "enabled": true,
+      "version": "1.0.0"
+    },
+    {
+      "id": "postgresql",
+      "name": "PostgreSQL MCP",
+      "category": "databases",
+      "description": "Package-backed PostgreSQL MCP server for local and shared project setups.",
+      "runtime": {
+        "type": "node",
+        "version": ">=20"
+      },
+      "source": {
+        "type": "npm",
+        "package": "@example/postgres-mcp",
+        "version": "1.0.0",
+        "url": ""
+      },
+      "install": {
+        "strategy": "npm",
+        "metadata": {
+          "registry": "https://registry.npmjs.org"
+        }
+      },
+      "launch": {
+        "command": "node",
+        "args": [
+          "dist/index.js"
+        ],
+        "working_dir": "{install_dir}",
+        "entry_point": "dist/index.js"
+      },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "node",
+      "args": [
+        "dist/index.js"
+      ],
+      "env": [],
+      "env_passthrough": [],
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "postgres_host": {
+            "type": "string",
+            "title": "Host",
+            "default": "127.0.0.1"
+          },
+          "postgres_port": {
+            "type": "string",
+            "title": "Port",
+            "default": "5432"
+          },
+          "postgres_user": {
+            "type": "string",
+            "title": "User",
+            "default": "postgres"
+          },
+          "postgres_password": {
+            "type": "string",
+            "title": "Password"
+          },
+          "postgres_database": {
+            "type": "string",
+            "title": "Database"
+          }
+        },
+        "required": [
+          "postgres_host",
+          "postgres_user"
+        ]
+      },
+      "capabilities": [
+        "postgresql",
+        "database",
+        "local"
+      ],
+      "tags": [
+        "postgresql",
+        "node",
+        "shared-install"
+      ],
+      "website": "https://www.postgresql.org",
+      "docs_url": "https://www.postgresql.org/docs/",
+      "enabled": true,
+      "version": "1.0.0"
+    }
+  ]
+}

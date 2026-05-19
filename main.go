@@ -18,6 +18,9 @@ import (
 	"time"
 
 	"MCPBox/internal/httpapi"
+	"MCPBox/internal/installer"
+	"MCPBox/internal/models"
+	"MCPBox/internal/ollamahost"
 	"MCPBox/internal/orchestrator"
 	"MCPBox/internal/storage"
 )
@@ -25,6 +28,13 @@ import (
 const defaultPort = 38180
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "ollama-chat" {
+		if err := ollamahost.Run(context.Background(), os.Args[2:]); err != nil {
+			log.Fatalf("ollama chat failed: %v", err)
+		}
+		return
+	}
+
 	port := resolvePort()
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -35,6 +45,7 @@ func main() {
 	}
 
 	registry := orchestrator.NewRegistry(rootCtx)
+	packageInstaller := installer.NewService(store, "package_store")
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -44,18 +55,18 @@ func main() {
 		}
 	}()
 
-	autoStartServers, err := store.ListAutoStartServers(rootCtx)
+	projects, err := store.ListProjects(rootCtx)
 	if err != nil {
-		log.Fatalf("load auto-start servers: %v", err)
+		log.Fatalf("load projects for auto-start: %v", err)
 	}
 
-	for _, server := range autoStartServers {
+	for _, server := range startupServersForProjects(projects) {
 		if err := registry.StartServer(rootCtx, server); err != nil {
 			log.Printf("auto-start server %d failed: %v", server.ID, err)
 		}
 	}
 
-	api := httpapi.NewServer(store, registry)
+	api := httpapi.NewServerWithInstaller(store, registry, packageInstaller)
 	httpServer := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
 		Handler:           api.Handler(),
@@ -181,4 +192,43 @@ func listenAddresses(port int) []string {
 	})
 
 	return addresses
+}
+
+func startupServersForProjects(projects []models.Project) []models.MCPServer {
+	servers := make([]models.MCPServer, 0)
+	for _, project := range projects {
+		if project.IsPaused {
+			continue
+		}
+
+		projectShouldStart := false
+		for _, server := range project.Servers {
+			if server.Transport != models.ServerTransportSTDIO {
+				continue
+			}
+			if !server.IsEnabled {
+				continue
+			}
+			if server.AutoStart {
+				projectShouldStart = true
+				break
+			}
+		}
+
+		if !projectShouldStart {
+			continue
+		}
+
+		for _, server := range project.Servers {
+			if server.Transport != models.ServerTransportSTDIO {
+				continue
+			}
+			if !server.IsEnabled {
+				continue
+			}
+			servers = append(servers, server)
+		}
+	}
+
+	return servers
 }

@@ -55,6 +55,13 @@ func (r *Registry) Status(serverID uint) string {
 	return "Stopped"
 }
 
+func (r *Registry) Runner(serverID uint) *ServerRunner {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	return r.runners[serverID]
+}
+
 func (r *Registry) RunnerForProject(ctx context.Context, project models.Project) (*ServerRunner, *models.MCPServer, error) {
 	if project.IsPaused {
 		return nil, nil, errors.New("project is paused")
@@ -64,37 +71,30 @@ func (r *Registry) RunnerForProject(ctx context.Context, project models.Project)
 		return nil, nil, errors.New("project has no configured MCP servers")
 	}
 
-	if project.PrimaryServerID == nil {
-		return nil, nil, errors.New("project has no primary MCP server configured")
-	}
-
-	var primary *models.MCPServer
+	var selected *models.MCPServer
 	for i := range project.Servers {
-		if project.Servers[i].ID == *project.PrimaryServerID {
-			primary = &project.Servers[i]
+		if project.Servers[i].IsEnabled {
+			selected = &project.Servers[i]
 			break
 		}
 	}
 
-	if primary == nil {
-		return nil, nil, errors.New("project primary MCP server was not found")
-	}
-	if !primary.IsEnabled {
-		return nil, nil, errors.New("project primary MCP server is disabled")
+	if selected == nil {
+		return nil, nil, errors.New("project has no enabled MCP servers")
 	}
 
-	if primary.Transport == models.ServerTransportHTTPStream {
-		return nil, primary, nil
+	if selected.Transport == models.ServerTransportHTTPStream {
+		return nil, selected, nil
 	}
 
-	runner := r.getOrCreateRunner(*primary)
+	runner := r.getOrCreateRunner(*selected)
 	if !runner.Running() {
 		if err := runner.Start(r.baseCtx); err != nil {
 			return nil, nil, fmt.Errorf("start project server: %w", err)
 		}
 	}
 
-	return runner, primary, nil
+	return runner, selected, nil
 }
 
 func (r *Registry) Shutdown(ctx context.Context) error {
