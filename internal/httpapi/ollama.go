@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"unicode/utf16"
 
 	"MCPBox/internal/models"
 )
@@ -208,15 +210,16 @@ func buildEmbeddedOllamaLaunchCommand(configPath, model string) (string, string,
 	var command string
 	switch runtime.GOOS {
 	case "windows":
-		logPath := filepath.Join(os.TempDir(), "mcpbox-ollama.log")
 		command = fmt.Sprintf(
-			"%s list >NUL 2>&1 || (start \"\" /b %s serve ^> %s 2^>^&1 ^& timeout /t 2 /nobreak >NUL) && %s ollama-chat --config %s --model %s",
-			windowsQuote(ollamaPath),
-			windowsQuote(ollamaPath),
-			windowsQuote(logPath),
-			windowsQuote(executablePath),
-			windowsQuote(configPath),
-			windowsQuote(normalizedModel),
+			"$ollamaPath = %s; $exePath = %s; $configPath = %s; $model = %s; "+
+				"$ollamaReady = $false; "+
+				"try { & $ollamaPath list *> $null; $ollamaReady = ($LASTEXITCODE -eq 0) } catch { $ollamaReady = $false }; "+
+				"if (-not $ollamaReady) { Start-Process -FilePath $ollamaPath -ArgumentList 'serve' -WindowStyle Hidden; Start-Sleep -Seconds 2 }; "+
+				"& $exePath 'ollama-chat' '--config' $configPath '--model' $model",
+			powerShellQuote(ollamaPath),
+			powerShellQuote(executablePath),
+			powerShellQuote(configPath),
+			powerShellQuote(normalizedModel),
 		)
 	default:
 		command = fmt.Sprintf(
@@ -295,12 +298,18 @@ func launchLinuxTerminal(command string) error {
 }
 
 func launchWindowsTerminal(cwd, command string) error {
-	script := fmt.Sprintf(
-		"Start-Process -FilePath 'cmd.exe' -WorkingDirectory %s -ArgumentList '/k', %s",
-		powerShellQuote(cwd),
-		powerShellQuote(command),
+	script := command
+	if trimmed := strings.TrimSpace(cwd); trimmed != "" {
+		script = fmt.Sprintf("Set-Location -LiteralPath %s; %s", powerShellQuote(trimmed), command)
+	}
+
+	encoded := encodePowerShellCommand(script)
+	startScript := fmt.Sprintf(
+		"Start-Process -FilePath 'powershell.exe' -WorkingDirectory %s -ArgumentList @('-NoExit','-NoProfile','-EncodedCommand','%s')",
+		powerShellQuote(strings.TrimSpace(cwd)),
+		encoded,
 	)
-	cmd := exec.Command("powershell", "-NoProfile", "-Command", script)
+	cmd := exec.Command("powershell", "-NoProfile", "-Command", startScript)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("open Windows terminal: %w", err)
 	}
@@ -316,12 +325,17 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
-func windowsQuote(value string) string {
-	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
-}
-
 func powerShellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+}
+
+func encodePowerShellCommand(script string) string {
+	encoded := utf16.Encode([]rune(script))
+	bytes := make([]byte, 0, len(encoded)*2)
+	for _, value := range encoded {
+		bytes = append(bytes, byte(value), byte(value>>8))
+	}
+	return base64.StdEncoding.EncodeToString(bytes)
 }
 
 func escapeAppleScriptString(value string) string {
