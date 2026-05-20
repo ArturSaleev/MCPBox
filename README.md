@@ -33,7 +33,14 @@ Key capabilities:
 - One-click Ollama launcher for local MCP testing through embedded `mcphost/sdk`
 - Single-binary deployment with embedded React UI and local SQLite storage
 
-## What Is New In 1.1.0
+## What Is New In 1.1.1
+
+- Windows Ollama launch fix: the embedded `Launch Ollama` flow now starts correctly on Windows through a dedicated PowerShell path
+- Safer command execution on Windows: quoted paths and paths with spaces are handled more reliably
+- Better Windows terminal startup: the launched chat session now respects the project working directory
+- Automatic Windows recovery: if the Ollama daemon is not ready, MCPBox starts `ollama serve` before opening chat
+
+## What Was New In 1.1.0
 
 - Embedded Ollama support: launch a local `ollama + MCPBox` chat flow from the project UI without installing `mcphost` separately
 - Aggregated project endpoint: enabled project servers are exposed through the same project MCP URL
@@ -83,6 +90,7 @@ Default port: `38180`
 - [README-ru.md](./README-ru.md) - Russian user guide
 - [DEVELOPER.md](./DEVELOPER.md) - developer guide, API notes, and architecture
 - [DEVELOPER-ru.md](./DEVELOPER-ru.md) - Russian developer guide
+- [RELEASE-1.1.1.md](./RELEASE-1.1.1.md) - release notes draft for version `1.1.1`
 - [RELEASE-1.1.0.md](./RELEASE-1.1.0.md) - release notes draft for version `1.1.0`
 
 ## Notes

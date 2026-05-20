@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"bytes"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"unicode/utf16"
 
 	"MCPBox/internal/models"
 )
@@ -78,6 +80,15 @@ func (s *Server) handleLaunchProjectOllama(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+
+	s.logAudit(
+		r.Context(),
+		&project.ID,
+		nil,
+		"project_ollama_launch_prepared",
+		clientActor(r),
+		truncateDetail(fmt.Sprintf("cwd=%s | config=%s | preview=%s | shell=%s", cwd, configPath, preview, shellCommand)),
+	)
 
 	if err := s.terminalLauncher(cwd, shellCommand); err != nil {
 		writeError(w, http.StatusBadGateway, err)
@@ -195,14 +206,31 @@ func buildEmbeddedOllamaLaunchCommand(configPath, model string) (string, string,
 
 	normalizedModel := normalizeOllamaModel(model)
 	preview := fmt.Sprintf("%s ollama-chat --config %s --model %s", executablePath, configPath, normalizedModel)
-	command := fmt.Sprintf(
-		"if ! %s list >/dev/null 2>&1; then %s serve >/tmp/mcpbox-ollama.log 2>&1 & sleep 2; fi; exec %s ollama-chat --config %s --model %s",
-		shellQuote(ollamaPath),
-		shellQuote(ollamaPath),
-		shellQuote(executablePath),
-		shellQuote(configPath),
-		shellQuote(normalizedModel),
-	)
+
+	var command string
+	switch runtime.GOOS {
+	case "windows":
+		command = fmt.Sprintf(
+			"$ollamaPath = %s; $exePath = %s; $configPath = %s; $model = %s; "+
+				"$ollamaReady = $false; "+
+				"try { & $ollamaPath list *> $null; $ollamaReady = ($LASTEXITCODE -eq 0) } catch { $ollamaReady = $false }; "+
+				"if (-not $ollamaReady) { Start-Process -FilePath $ollamaPath -ArgumentList 'serve' -WindowStyle Hidden; Start-Sleep -Seconds 2 }; "+
+				"& $exePath 'ollama-chat' '--config' $configPath '--model' $model",
+			powerShellQuote(ollamaPath),
+			powerShellQuote(executablePath),
+			powerShellQuote(configPath),
+			powerShellQuote(normalizedModel),
+		)
+	default:
+		command = fmt.Sprintf(
+			"if ! %s list >/dev/null 2>&1; then %s serve >/tmp/mcpbox-ollama.log 2>&1 & sleep 2; fi; exec %s ollama-chat --config %s --model %s",
+			shellQuote(ollamaPath),
+			shellQuote(ollamaPath),
+			shellQuote(executablePath),
+			shellQuote(configPath),
+			shellQuote(normalizedModel),
+		)
+	}
 
 	return command, preview, nil
 }
@@ -210,7 +238,9 @@ func buildEmbeddedOllamaLaunchCommand(configPath, model string) (string, string,
 func launchTerminalSession(cwd, shellCommand string) error {
 	command := shellCommand
 	if trimmed := strings.TrimSpace(cwd); trimmed != "" {
-		command = fmt.Sprintf("cd %s && %s", shellQuote(trimmed), shellCommand)
+		if runtime.GOOS != "windows" {
+			command = fmt.Sprintf("cd %s && %s", shellQuote(trimmed), shellCommand)
+		}
 	}
 
 	switch runtime.GOOS {
@@ -219,7 +249,7 @@ func launchTerminalSession(cwd, shellCommand string) error {
 	case "linux":
 		return launchLinuxTerminal(command)
 	case "windows":
-		return launchWindowsTerminal(command)
+		return launchWindowsTerminal(strings.TrimSpace(cwd), command)
 	default:
 		return fmt.Errorf("automatic terminal launch is not supported on %s", runtime.GOOS)
 	}
@@ -267,8 +297,19 @@ func launchLinuxTerminal(command string) error {
 	return errors.New("no supported terminal emulator found")
 }
 
-func launchWindowsTerminal(command string) error {
-	cmd := exec.Command("cmd", "/c", "start", "cmd", "/k", command)
+func launchWindowsTerminal(cwd, command string) error {
+	script := command
+	if trimmed := strings.TrimSpace(cwd); trimmed != "" {
+		script = fmt.Sprintf("Set-Location -LiteralPath %s; %s", powerShellQuote(trimmed), command)
+	}
+
+	encoded := encodePowerShellCommand(script)
+	startScript := fmt.Sprintf(
+		"Start-Process -FilePath 'powershell.exe' -WorkingDirectory %s -ArgumentList @('-NoExit','-NoProfile','-EncodedCommand','%s')",
+		powerShellQuote(strings.TrimSpace(cwd)),
+		encoded,
+	)
+	cmd := exec.Command("powershell", "-NoProfile", "-Command", startScript)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("open Windows terminal: %w", err)
 	}
@@ -282,6 +323,19 @@ func shellQuote(value string) string {
 	}
 
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+func powerShellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+}
+
+func encodePowerShellCommand(script string) string {
+	encoded := utf16.Encode([]rune(script))
+	bytes := make([]byte, 0, len(encoded)*2)
+	for _, value := range encoded {
+		bytes = append(bytes, byte(value), byte(value>>8))
+	}
+	return base64.StdEncoding.EncodeToString(bytes)
 }
 
 func escapeAppleScriptString(value string) string {
