@@ -79,6 +79,15 @@ func (s *Server) handleLaunchProjectOllama(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	s.logAudit(
+		r.Context(),
+		&project.ID,
+		nil,
+		"project_ollama_launch_prepared",
+		clientActor(r),
+		truncateDetail(fmt.Sprintf("cwd=%s | config=%s | preview=%s | shell=%s", cwd, configPath, preview, shellCommand)),
+	)
+
 	if err := s.terminalLauncher(cwd, shellCommand); err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return
@@ -195,14 +204,30 @@ func buildEmbeddedOllamaLaunchCommand(configPath, model string) (string, string,
 
 	normalizedModel := normalizeOllamaModel(model)
 	preview := fmt.Sprintf("%s ollama-chat --config %s --model %s", executablePath, configPath, normalizedModel)
-	command := fmt.Sprintf(
-		"if ! %s list >/dev/null 2>&1; then %s serve >/tmp/mcpbox-ollama.log 2>&1 & sleep 2; fi; exec %s ollama-chat --config %s --model %s",
-		shellQuote(ollamaPath),
-		shellQuote(ollamaPath),
-		shellQuote(executablePath),
-		shellQuote(configPath),
-		shellQuote(normalizedModel),
-	)
+
+	var command string
+	switch runtime.GOOS {
+	case "windows":
+		logPath := filepath.Join(os.TempDir(), "mcpbox-ollama.log")
+		command = fmt.Sprintf(
+			"%s list >NUL 2>&1 || (start \"\" /b %s serve ^> %s 2^>^&1 ^& timeout /t 2 /nobreak >NUL) && %s ollama-chat --config %s --model %s",
+			windowsQuote(ollamaPath),
+			windowsQuote(ollamaPath),
+			windowsQuote(logPath),
+			windowsQuote(executablePath),
+			windowsQuote(configPath),
+			windowsQuote(normalizedModel),
+		)
+	default:
+		command = fmt.Sprintf(
+			"if ! %s list >/dev/null 2>&1; then %s serve >/tmp/mcpbox-ollama.log 2>&1 & sleep 2; fi; exec %s ollama-chat --config %s --model %s",
+			shellQuote(ollamaPath),
+			shellQuote(ollamaPath),
+			shellQuote(executablePath),
+			shellQuote(configPath),
+			shellQuote(normalizedModel),
+		)
+	}
 
 	return command, preview, nil
 }
@@ -210,7 +235,9 @@ func buildEmbeddedOllamaLaunchCommand(configPath, model string) (string, string,
 func launchTerminalSession(cwd, shellCommand string) error {
 	command := shellCommand
 	if trimmed := strings.TrimSpace(cwd); trimmed != "" {
-		command = fmt.Sprintf("cd %s && %s", shellQuote(trimmed), shellCommand)
+		if runtime.GOOS != "windows" {
+			command = fmt.Sprintf("cd %s && %s", shellQuote(trimmed), shellCommand)
+		}
 	}
 
 	switch runtime.GOOS {
@@ -219,7 +246,7 @@ func launchTerminalSession(cwd, shellCommand string) error {
 	case "linux":
 		return launchLinuxTerminal(command)
 	case "windows":
-		return launchWindowsTerminal(command)
+		return launchWindowsTerminal(strings.TrimSpace(cwd), command)
 	default:
 		return fmt.Errorf("automatic terminal launch is not supported on %s", runtime.GOOS)
 	}
@@ -267,8 +294,13 @@ func launchLinuxTerminal(command string) error {
 	return errors.New("no supported terminal emulator found")
 }
 
-func launchWindowsTerminal(command string) error {
-	cmd := exec.Command("cmd", "/c", "start", "cmd", "/k", command)
+func launchWindowsTerminal(cwd, command string) error {
+	script := fmt.Sprintf(
+		"Start-Process -FilePath 'cmd.exe' -WorkingDirectory %s -ArgumentList '/k', %s",
+		powerShellQuote(cwd),
+		powerShellQuote(command),
+	)
+	cmd := exec.Command("powershell", "-NoProfile", "-Command", script)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("open Windows terminal: %w", err)
 	}
@@ -282,6 +314,14 @@ func shellQuote(value string) string {
 	}
 
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+func windowsQuote(value string) string {
+	return `"` + strings.ReplaceAll(value, `"`, `""`) + `"`
+}
+
+func powerShellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }
 
 func escapeAppleScriptString(value string) string {
