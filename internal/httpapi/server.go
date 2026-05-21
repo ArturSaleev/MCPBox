@@ -117,6 +117,7 @@ type projectStatusResponse struct {
 	ConnectURL            string                         `json:"connect_url"`
 	ConnectionReady       bool                           `json:"connection_ready"`
 	Servers               []serverStatusRecord           `json:"servers"`
+	RAGCollections        []ragCollectionResponse        `json:"rag_collections"`
 	InstalledIntegrations []installedIntegrationResponse `json:"installed_integrations"`
 }
 
@@ -207,6 +208,10 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/catalog/items", s.handleCatalogList)
 	s.mux.HandleFunc("POST /api/catalog/items/", s.handleCatalogItemAction)
 	s.mux.HandleFunc("POST /api/catalog/sync", s.handleCatalogSync)
+	s.mux.HandleFunc("GET /api/rag/collections", s.handleListRAGCollections)
+	s.mux.HandleFunc("POST /api/rag/collections", s.handleCreateRAGCollection)
+	s.mux.HandleFunc("POST /api/rag/collections/", s.handleRAGCollectionAction)
+	s.mux.HandleFunc("DELETE /api/rag/collections/", s.handleDeleteRAGCollection)
 	s.mux.HandleFunc("GET /api/projects", s.handleListProjects)
 	s.mux.HandleFunc("POST /api/projects", s.handleCreateProject)
 	s.mux.HandleFunc("GET /api/projects/", s.handleProjectStatus)
@@ -352,6 +357,8 @@ func (s *Server) handleProjectAction(w http.ResponseWriter, r *http.Request) {
 	switch tail {
 	case "servers":
 		s.handleAddServer(w, r, projectID)
+	case "rag-collections":
+		s.handleProjectRAGCollectionAction(w, r, projectID)
 	case "integrations":
 		s.handleProjectInstallIntegration(w, r, projectID)
 	case "launch-ollama":
@@ -416,6 +423,11 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProjectDelete(w http.ResponseWriter, r *http.Request) {
+	if projectID, collectionID, ok := parseProjectStringTail(r.URL.Path, "/api/projects/", "rag-collections"); ok {
+		s.handleProjectRAGCollectionDelete(w, r, projectID, collectionID)
+		return
+	}
+
 	projectID, ok := parseSingleID(r.URL.Path, "/api/projects/")
 	if !ok {
 		http.NotFound(w, r)
@@ -783,7 +795,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	servers := s.projectConnectServers(*project)
-	if len(servers) == 0 {
+	if len(servers) == 0 && len(project.RAGCollections) == 0 {
 		err := errors.New("project has no enabled MCP servers configured")
 		s.logAudit(r.Context(), &project.ID, nil, "connect_failed", clientActor(r), truncateDetail(err.Error()))
 		writeError(w, http.StatusBadGateway, err)
@@ -985,9 +997,14 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 		Token:                 project.Token,
 		IsPaused:              project.IsPaused,
 		ConnectURL:            s.connectURL(r, project.Token),
-		ConnectionReady:       len(activeServers) > 0,
+		ConnectionReady:       len(activeServers) > 0 || len(project.RAGCollections) > 0,
 		Servers:               make([]serverStatusRecord, 0, len(project.Servers)),
+		RAGCollections:        make([]ragCollectionResponse, 0, len(project.RAGCollections)),
 		InstalledIntegrations: mapInstalledIntegrations(project.InstalledIntegrations),
+	}
+
+	for _, collection := range project.RAGCollections {
+		response.RAGCollections = append(response.RAGCollections, mapRAGCollection(collection))
 	}
 
 	for _, server := range project.Servers {

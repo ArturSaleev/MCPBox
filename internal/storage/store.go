@@ -43,6 +43,9 @@ func NewStore(dsn string) (*Store, error) {
 	if err := db.AutoMigrate(&models.AuditLog{}); err != nil {
 		return nil, err
 	}
+	if err := db.AutoMigrate(&models.RAGCollection{}, &models.ProjectRAGCollection{}); err != nil {
+		return nil, err
+	}
 	if err := db.AutoMigrate(
 		&models.ProjectCatalogSettings{},
 		&models.IntegrationCatalogItem{},
@@ -135,6 +138,7 @@ func (s *Store) ListProjects(ctx context.Context) ([]models.Project, error) {
 	var projects []models.Project
 	err := s.db.WithContext(ctx).
 		Preload("Servers").
+		Preload("RAGCollections").
 		Preload("InstalledIntegrations").
 		Preload("PackageInstances").
 		Preload("PackageInstances.InstalledPackage").
@@ -147,6 +151,7 @@ func (s *Store) GetProject(ctx context.Context, id uint) (*models.Project, error
 	var project models.Project
 	err := s.db.WithContext(ctx).
 		Preload("Servers").
+		Preload("RAGCollections").
 		Preload("InstalledIntegrations").
 		Preload("PackageInstances").
 		Preload("PackageInstances.InstalledPackage").
@@ -162,6 +167,7 @@ func (s *Store) GetProjectByToken(ctx context.Context, token string) (*models.Pr
 	var project models.Project
 	err := s.db.WithContext(ctx).
 		Preload("Servers").
+		Preload("RAGCollections").
 		Preload("InstalledIntegrations").
 		Preload("PackageInstances").
 		Preload("PackageInstances.InstalledPackage").
@@ -239,6 +245,9 @@ func (s *Store) DeleteProject(ctx context.Context, projectID uint) error {
 			return err
 		}
 		if err := tx.Where("project_id = ?", projectID).Delete(&models.InstalledIntegration{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("project_id = ?", projectID).Delete(&models.ProjectRAGCollection{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("project_id = ?", projectID).Delete(&models.ProjectPackageInstance{}).Error; err != nil {

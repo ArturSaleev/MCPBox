@@ -16,6 +16,7 @@ import (
 
 	"MCPBox/internal/models"
 	"MCPBox/internal/orchestrator"
+	"MCPBox/internal/rag"
 )
 
 type projectRequestEnvelope struct {
@@ -81,6 +82,20 @@ type aggregatedToolResult struct {
 	InputSchema  json.RawMessage `json:"inputSchema"`
 	OutputSchema json.RawMessage `json:"outputSchema,omitempty"`
 }
+
+type projectKnowledgeSearchArguments struct {
+	Query       string   `json:"query"`
+	Limit       int      `json:"limit,omitempty"`
+	Collections []string `json:"collections,omitempty"`
+}
+
+type projectKnowledgeSearchResultItem struct {
+	CollectionID string `json:"collection_id"`
+	FilePath     string `json:"file_path"`
+	Content      string `json:"content"`
+}
+
+const projectKnowledgeSearchToolName = "search_project_knowledge"
 
 type listResourcesResult struct {
 	Resources  []orchestrator.InspectionItem `json:"resources"`
@@ -227,6 +242,9 @@ func (s *Server) dispatchProjectJSONRPC(
 		if err != nil {
 			return nil, false, err
 		}
+		if len(project.RAGCollections) > 0 {
+			tools = append(tools, s.projectKnowledgeAggregateTool())
+		}
 		result := struct {
 			Tools []aggregatedToolResult `json:"tools"`
 		}{
@@ -251,6 +269,17 @@ func (s *Server) dispatchProjectJSONRPC(
 		var params toolCallParams
 		if err := json.Unmarshal(request.Params, &params); err != nil {
 			return nil, false, errors.New("invalid tools/call params")
+		}
+		if params.Name == projectKnowledgeSearchToolName {
+			result, err := s.callProjectKnowledgeTool(ctx, project, params.Arguments)
+			if err != nil {
+				return nil, false, err
+			}
+			return mustMarshal(projectResponseEnvelope{
+				JSONRPC: "2.0",
+				ID:      request.ID,
+				Result:  result,
+			}), true, nil
 		}
 		tool, err := s.resolveAggregateTool(ctx, servers, params.Name)
 		if err != nil {
@@ -560,6 +589,140 @@ func (s *Server) aggregateTools(ctx context.Context, servers []models.MCPServer)
 	assignToolAliases(tools)
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Alias < tools[j].Alias })
 	return tools, nil
+}
+
+func (s *Server) projectKnowledgeAggregateTool() aggregateTool {
+	return aggregateTool{
+		Origin: orchestrator.InspectionTool{
+			Name:        projectKnowledgeSearchToolName,
+			Title:       "Project Knowledge Search",
+			Description: "Searches across all knowledge base collections connected to the current project.",
+			InputSchema: json.RawMessage(`{
+				"type":"object",
+				"properties":{
+					"query":{"type":"string","description":"What to search for in the connected project knowledge bases."},
+					"limit":{"type":"integer","minimum":1,"maximum":20,"description":"Maximum number of chunks to return."},
+					"collections":{"type":"array","items":{"type":"string"},"description":"Optional subset of connected collection ids to search in."}
+				},
+				"required":["query"]
+			}`),
+		},
+		Alias: projectKnowledgeSearchToolName,
+	}
+}
+
+func (s *Server) callProjectKnowledgeTool(ctx context.Context, project models.Project, arguments map[string]any) (map[string]any, error) {
+	rawArgs, err := json.Marshal(arguments)
+	if err != nil {
+		return nil, err
+	}
+
+	var args projectKnowledgeSearchArguments
+	if err := json.Unmarshal(rawArgs, &args); err != nil {
+		return nil, errors.New("invalid search_project_knowledge arguments")
+	}
+
+	query := strings.TrimSpace(args.Query)
+	if query == "" {
+		return nil, errors.New("query is required")
+	}
+	limit := args.Limit
+	if limit <= 0 {
+		limit = 5
+	}
+	if limit > 20 {
+		limit = 20
+	}
+
+	allowed := make(map[string]models.RAGCollection, len(project.RAGCollections))
+	for _, collection := range project.RAGCollections {
+		allowed[collection.CollectionID] = collection
+	}
+	if len(allowed) == 0 {
+		return nil, errors.New("project has no connected knowledge bases")
+	}
+
+	targets := make([]models.RAGCollection, 0, len(allowed))
+	if len(args.Collections) == 0 {
+		for _, collection := range project.RAGCollections {
+			targets = append(targets, collection)
+		}
+	} else {
+		for _, collectionID := range args.Collections {
+			collectionID = strings.TrimSpace(collectionID)
+			collection, ok := allowed[collectionID]
+			if !ok {
+				return nil, fmt.Errorf("collection %q is not connected to the project", collectionID)
+			}
+			targets = append(targets, collection)
+		}
+	}
+
+	items := make([]projectKnowledgeSearchResultItem, 0)
+	for _, collection := range targets {
+		index, err := rag.NewCollection(collection.CollectionID, collection.Name, collection.IndexPath)
+		if err != nil {
+			return nil, err
+		}
+
+		chunks, searchErr := index.Search(query, limit)
+		closeErr := index.Close()
+		if searchErr != nil {
+			return nil, searchErr
+		}
+		if closeErr != nil {
+			return nil, closeErr
+		}
+
+		for _, chunk := range chunks {
+			items = append(items, projectKnowledgeSearchResultItem{
+				CollectionID: collection.CollectionID,
+				FilePath:     chunk.FilePath,
+				Content:      chunk.Content,
+			})
+		}
+	}
+
+	if len(items) > limit {
+		items = items[:limit]
+	}
+
+	textParts := make([]string, 0, len(items))
+	for _, item := range items {
+		textParts = append(textParts, fmt.Sprintf("[%s] %s\n%s", item.CollectionID, item.FilePath, item.Content))
+	}
+	text := "No relevant knowledge chunks found."
+	if len(textParts) > 0 {
+		text = strings.Join(textParts, "\n\n")
+	}
+
+	s.logAudit(ctx, &project.ID, nil, "tool_call_project_knowledge_search", "mcp-client", mustJSON(map[string]any{
+		"tool":        projectKnowledgeSearchToolName,
+		"query":       truncateDetail(query),
+		"collections": collectionIDs(targets),
+		"results":     len(items),
+	}))
+
+	return map[string]any{
+		"content": []map[string]any{
+			{
+				"type": "text",
+				"text": text,
+			},
+		},
+		"structuredContent": map[string]any{
+			"query": query,
+			"items": items,
+		},
+	}, nil
+}
+
+func collectionIDs(collections []models.RAGCollection) []string {
+	result := make([]string, 0, len(collections))
+	for _, collection := range collections {
+		result = append(result, collection.CollectionID)
+	}
+	return result
 }
 
 func (s *Server) aggregateResources(ctx context.Context, servers []models.MCPServer) ([]aggregateResource, error) {

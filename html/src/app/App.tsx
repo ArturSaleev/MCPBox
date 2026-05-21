@@ -4,6 +4,7 @@ import {
   Bot,
   CheckCircle2,
   Copy,
+  Database,
   FolderKanban,
   Info,
   LoaderCircle,
@@ -31,6 +32,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -87,8 +89,23 @@ type ProjectStatus = {
   connect_url: string;
   connection_ready: boolean;
   servers: ServerStatus[];
+  rag_collections: RAGCollection[];
   installed_integrations: InstalledIntegration[];
   package_instances?: ProjectPackageInstance[];
+};
+
+type RAGCollection = {
+  id: number;
+  collection_id: string;
+  name: string;
+  data_type: string;
+  index_path: string;
+};
+
+type RAGSearchResult = {
+  id: string;
+  file_path: string;
+  content: string;
 };
 
 type InstalledIntegration = {
@@ -232,6 +249,13 @@ type ApiError = {
   error: string;
 };
 
+type KnowledgeSearchAuditDetail = {
+  tool?: string;
+  query?: string;
+  collections?: string[];
+  results?: number;
+};
+
 type OllamaLaunchResponse = {
   project_id: number;
   model: string;
@@ -356,6 +380,12 @@ const emptyServerForm: ServerFormState = {
   auto_start: false,
 };
 
+const emptyRAGCollectionForm = {
+  id: '',
+  name: '',
+  index_path: '',
+};
+
 async function apiRequest<T>(
   input: RequestInfo,
   requestFailedMessage: (status: number) => string,
@@ -436,6 +466,32 @@ function formatSchema(schema: unknown) {
     return JSON.stringify(schema, null, 2);
   } catch {
     return String(schema);
+  }
+}
+
+function formatAuditAction(action: string) {
+  if (action === 'tool_call_project_knowledge_search') {
+    return 'tool_call -> search_project_knowledge';
+  }
+  return action;
+}
+
+function formatAuditDetail(entry: AuditLog) {
+  if (entry.action !== 'tool_call_project_knowledge_search') {
+    return entry.detail;
+  }
+
+  try {
+    const parsed = JSON.parse(entry.detail) as KnowledgeSearchAuditDetail;
+    const collections = parsed.collections?.length ? `[${parsed.collections.join(', ')}]` : '[all connected collections]';
+    const query = parsed.query ? `query="${parsed.query}"` : '';
+    const results =
+      typeof parsed.results === 'number' ? `results=${parsed.results}` : '';
+    return ['tool_call -> search_project_knowledge', collections, query, results]
+      .filter((part) => part && part.trim() !== '')
+      .join(' ');
+  } catch {
+    return entry.detail;
   }
 }
 
@@ -524,7 +580,7 @@ function OllamaIcon({ className }: { className?: string }) {
 }
 
 export default function App() {
-  const [view, setView] = useState<'projects' | 'market' | 'logs'>('projects');
+  const [view, setView] = useState<'projects' | 'knowledge' | 'market' | 'logs'>('projects');
   const [language, setLanguage] = useState<Language>(detectInitialLanguage);
   const [projects, setProjects] = useState<ProjectStatus[]>([]);
   const [logs, setLogs] = useState<AuditLog[]>([]);
@@ -532,6 +588,7 @@ export default function App() {
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [projectForm, setProjectForm] = useState<ProjectFormState>(emptyProjectForm);
   const [serverForm, setServerForm] = useState<ServerFormState>(emptyServerForm);
+  const [allRAGCollections, setAllRAGCollections] = useState<RAGCollection[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -543,6 +600,16 @@ export default function App() {
   const [addServerOpen, setAddServerOpen] = useState(false);
   const [, setOAuthAdvancedOpen] = useState(false);
   const [editingServerId, setEditingServerId] = useState<number | null>(null);
+  const [createRAGCollectionOpen, setCreateRAGCollectionOpen] = useState(false);
+  const [connectRAGCollectionOpen, setConnectRAGCollectionOpen] = useState(false);
+  const [creatingRAGCollection, setCreatingRAGCollection] = useState(false);
+  const [linkingCollectionId, setLinkingCollectionId] = useState<string | null>(null);
+  const [ragCollectionForm, setRAGCollectionForm] = useState(emptyRAGCollectionForm);
+  const [ragIndexPaths, setRAGIndexPaths] = useState<Record<string, string>>({});
+  const [ragSearchQueries, setRAGSearchQueries] = useState<Record<string, string>>({});
+  const [ragSearchResults, setRAGSearchResults] = useState<Record<string, RAGSearchResult[]>>({});
+  const [indexingCollectionId, setIndexingCollectionId] = useState<string | null>(null);
+  const [searchingCollectionId, setSearchingCollectionId] = useState<string | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [catalogSettings, setCatalogSettings] = useState<CatalogSettings | null>(null);
@@ -580,6 +647,7 @@ export default function App() {
   ];
   const navigationItems = [
     { id: 'projects' as const, label: labels.projects, icon: FolderKanban },
+    { id: 'knowledge' as const, label: 'Knowledge Base', icon: Database },
     { id: 'market' as const, label: labels.market, icon: ShoppingBag },
     { id: 'logs' as const, label: labels.logs, icon: TextSearch },
   ];
@@ -610,6 +678,12 @@ export default function App() {
     installedPackages
       .filter((pkg) => pkg.status === 'installed')
       .map((pkg) => pkg.catalog_item_id),
+  );
+  const connectedRAGCollectionIDs = new Set(
+    (selectedProject?.rag_collections ?? []).map((collection) => collection.collection_id),
+  );
+  const availableRAGCollections = allRAGCollections.filter(
+    (collection) => !connectedRAGCollectionIDs.has(collection.collection_id),
   );
   const catalogCategories = ['all', ...Array.from(new Set(catalogItems.map((item) => item.category || labels.generalCategory))).sort((left, right) => left.localeCompare(right))];
   const filteredCatalogItems = selectedCatalogCategory === 'all'
@@ -684,7 +758,7 @@ export default function App() {
   }, [logsCurrentProjectOnly, selectedProjectId]);
 
   useEffect(() => {
-    void Promise.all([loadProjects(true), loadCatalog(true), loadInstalledPackages(), loadOllamaStatus()]);
+    void Promise.all([loadProjects(true), loadRAGCollections(), loadCatalog(true), loadInstalledPackages(), loadOllamaStatus()]);
   }, []);
 
   useEffect(() => {
@@ -778,6 +852,18 @@ export default function App() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  }
+
+  async function loadRAGCollections() {
+    try {
+      const response = await apiRequest<{ items: RAGCollection[] }>(
+        '/api/rag/collections',
+        messages.requestFailed,
+      );
+      setAllRAGCollections(response.items);
+    } catch (loadError) {
+      setActionError(loadError instanceof Error ? loadError.message : messages.loadProjectsError);
     }
   }
 
@@ -1534,6 +1620,182 @@ export default function App() {
     }
   }
 
+  async function deleteRAGCollection(collectionId: string) {
+    const confirmed = window.confirm('Delete this knowledge base?');
+    if (!confirmed) {
+      return;
+    }
+
+    setActionError(null);
+    setLinkingCollectionId(collectionId);
+
+    try {
+      await apiRequest<{ deleted: boolean }>(
+        `/api/rag/collections/${collectionId}`,
+        messages.requestFailed,
+        {
+          method: 'DELETE',
+        },
+      );
+      await loadRAGCollections();
+      await loadProjects();
+      await loadLogs();
+    } catch (submitError) {
+      setActionError(submitError instanceof Error ? submitError.message : messages.loadProjectsError);
+    } finally {
+      setLinkingCollectionId(null);
+    }
+  }
+
+  async function createRAGCollection(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    setCreatingRAGCollection(true);
+    setActionError(null);
+
+    try {
+      const createdCollection = await apiRequest<RAGCollection>(
+        '/api/rag/collections',
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            id: ragCollectionForm.id,
+            name: ragCollectionForm.name,
+            data_type: 'code',
+            index_path: ragCollectionForm.index_path,
+          }),
+        },
+      );
+
+      setAllRAGCollections((current) => [...current, createdCollection]);
+      setRAGCollectionForm(emptyRAGCollectionForm);
+      setCreateRAGCollectionOpen(false);
+      await loadLogs();
+    } catch (submitError) {
+      setActionError(submitError instanceof Error ? submitError.message : messages.loadProjectsError);
+    } finally {
+      setCreatingRAGCollection(false);
+    }
+  }
+
+  async function indexRAGCollection(collectionId: string) {
+    const dirPath = (ragIndexPaths[collectionId] ?? selectedProject?.root_path ?? '').trim();
+    if (!dirPath) {
+      setActionError('Directory path is required for indexing.');
+      return;
+    }
+
+    setIndexingCollectionId(collectionId);
+    setActionError(null);
+
+    try {
+      await apiRequest<{ indexed: boolean }>(
+        `/api/rag/collections/${collectionId}/index`,
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({ dir_path: dirPath }),
+        },
+      );
+      await loadLogs();
+    } catch (submitError) {
+      setActionError(submitError instanceof Error ? submitError.message : messages.loadProjectsError);
+    } finally {
+      setIndexingCollectionId(null);
+    }
+  }
+
+  async function searchRAGCollection(collectionId: string) {
+    const query = (ragSearchQueries[collectionId] ?? '').trim();
+    if (!query) {
+      setActionError('Search query is required.');
+      return;
+    }
+
+    setSearchingCollectionId(collectionId);
+    setActionError(null);
+
+    try {
+      const response = await apiRequest<{ items: RAGSearchResult[] }>(
+        `/api/rag/collections/${collectionId}/search`,
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({ query, limit: 5 }),
+        },
+      );
+      setRAGSearchResults((current) => ({
+        ...current,
+        [collectionId]: response.items,
+      }));
+    } catch (submitError) {
+      setActionError(submitError instanceof Error ? submitError.message : messages.loadProjectsError);
+    } finally {
+      setSearchingCollectionId(null);
+    }
+  }
+
+  async function connectRAGCollectionToProject(collectionId: string) {
+    if (!selectedProject) {
+      return;
+    }
+
+    setLinkingCollectionId(collectionId);
+    setActionError(null);
+
+    try {
+      const updatedProject = await apiRequest<ProjectStatus>(
+        `/api/projects/${selectedProject.project_id}/rag-collections`,
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({ collection_id: collectionId }),
+        },
+      );
+      setProjects((current) =>
+        current.map((project) =>
+          project.project_id === updatedProject.project_id ? updatedProject : project,
+        ),
+      );
+      setConnectRAGCollectionOpen(false);
+      await loadLogs();
+    } catch (submitError) {
+      setActionError(submitError instanceof Error ? submitError.message : messages.loadProjectsError);
+    } finally {
+      setLinkingCollectionId(null);
+    }
+  }
+
+  async function disconnectRAGCollectionFromProject(collectionId: string) {
+    if (!selectedProject) {
+      return;
+    }
+
+    setBusyProjectId(selectedProject.project_id);
+    setActionError(null);
+
+    try {
+      const updatedProject = await apiRequest<ProjectStatus>(
+        `/api/projects/${selectedProject.project_id}/rag-collections/${collectionId}`,
+        messages.requestFailed,
+        {
+          method: 'DELETE',
+        },
+      );
+      setProjects((current) =>
+        current.map((project) =>
+          project.project_id === updatedProject.project_id ? updatedProject : project,
+        ),
+      );
+      await loadLogs();
+    } catch (submitError) {
+      setActionError(submitError instanceof Error ? submitError.message : messages.loadProjectsError);
+    } finally {
+      setBusyProjectId(null);
+    }
+  }
+
   function updateStringListField(
     field: 'args' | 'env_passthrough',
     index: number,
@@ -1894,7 +2156,7 @@ export default function App() {
                             <span className="text-slate-500">
                               {new Date(entry.created_at).toLocaleTimeString()}
                             </span>
-                            <span className="text-electric-blue">{entry.action}</span>
+                            <span className="text-electric-blue">{formatAuditAction(entry.action)}</span>
                             <span className="text-slate-400">
                               {entry.actor || labels.unknownActor}
                             </span>
@@ -1911,7 +2173,7 @@ export default function App() {
                           </div>
                           {entry.detail ? (
                             <div className="mt-1 break-words text-slate-300/85">
-                              {entry.detail}
+                              {formatAuditDetail(entry)}
                             </div>
                           ) : null}
                         </div>
@@ -1989,6 +2251,202 @@ export default function App() {
                   </div>
                 </div>
               </aside>
+            </section>
+          ) : view === 'knowledge' ? (
+            <section className="space-y-6">
+              <div className="rounded-2xl border border-border bg-card p-6">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="text-sm uppercase tracking-[0.24em] text-electric-blue">
+                      Knowledge Base
+                    </p>
+                    <h2 className="mt-2 text-3xl font-semibold">Global Knowledge Collections</h2>
+                    <p className="mt-2 max-w-3xl text-muted-foreground">
+                      Create reusable collections once, index local folders, and then attach them to one or many projects.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-xl border border-border bg-background px-4 py-3">
+                      <div className="text-sm text-muted-foreground">Collections</div>
+                      <div className="mt-1 text-2xl font-semibold">{allRAGCollections.length}</div>
+                    </div>
+                    <Dialog
+                      open={createRAGCollectionOpen}
+                      onOpenChange={(open) => {
+                        setCreateRAGCollectionOpen(open);
+                        if (!open) {
+                          setRAGCollectionForm(emptyRAGCollectionForm);
+                        }
+                      }}
+                    >
+                      <DialogTrigger asChild>
+                        <button className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90">
+                          <Plus className="h-4 w-4" />
+                          Create Collection
+                        </button>
+                      </DialogTrigger>
+                      <DialogContent className="sm:max-w-xl">
+                        <DialogHeader>
+                          <DialogTitle>Create Knowledge Base</DialogTitle>
+                          <DialogDescription>
+                            Add a global collection that can later be connected to one or many projects.
+                          </DialogDescription>
+                        </DialogHeader>
+                        <form className="space-y-4" onSubmit={createRAGCollection}>
+                          <label className="block space-y-2">
+                            <span className="text-sm text-muted-foreground">Collection ID</span>
+                            <input
+                              required
+                              value={ragCollectionForm.id}
+                              onChange={(event) =>
+                                setRAGCollectionForm((current) => ({ ...current, id: event.target.value }))
+                              }
+                              className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
+                              placeholder="crm_gym"
+                            />
+                          </label>
+                          <label className="block space-y-2">
+                            <span className="text-sm text-muted-foreground">Name</span>
+                            <input
+                              required
+                              value={ragCollectionForm.name}
+                              onChange={(event) =>
+                                setRAGCollectionForm((current) => ({ ...current, name: event.target.value }))
+                              }
+                              className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
+                              placeholder="CRM Gym Codebase"
+                            />
+                          </label>
+                          <label className="block space-y-2">
+                            <span className="text-sm text-muted-foreground">Index path</span>
+                            <input
+                              value={ragCollectionForm.index_path}
+                              onChange={(event) =>
+                                setRAGCollectionForm((current) => ({ ...current, index_path: event.target.value }))
+                              }
+                              className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
+                              placeholder=".mcpbox/rag/crm_gym.bleve"
+                            />
+                          </label>
+                          <DialogFooter>
+                            <button
+                              type="submit"
+                              disabled={creatingRAGCollection}
+                              className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                            >
+                              {creatingRAGCollection ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                              Create
+                            </button>
+                          </DialogFooter>
+                        </form>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+                </div>
+              </div>
+
+              <section className="rounded-2xl border border-border bg-card p-6">
+                {allRAGCollections.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border bg-background px-4 py-6 text-sm text-muted-foreground">
+                    No knowledge bases created yet.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {allRAGCollections.map((collection) => (
+                      <div key={collection.collection_id} className="rounded-xl border border-border bg-background p-4">
+                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2">
+                              <Database className="h-4 w-4 text-electric-blue" />
+                              <div className="font-medium">{collection.name}</div>
+                            </div>
+                            <div className="mt-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                              {collection.collection_id} · {collection.data_type}
+                            </div>
+                            <code className="mt-2 block overflow-x-auto text-xs text-electric-blue">
+                              {collection.index_path}
+                            </code>
+                          </div>
+                          <button
+                            onClick={() => void deleteRAGCollection(collection.collection_id)}
+                            disabled={linkingCollectionId === collection.collection_id}
+                            className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-destructive/30 px-4 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-70"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Delete
+                          </button>
+                        </div>
+
+                        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                          <div className="rounded-xl border border-border bg-card p-4">
+                            <div className="text-sm font-medium">Index Folder</div>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              Point the collection at a local directory and index supported code and text files.
+                            </p>
+                            <input
+                              value={ragIndexPaths[collection.collection_id] ?? ''}
+                              onChange={(event) =>
+                                setRAGIndexPaths((current) => ({
+                                  ...current,
+                                  [collection.collection_id]: event.target.value,
+                                }))
+                              }
+                              className="mt-3 h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
+                              placeholder="/path/to/project"
+                            />
+                            <button
+                              onClick={() => void indexRAGCollection(collection.collection_id)}
+                              disabled={indexingCollectionId === collection.collection_id}
+                              className="mt-3 inline-flex h-10 items-center justify-center gap-2 rounded-md bg-foreground px-4 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-70"
+                            >
+                              {indexingCollectionId === collection.collection_id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                              Index
+                            </button>
+                          </div>
+
+                          <div className="rounded-xl border border-border bg-card p-4">
+                            <div className="text-sm font-medium">Search Collection</div>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              Run a quick keyword search and inspect the most relevant indexed chunks.
+                            </p>
+                            <div className="mt-3 flex gap-3">
+                              <input
+                                value={ragSearchQueries[collection.collection_id] ?? ''}
+                                onChange={(event) =>
+                                  setRAGSearchQueries((current) => ({
+                                    ...current,
+                                    [collection.collection_id]: event.target.value,
+                                  }))
+                                }
+                                className="h-10 min-w-0 flex-1 rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
+                                placeholder="payment gateway"
+                              />
+                              <button
+                                onClick={() => void searchRAGCollection(collection.collection_id)}
+                                disabled={searchingCollectionId === collection.collection_id}
+                                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                              >
+                                {searchingCollectionId === collection.collection_id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <TextSearch className="h-4 w-4" />}
+                                Search
+                              </button>
+                            </div>
+                            {(ragSearchResults[collection.collection_id] ?? []).length > 0 ? (
+                              <div className="mt-4 space-y-3">
+                                {(ragSearchResults[collection.collection_id] ?? []).map((item) => (
+                                  <div key={item.id} className="rounded-lg border border-border bg-background p-3">
+                                    <code className="block overflow-x-auto text-xs text-electric-blue">{item.file_path}</code>
+                                    <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-xs text-foreground/85">{item.content}</pre>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
             </section>
           ) : view === 'market' ? (
             <section className="space-y-6">
@@ -2393,7 +2851,7 @@ export default function App() {
                       </p>
                     </div>
 
-                    <div className="grid gap-3 sm:grid-cols-4">
+                    <div className="grid gap-3 sm:grid-cols-5">
                       <div className="rounded-xl border border-border bg-background px-4 py-3">
                         <div className="text-sm text-muted-foreground">{labels.servers}</div>
                         <div className="mt-1 text-2xl font-semibold">
@@ -2419,6 +2877,12 @@ export default function App() {
                         <div className="text-sm text-muted-foreground">{labels.oauthConnected}</div>
                         <div className="mt-1 text-2xl font-semibold">
                           {selectedProjectOAuthConnectedCount}
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-border bg-background px-4 py-3">
+                        <div className="text-sm text-muted-foreground">Knowledge Bases</div>
+                        <div className="mt-1 text-2xl font-semibold">
+                          {selectedProject.rag_collections.length}
                         </div>
                       </div>
                     </div>
@@ -2549,6 +3013,112 @@ export default function App() {
                     </div>
                   ) : null}
                 </div>
+              </section>
+
+              <section className="rounded-2xl border border-border bg-card p-6">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-lg font-semibold">Connected Knowledge Bases</h3>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Attach one or many global collections to this project.
+                    </p>
+                  </div>
+                  <Dialog open={connectRAGCollectionOpen} onOpenChange={setConnectRAGCollectionOpen}>
+                    <DialogTrigger asChild>
+                      <button className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90">
+                        <Plus className="h-4 w-4" />
+                        Connect Knowledge Base
+                      </button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-xl">
+                      <DialogHeader>
+                        <DialogTitle>Connect Knowledge Base</DialogTitle>
+                        <DialogDescription>
+                          Choose one of the global collections and attach it to this project.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-3">
+                        {availableRAGCollections.length === 0 ? (
+                          <div className="rounded-xl border border-dashed border-border bg-background px-4 py-6 text-sm text-muted-foreground">
+                            No available collections. Create one in the Knowledge Base tab first.
+                          </div>
+                        ) : (
+                          availableRAGCollections.map((collection) => (
+                            <div key={collection.collection_id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-background p-4">
+                              <div className="min-w-0">
+                                <div className="font-medium">{collection.name}</div>
+                                <div className="mt-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                                  {collection.collection_id} · {collection.data_type}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => void connectRAGCollectionToProject(collection.collection_id)}
+                                disabled={linkingCollectionId === collection.collection_id}
+                                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                              >
+                                {linkingCollectionId === collection.collection_id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                                Connect
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+
+                {selectedProject.rag_collections.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border bg-background px-4 py-6 text-sm text-muted-foreground">
+                    No knowledge bases connected to this project yet.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="rounded-xl border border-electric-blue/20 bg-electric-blue/8 p-4">
+                      <div className="flex items-center gap-2 text-sm font-medium text-electric-blue">
+                        <Database className="h-4 w-4" />
+                        MCP Tool Ready
+                      </div>
+                      <p className="mt-2 text-sm text-foreground/85">
+                        This project now exposes an internal MCP tool named <code>search_project_knowledge</code>.
+                        Any model connected through the project endpoint can call it to search across all connected knowledge bases.
+                      </p>
+                      <div className="mt-3 rounded-lg border border-border bg-background p-3">
+                        <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                          Tool Contract
+                        </div>
+                        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-xs text-foreground/85">{`search_project_knowledge({
+  query: "payment gateway",
+  limit: 5,
+  collections: ["crm_gym"]
+})`}</pre>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                    {selectedProject.rag_collections.map((collection) => (
+                      <div key={collection.collection_id} className="flex flex-col gap-3 rounded-xl border border-border bg-background p-4 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <Database className="h-4 w-4 text-electric-blue" />
+                            <div className="font-medium">{collection.name}</div>
+                          </div>
+                          <div className="mt-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                            {collection.collection_id} · {collection.data_type}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => void disconnectRAGCollectionFromProject(collection.collection_id)}
+                          disabled={busyProjectId === selectedProject.project_id}
+                          className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          Disconnect
+                        </button>
+                      </div>
+                    ))}
+                    </div>
+                  </div>
+                )}
               </section>
 
               <section className="rounded-2xl border border-border bg-card p-6">
