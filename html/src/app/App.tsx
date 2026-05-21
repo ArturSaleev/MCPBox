@@ -3,6 +3,8 @@ import {
   AlertCircle,
   Bot,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Copy,
   Database,
   FolderKanban,
@@ -87,6 +89,7 @@ type ProjectStatus = {
   token: string;
   is_paused: boolean;
   connect_url: string;
+  connect_urls: string[];
   connection_ready: boolean;
   servers: ServerStatus[];
   rag_collections: RAGCollection[];
@@ -584,7 +587,7 @@ export default function App() {
   const [language, setLanguage] = useState<Language>(detectInitialLanguage);
   const [projects, setProjects] = useState<ProjectStatus[]>([]);
   const [logs, setLogs] = useState<AuditLog[]>([]);
-  const [logsCurrentProjectOnly, setLogsCurrentProjectOnly] = useState(false);
+  const [selectedLogsProjectId, setSelectedLogsProjectId] = useState<number | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [projectForm, setProjectForm] = useState<ProjectFormState>(emptyProjectForm);
   const [serverForm, setServerForm] = useState<ServerFormState>(emptyServerForm);
@@ -638,6 +641,7 @@ export default function App() {
   const [authOpen, setAuthOpen] = useState(false);
   const [authServerId, setAuthServerId] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
+  const [connectionURLsExpanded, setConnectionURLsExpanded] = useState(false);
   const logsViewportRef = useRef<HTMLDivElement | null>(null);
   const dictionary = dictionaries[language];
   const { labels, messages } = dictionary;
@@ -647,15 +651,20 @@ export default function App() {
   ];
   const navigationItems = [
     { id: 'projects' as const, label: labels.projects, icon: FolderKanban },
-    { id: 'knowledge' as const, label: 'Knowledge Base', icon: Database },
+    { id: 'knowledge' as const, label: labels.knowledgeBase, icon: Database },
     { id: 'market' as const, label: labels.market, icon: ShoppingBag },
     { id: 'logs' as const, label: labels.logs, icon: TextSearch },
   ];
 
   const selectedProject =
     projects.find((project) => project.project_id === selectedProjectId) ?? null;
+  const alternativeConnectURLs = (selectedProject?.connect_urls ?? []).filter(
+    (url) => url !== selectedProject?.connect_url,
+  );
   const filteredLogsProject =
-    logsCurrentProjectOnly ? selectedProject : null;
+    selectedLogsProjectId !== null
+      ? projects.find((project) => project.project_id === selectedLogsProjectId) ?? null
+      : null;
   const serverNamesById = Object.fromEntries(
     projects.flatMap((project) =>
       project.servers.map((server) => [server.id, server.name] as const),
@@ -712,6 +721,10 @@ export default function App() {
   }, [language]);
 
   useEffect(() => {
+    setConnectionURLsExpanded(false);
+  }, [selectedProjectId]);
+
+  useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
@@ -755,7 +768,7 @@ export default function App() {
 
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);
-  }, [logsCurrentProjectOnly, selectedProjectId]);
+  }, [selectedLogsProjectId]);
 
   useEffect(() => {
     void Promise.all([loadProjects(true), loadRAGCollections(), loadCatalog(true), loadInstalledPackages(), loadOllamaStatus()]);
@@ -781,7 +794,7 @@ export default function App() {
     if (view === 'logs') {
       void loadLogs();
     }
-  }, [view, logsCurrentProjectOnly, selectedProjectId]);
+  }, [view, selectedLogsProjectId]);
 
   useEffect(() => {
     if (view !== 'logs') {
@@ -793,7 +806,7 @@ export default function App() {
     }, 5000);
 
     return () => window.clearInterval(intervalID);
-  }, [view, logsCurrentProjectOnly, selectedProjectId]);
+  }, [view, selectedLogsProjectId]);
 
   useEffect(() => {
     if (view !== 'logs' || !logsViewportRef.current) {
@@ -873,7 +886,7 @@ export default function App() {
     }
     try {
       const query =
-        logsCurrentProjectOnly && selectedProjectId ? `?project_id=${selectedProjectId}` : '';
+        selectedLogsProjectId !== null ? `?project_id=${selectedLogsProjectId}` : '';
       const nextLogs = await apiRequest<AuditLog[]>(
         `/api/logs${query}`,
         messages.requestFailed,
@@ -1621,7 +1634,7 @@ export default function App() {
   }
 
   async function deleteRAGCollection(collectionId: string) {
-    const confirmed = window.confirm('Delete this knowledge base?');
+    const confirmed = window.confirm(messages.deleteKnowledgeBaseConfirm);
     if (!confirmed) {
       return;
     }
@@ -1709,7 +1722,7 @@ export default function App() {
   async function searchRAGCollection(collectionId: string) {
     const query = (ragSearchQueries[collectionId] ?? '').trim();
     if (!query) {
-      setActionError('Search query is required.');
+      setActionError(messages.searchQueryRequired);
       return;
     }
 
@@ -1860,10 +1873,10 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto flex min-h-screen max-w-[1600px]">
-        <aside className="flex w-20 flex-col items-center border-r border-border bg-sidebar/55 px-3 py-6">
+      <div className="flex min-h-screen w-full">
+        <aside className="sticky top-0 flex h-screen w-20 shrink-0 flex-col items-center border-r border-border bg-sidebar/55 px-3 py-6">
           <div className="flex h-full flex-col items-center gap-3">
-            <div className="mb-2 flex h-12 w-12 items-center justify-center rounded-2xl border border-border bg-card p-2">
+            <div className="mb-2 flex h-12 w-12 items-center justify-center">
               <img src={logo} alt={labels.appTitle} className="max-h-full w-auto object-contain" />
             </div>
             {navigationItems.map((item) => {
@@ -1894,6 +1907,7 @@ export default function App() {
           </div>
         </aside>
 
+        {view === 'projects' ? (
         <aside className="w-full max-w-sm border-r border-border bg-sidebar/40">
           <div className="border-b border-border px-6 py-5">
             <div className="flex items-center justify-between gap-3">
@@ -2082,6 +2096,7 @@ export default function App() {
 
           </div>
         </aside>
+        ) : null}
 
         <main className="flex-1 p-6 md:p-8">
           {error ? (
@@ -2104,15 +2119,26 @@ export default function App() {
                   <h2 className="text-2xl font-semibold">{labels.auditLogs}</h2>
                 </div>
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                    <label className="flex items-center gap-3 rounded-md border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
-                      <input
-                        type="checkbox"
-                        checked={logsCurrentProjectOnly}
-                        onChange={(event) => setLogsCurrentProjectOnly(event.target.checked)}
-                        className="h-4 w-4 rounded border-border"
-                      />
-                      <span>{labels.currentProjectOnly}</span>
-                    </label>
+                    <div className="min-w-[220px]">
+                      <Select
+                        value={selectedLogsProjectId === null ? 'all' : String(selectedLogsProjectId)}
+                        onValueChange={(value) =>
+                          setSelectedLogsProjectId(value === 'all' ? null : Number(value))
+                        }
+                      >
+                        <SelectTrigger className="h-10 rounded-md border-border bg-background text-sm">
+                          <SelectValue placeholder={labels.filterByProject} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">{labels.allProjects}</SelectItem>
+                          {projects.map((project) => (
+                            <SelectItem key={`logs-project-${project.project_id}`} value={String(project.project_id)}>
+                              {project.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                     <button
                       onClick={() => void loadLogs()}
                       className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent"
@@ -2258,16 +2284,16 @@ export default function App() {
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <p className="text-sm uppercase tracking-[0.24em] text-electric-blue">
-                      Knowledge Base
+                      {labels.knowledgeBase}
                     </p>
-                    <h2 className="mt-2 text-3xl font-semibold">Global Knowledge Collections</h2>
+                    <h2 className="mt-2 text-3xl font-semibold">{messages.knowledgeBaseHeroTitle}</h2>
                     <p className="mt-2 max-w-3xl text-muted-foreground">
-                      Create reusable collections once, index local folders, and then attach them to one or many projects.
+                      {messages.knowledgeBaseHeroDescription}
                     </p>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="rounded-xl border border-border bg-background px-4 py-3">
-                      <div className="text-sm text-muted-foreground">Collections</div>
+                      <div className="text-sm text-muted-foreground">{labels.collections}</div>
                       <div className="mt-1 text-2xl font-semibold">{allRAGCollections.length}</div>
                     </div>
                     <Dialog
@@ -2282,19 +2308,19 @@ export default function App() {
                       <DialogTrigger asChild>
                         <button className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90">
                           <Plus className="h-4 w-4" />
-                          Create Collection
+                          {labels.createCollection}
                         </button>
                       </DialogTrigger>
                       <DialogContent className="sm:max-w-xl">
                         <DialogHeader>
-                          <DialogTitle>Create Knowledge Base</DialogTitle>
+                          <DialogTitle>{messages.createKnowledgeBaseTitle}</DialogTitle>
                           <DialogDescription>
-                            Add a global collection that can later be connected to one or many projects.
+                            {messages.createKnowledgeBaseDescription}
                           </DialogDescription>
                         </DialogHeader>
                         <form className="space-y-4" onSubmit={createRAGCollection}>
                           <label className="block space-y-2">
-                            <span className="text-sm text-muted-foreground">Collection ID</span>
+                            <span className="text-sm text-muted-foreground">{messages.collectionIdLabel}</span>
                             <input
                               required
                               value={ragCollectionForm.id}
@@ -2302,11 +2328,11 @@ export default function App() {
                                 setRAGCollectionForm((current) => ({ ...current, id: event.target.value }))
                               }
                               className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                              placeholder="crm_gym"
+                              placeholder={messages.collectionIdPlaceholder}
                             />
                           </label>
                           <label className="block space-y-2">
-                            <span className="text-sm text-muted-foreground">Name</span>
+                            <span className="text-sm text-muted-foreground">{labels.name}</span>
                             <input
                               required
                               value={ragCollectionForm.name}
@@ -2314,18 +2340,18 @@ export default function App() {
                                 setRAGCollectionForm((current) => ({ ...current, name: event.target.value }))
                               }
                               className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                              placeholder="CRM Gym Codebase"
+                              placeholder={messages.collectionNamePlaceholder}
                             />
                           </label>
                           <label className="block space-y-2">
-                            <span className="text-sm text-muted-foreground">Index path</span>
+                            <span className="text-sm text-muted-foreground">{messages.indexPathLabel}</span>
                             <input
                               value={ragCollectionForm.index_path}
                               onChange={(event) =>
                                 setRAGCollectionForm((current) => ({ ...current, index_path: event.target.value }))
                               }
                               className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                              placeholder=".mcpbox/rag/crm_gym.bleve"
+                              placeholder={messages.indexPathPlaceholder}
                             />
                           </label>
                           <DialogFooter>
@@ -2335,7 +2361,7 @@ export default function App() {
                               className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
                             >
                               {creatingRAGCollection ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                              Create
+                              {labels.create}
                             </button>
                           </DialogFooter>
                         </form>
@@ -2348,7 +2374,7 @@ export default function App() {
               <section className="rounded-2xl border border-border bg-card p-6">
                 {allRAGCollections.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-border bg-background px-4 py-6 text-sm text-muted-foreground">
-                    No knowledge bases created yet.
+                    {messages.noKnowledgeBasesCreated}
                   </div>
                 ) : (
                   <div className="space-y-3">
@@ -2373,15 +2399,15 @@ export default function App() {
                             className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-destructive/30 px-4 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-70"
                           >
                             <Trash2 className="h-4 w-4" />
-                            Delete
+                            {labels.delete}
                           </button>
                         </div>
 
                         <div className="mt-4 grid gap-4 xl:grid-cols-2">
                           <div className="rounded-xl border border-border bg-card p-4">
-                            <div className="text-sm font-medium">Index Folder</div>
+                            <div className="text-sm font-medium">{messages.indexFolderTitle}</div>
                             <p className="mt-1 text-sm text-muted-foreground">
-                              Point the collection at a local directory and index supported code and text files.
+                              {messages.indexFolderDescription}
                             </p>
                             <input
                               value={ragIndexPaths[collection.collection_id] ?? ''}
@@ -2392,7 +2418,7 @@ export default function App() {
                                 }))
                               }
                               className="mt-3 h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                              placeholder="/path/to/project"
+                              placeholder={messages.indexFolderPlaceholder}
                             />
                             <button
                               onClick={() => void indexRAGCollection(collection.collection_id)}
@@ -2400,14 +2426,14 @@ export default function App() {
                               className="mt-3 inline-flex h-10 items-center justify-center gap-2 rounded-md bg-foreground px-4 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-70"
                             >
                               {indexingCollectionId === collection.collection_id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                              Index
+                              {labels.index}
                             </button>
                           </div>
 
                           <div className="rounded-xl border border-border bg-card p-4">
-                            <div className="text-sm font-medium">Search Collection</div>
+                            <div className="text-sm font-medium">{messages.searchCollectionTitle}</div>
                             <p className="mt-1 text-sm text-muted-foreground">
-                              Run a quick keyword search and inspect the most relevant indexed chunks.
+                              {messages.searchCollectionDescription}
                             </p>
                             <div className="mt-3 flex gap-3">
                               <input
@@ -2419,7 +2445,7 @@ export default function App() {
                                   }))
                                 }
                                 className="h-10 min-w-0 flex-1 rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                                placeholder="payment gateway"
+                                placeholder={messages.searchCollectionPlaceholder}
                               />
                               <button
                                 onClick={() => void searchRAGCollection(collection.collection_id)}
@@ -2427,7 +2453,7 @@ export default function App() {
                                 className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
                               >
                                 {searchingCollectionId === collection.collection_id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <TextSearch className="h-4 w-4" />}
-                                Search
+                                {labels.search}
                               </button>
                             </div>
                             {(ragSearchResults[collection.collection_id] ?? []).length > 0 ? (
@@ -2449,7 +2475,50 @@ export default function App() {
               </section>
             </section>
           ) : view === 'market' ? (
-            <section className="space-y-6">
+            <section className="grid gap-6 xl:grid-cols-[260px_minmax(0,1fr)] xl:items-start">
+              <aside className="rounded-2xl border border-border bg-card p-4 xl:sticky xl:top-8 xl:h-[calc(100vh-4rem)] xl:overflow-hidden">
+                <div className="flex h-full flex-col gap-4">
+                  <div>
+                    <div className="text-sm uppercase tracking-[0.24em] text-electric-blue">
+                      {labels.catalog}
+                    </div>
+                    <div className="mt-2 text-lg font-semibold">{labels.integrations}</div>
+                  </div>
+
+                  <div className="space-y-2 overflow-y-auto pr-1 xl:flex-1">
+                    {catalogCategories.map((category) => (
+                      <button
+                        key={`catalog-category-${category}`}
+                        onClick={() => setSelectedCatalogCategory(category)}
+                        className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-xs font-medium transition-colors ${
+                          selectedCatalogCategory === category
+                            ? 'border-electric-blue bg-electric-blue text-white'
+                            : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground'
+                        }`}
+                      >
+                        <span>{category === 'all' ? labels.allCategories : category}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="mt-auto pt-2">
+                    <button
+                      onClick={() => void syncCatalog()}
+                      disabled={catalogSyncing}
+                      className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {catalogSyncing ? (
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4" />
+                      )}
+                      {labels.syncCatalog}
+                    </button>
+                  </div>
+                </div>
+              </aside>
+
+              <div className="space-y-6">
               <div className="rounded-2xl border border-border bg-card p-6">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                   <div>
@@ -2516,41 +2585,6 @@ export default function App() {
                   {messages.selectProjectBeforeInstall}
                 </div>
               ) : null}
-
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap gap-2">
-                  {catalogCategories.map((category) => (
-                    <button
-                      key={`catalog-category-${category}`}
-                      onClick={() => setSelectedCatalogCategory(category)}
-                      className={`inline-flex h-9 items-center justify-center rounded-full border px-4 text-sm font-medium transition-colors ${
-                        selectedCatalogCategory === category
-                          ? 'border-electric-blue bg-electric-blue text-white'
-                          : 'border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground'
-                      }`}
-                    >
-                      {category === 'all' ? labels.allCategories : category}
-                    </button>
-                  ))}
-                </div>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={() => void syncCatalog()}
-                      disabled={catalogSyncing}
-                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-70"
-                      aria-label={labels.syncCatalog}
-                    >
-                      {catalogSyncing ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-4 w-4" />
-                      )}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent>{labels.syncCatalog}</TooltipContent>
-                </Tooltip>
-              </div>
 
               <div className="grid gap-4">
                 {filteredCatalogItems.map((item) => {
@@ -2825,6 +2859,7 @@ export default function App() {
                   ) : null}
                 </DialogContent>
               </Dialog>
+              </div>
             </section>
           ) : !selectedProject ? (
             <div className="flex min-h-[60vh] items-center justify-center rounded-2xl border border-dashed border-border bg-card/50">
@@ -2880,7 +2915,7 @@ export default function App() {
                         </div>
                       </div>
                       <div className="rounded-xl border border-border bg-background px-4 py-3">
-                        <div className="text-sm text-muted-foreground">Knowledge Bases</div>
+                        <div className="text-sm text-muted-foreground">{labels.connectedKnowledgeBases}</div>
                         <div className="mt-1 text-2xl font-semibold">
                           {selectedProject.rag_collections.length}
                         </div>
@@ -3007,6 +3042,39 @@ export default function App() {
                     </button>
                   </div>
 
+                  {alternativeConnectURLs.length > 0 ? (
+                    <div className="mt-3 rounded-xl border border-border bg-background">
+                      <button
+                        type="button"
+                        onClick={() => setConnectionURLsExpanded((current) => !current)}
+                        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-medium transition-colors hover:bg-accent"
+                      >
+                        <span>{messages.otherConnectionOptions}</span>
+                        <span className="inline-flex items-center gap-2 text-muted-foreground">
+                          {connectionURLsExpanded ? labels.hide : labels.showMore}
+                          {connectionURLsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                        </span>
+                      </button>
+                      {connectionURLsExpanded ? (
+                        <div className="border-t border-border px-4 py-4">
+                          <p className="text-sm text-muted-foreground">
+                            {messages.otherConnectionOptionsDescription}
+                          </p>
+                          <div className="mt-3 space-y-2">
+                            {alternativeConnectURLs.map((url) => (
+                              <code
+                                key={url}
+                                className="block overflow-x-auto rounded-lg border border-border bg-card px-3 py-2 text-xs text-electric-blue"
+                              >
+                                {url}
+                              </code>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
                   {!selectedProject.connection_ready ? (
                     <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700">
                       {messages.connectionWarning(selectedProject.token)}
@@ -3018,29 +3086,29 @@ export default function App() {
               <section className="rounded-2xl border border-border bg-card p-6">
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-lg font-semibold">Connected Knowledge Bases</h3>
+                    <h3 className="text-lg font-semibold">{labels.connectedKnowledgeBases}</h3>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Attach one or many global collections to this project.
+                      {messages.connectedKnowledgeBasesDescription}
                     </p>
                   </div>
                   <Dialog open={connectRAGCollectionOpen} onOpenChange={setConnectRAGCollectionOpen}>
                     <DialogTrigger asChild>
                       <button className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90">
                         <Plus className="h-4 w-4" />
-                        Connect Knowledge Base
+                        {messages.connectKnowledgeBaseTitle}
                       </button>
                     </DialogTrigger>
                     <DialogContent className="sm:max-w-xl">
                       <DialogHeader>
-                        <DialogTitle>Connect Knowledge Base</DialogTitle>
+                        <DialogTitle>{messages.connectKnowledgeBaseTitle}</DialogTitle>
                         <DialogDescription>
-                          Choose one of the global collections and attach it to this project.
+                          {messages.connectKnowledgeBaseDescription}
                         </DialogDescription>
                       </DialogHeader>
                       <div className="space-y-3">
                         {availableRAGCollections.length === 0 ? (
                           <div className="rounded-xl border border-dashed border-border bg-background px-4 py-6 text-sm text-muted-foreground">
-                            No available collections. Create one in the Knowledge Base tab first.
+                            {messages.noAvailableCollections}
                           </div>
                         ) : (
                           availableRAGCollections.map((collection) => (
@@ -3057,7 +3125,7 @@ export default function App() {
                                 className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
                               >
                                 {linkingCollectionId === collection.collection_id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                                Connect
+                                {labels.connect}
                               </button>
                             </div>
                           ))
@@ -3069,22 +3137,21 @@ export default function App() {
 
                 {selectedProject.rag_collections.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-border bg-background px-4 py-6 text-sm text-muted-foreground">
-                    No knowledge bases connected to this project yet.
+                    {messages.noKnowledgeBasesConnected}
                   </div>
                 ) : (
                   <div className="space-y-4">
                     <div className="rounded-xl border border-electric-blue/20 bg-electric-blue/8 p-4">
                       <div className="flex items-center gap-2 text-sm font-medium text-electric-blue">
                         <Database className="h-4 w-4" />
-                        MCP Tool Ready
+                        {labels.mcpToolReady}
                       </div>
                       <p className="mt-2 text-sm text-foreground/85">
-                        This project now exposes an internal MCP tool named <code>search_project_knowledge</code>.
-                        Any model connected through the project endpoint can call it to search across all connected knowledge bases.
+                        {messages.mcpToolReadyIntro}<code>search_project_knowledge</code>{messages.mcpToolReadyOutro}
                       </p>
                       <div className="mt-3 rounded-lg border border-border bg-background p-3">
                         <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                          Tool Contract
+                          {labels.toolContract}
                         </div>
                         <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-xs text-foreground/85">{`search_project_knowledge({
   query: "payment gateway",
@@ -3112,7 +3179,7 @@ export default function App() {
                           className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
                         >
                           <Trash2 className="h-4 w-4" />
-                          Disconnect
+                          {labels.disconnect}
                         </button>
                       </div>
                     ))}

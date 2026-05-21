@@ -115,6 +115,12 @@ func (s *Server) projectConnectServers(project models.Project) []models.MCPServe
 		if !server.IsEnabled {
 			continue
 		}
+		if normalizedTransport(server.Transport) == models.ServerTransportSTDIO {
+			runner := s.registry.Runner(server.ID)
+			if runner == nil || !runner.Running() {
+				continue
+			}
+		}
 		servers = append(servers, server)
 	}
 	return servers
@@ -877,16 +883,114 @@ func (s *Server) resolveAggregatePrompt(ctx context.Context, servers []models.MC
 }
 
 func assignToolAliases(tools []aggregateTool) {
+	desiredAliases := make([]string, len(tools))
 	counts := make(map[string]int)
-	for _, tool := range tools {
-		counts[tool.Origin.Name]++
+	for index, tool := range tools {
+		alias := preferredDatabaseToolAlias(tool.Server, tool.Origin.Name)
+		if alias == "" {
+			alias = tool.Origin.Name
+		}
+		desiredAliases[index] = alias
+		counts[alias]++
 	}
 	for index := range tools {
-		if counts[tools[index].Origin.Name] == 1 {
-			tools[index].Alias = tools[index].Origin.Name
+		if description := preferredDatabaseToolDescription(tools[index].Server, tools[index].Origin.Name, tools[index].Origin.Description); description != "" {
+			tools[index].Origin.Description = description
+		}
+	}
+	for index := range tools {
+		if counts[desiredAliases[index]] == 1 {
+			tools[index].Alias = desiredAliases[index]
 			continue
 		}
-		tools[index].Alias = fmt.Sprintf("%s/%s", serverAliasPrefix(tools[index].Server), tools[index].Origin.Name)
+		tools[index].Alias = fmt.Sprintf("%s/%s", serverAliasPrefix(tools[index].Server), desiredAliases[index])
+	}
+}
+
+type databaseServerRole string
+
+const (
+	databaseServerRoleUnknown    databaseServerRole = ""
+	databaseServerRoleMySQLOps   databaseServerRole = "mysql_operational"
+	databaseServerRoleClickHouse databaseServerRole = "clickhouse_analytics"
+)
+
+var databaseToolAliasMap = map[databaseServerRole]map[string]string{
+	databaseServerRoleMySQLOps: {
+		"query":          "mysql_operational_query",
+		"schema":         "mysql_operational_schema",
+		"describe_table": "mysql_operational_describe_table",
+		"find_record":    "mysql_operational_find_record",
+	},
+	databaseServerRoleClickHouse: {
+		"query":          "clickhouse_analytics_query",
+		"schema":         "clickhouse_analytics_schema",
+		"describe_table": "clickhouse_analytics_describe_table",
+		"topn_report":    "clickhouse_analytics_topn_report",
+	},
+}
+
+func preferredDatabaseToolAlias(server models.MCPServer, toolName string) string {
+	role := inferDatabaseServerRole(server)
+	if role == databaseServerRoleUnknown {
+		return ""
+	}
+	aliases := databaseToolAliasMap[role]
+	if alias, ok := aliases[strings.ToLower(strings.TrimSpace(toolName))]; ok {
+		return alias
+	}
+	return ""
+}
+
+func preferredDatabaseToolDescription(server models.MCPServer, toolName, fallback string) string {
+	switch preferredDatabaseToolAlias(server, toolName) {
+	case "mysql_operational_query":
+		return mergePreferredToolDescription("Run read-only SQL against MySQL operational data. Use for current-state records, transactional entities, reference tables, exact lookups, and small-to-medium result sets.", fallback)
+	case "mysql_operational_schema":
+		return mergePreferredToolDescription("Inspect MySQL operational schema: list databases, tables, columns, keys, and relationships before querying transactional data.", fallback)
+	case "mysql_operational_describe_table":
+		return mergePreferredToolDescription("Describe a MySQL table structure, including columns, types, indexes, and constraints, before querying operational data.", fallback)
+	case "mysql_operational_find_record":
+		return mergePreferredToolDescription("Find one or a few operational records in MySQL by id, key, slug, email, code, or other exact identifiers.", fallback)
+	case "clickhouse_analytics_query":
+		return mergePreferredToolDescription("Run read-only SQL against ClickHouse analytical data. Use for aggregations, trends, dashboards, metrics, top-N reports, large historical datasets, event streams, logs, and time-range analysis.", fallback)
+	case "clickhouse_analytics_schema":
+		return mergePreferredToolDescription("Inspect ClickHouse analytical schema: list databases, tables, columns, partitions, and data layout for reporting workloads.", fallback)
+	case "clickhouse_analytics_describe_table":
+		return mergePreferredToolDescription("Describe a ClickHouse table structure, including columns, engine, partitions, sorting keys, and analytical storage details.", fallback)
+	case "clickhouse_analytics_topn_report":
+		return mergePreferredToolDescription("Generate top-N analytical reports from ClickHouse, such as top products, top customers, top endpoints, or top error sources over a time range.", fallback)
+	default:
+		return ""
+	}
+}
+
+func mergePreferredToolDescription(preferred, fallback string) string {
+	preferred = strings.TrimSpace(preferred)
+	fallback = strings.TrimSpace(fallback)
+	if preferred == "" {
+		return fallback
+	}
+	if fallback == "" {
+		return preferred
+	}
+	return preferred + " Upstream description: " + fallback
+}
+
+func inferDatabaseServerRole(server models.MCPServer) databaseServerRole {
+	fingerprint := strings.ToLower(strings.Join([]string{
+		server.Name,
+		server.Command,
+		server.LaunchCommand,
+		server.URL,
+	}, " "))
+	switch {
+	case strings.Contains(fingerprint, "clickhouse"):
+		return databaseServerRoleClickHouse
+	case strings.Contains(fingerprint, "mysql"), strings.Contains(fingerprint, "mariadb"):
+		return databaseServerRoleMySQLOps
+	default:
+		return databaseServerRoleUnknown
 	}
 }
 

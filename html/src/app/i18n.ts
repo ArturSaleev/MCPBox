@@ -113,6 +113,20 @@ type Dictionary = {
     addToProject: string;
     addedToProject: string;
     notInProject: string;
+    knowledgeBase: string;
+    collections: string;
+    create: string;
+    createCollection: string;
+    connect: string;
+    delete: string;
+    disconnect: string;
+    index: string;
+    search: string;
+    connectedKnowledgeBases: string;
+    toolContract: string;
+    mcpToolReady: string;
+    showMore: string;
+    hide: string;
   };
   messages: {
     loadingProjects: string;
@@ -181,6 +195,33 @@ type Dictionary = {
     addPackageDialogDescription: string;
     launchOllamaError: string;
     noOllamaModels: string;
+    knowledgeBaseHeroTitle: string;
+    knowledgeBaseHeroDescription: string;
+    createKnowledgeBaseTitle: string;
+    createKnowledgeBaseDescription: string;
+    collectionIdLabel: string;
+    collectionIdPlaceholder: string;
+    collectionNamePlaceholder: string;
+    indexPathLabel: string;
+    indexPathPlaceholder: string;
+    noKnowledgeBasesCreated: string;
+    indexFolderTitle: string;
+    indexFolderDescription: string;
+    indexFolderPlaceholder: string;
+    searchCollectionTitle: string;
+    searchCollectionDescription: string;
+    searchCollectionPlaceholder: string;
+    searchQueryRequired: string;
+    deleteKnowledgeBaseConfirm: string;
+    connectedKnowledgeBasesDescription: string;
+    connectKnowledgeBaseTitle: string;
+    connectKnowledgeBaseDescription: string;
+    noAvailableCollections: string;
+    noKnowledgeBasesConnected: string;
+    mcpToolReadyIntro: string;
+    mcpToolReadyOutro: string;
+    otherConnectionOptions: string;
+    otherConnectionOptionsDescription: string;
   };
 };
 
@@ -301,6 +342,20 @@ export const dictionaries: Record<Language, Dictionary> = {
       addToProject: 'Add to project',
       addedToProject: 'Added to project',
       notInProject: 'Not in project',
+      knowledgeBase: 'Knowledge Base',
+      collections: 'Collections',
+      create: 'Create',
+      createCollection: 'Create Collection',
+      connect: 'Connect',
+      delete: 'Delete',
+      disconnect: 'Disconnect',
+      index: 'Index',
+      search: 'Search',
+      connectedKnowledgeBases: 'Connected Knowledge Bases',
+      toolContract: 'Tool Contract',
+      mcpToolReady: 'MCP Tool Ready',
+      showMore: 'Show more',
+      hide: 'Hide',
     },
     messages: {
       loadingProjects: 'Loading projects...',
@@ -381,6 +436,43 @@ export const dictionaries: Record<Language, Dictionary> = {
         'Choose a project and configure the selected package instance before adding it.',
       launchOllamaError: 'Failed to launch Ollama terminal.',
       noOllamaModels: 'No local Ollama models found.',
+      knowledgeBaseHeroTitle: 'Global Knowledge Collections',
+      knowledgeBaseHeroDescription:
+        'Create reusable collections once, index local folders, and then attach them to one or many projects.',
+      createKnowledgeBaseTitle: 'Create Knowledge Base',
+      createKnowledgeBaseDescription:
+        'Add a global collection that can later be connected to one or many projects.',
+      collectionIdLabel: 'Collection ID',
+      collectionIdPlaceholder: 'crm_gym',
+      collectionNamePlaceholder: 'CRM Gym Codebase',
+      indexPathLabel: 'Index path',
+      indexPathPlaceholder: '.mcpbox/rag/crm_gym.bleve',
+      noKnowledgeBasesCreated: 'No knowledge bases created yet.',
+      indexFolderTitle: 'Index Folder',
+      indexFolderDescription:
+        'Point the collection at a local directory and index supported code and text files.',
+      indexFolderPlaceholder: '/path/to/project',
+      searchCollectionTitle: 'Search Collection',
+      searchCollectionDescription:
+        'Run a quick keyword search and inspect the most relevant indexed chunks.',
+      searchCollectionPlaceholder: 'payment gateway',
+      searchQueryRequired: 'Search query is required.',
+      deleteKnowledgeBaseConfirm: 'Delete this knowledge base?',
+      connectedKnowledgeBasesDescription:
+        'Attach one or many global collections to this project.',
+      connectKnowledgeBaseTitle: 'Connect Knowledge Base',
+      connectKnowledgeBaseDescription:
+        'Choose one of the global collections and attach it to this project.',
+      noAvailableCollections:
+        'No available collections. Create one in the Knowledge Base tab first.',
+      noKnowledgeBasesConnected: 'No knowledge bases connected to this project yet.',
+      mcpToolReadyIntro:
+        'This project now exposes an internal MCP tool named ',
+      mcpToolReadyOutro:
+        '. Any model connected through the project endpoint can call it to search across all connected knowledge bases.',
+      otherConnectionOptions: 'Other connection options',
+      otherConnectionOptionsDescription:
+        'Use these addresses for LAN access or when the default local URL is not the one you need.',
     },
   },
   ru: {
@@ -496,6 +588,20 @@ export const dictionaries: Record<Language, Dictionary> = {
       addToProject: 'Добавить в проект',
       addedToProject: 'Добавлено в проект',
       notInProject: 'Не в проекте',
+      knowledgeBase: 'База знаний',
+      collections: 'Коллекции',
+      create: 'Создать',
+      createCollection: 'Создать коллекцию',
+      connect: 'Подключить',
+      delete: 'Удалить',
+      disconnect: 'Отключить',
+      index: 'Индексировать',
+      search: 'Поиск',
+      connectedKnowledgeBases: 'Подключенные базы знаний',
+      toolContract: 'Контракт инструмента',
+      mcpToolReady: 'MCP-инструмент готов',
+      showMore: 'Показать еще',
+      hide: 'Скрыть',
     },
     messages: {
       loadingProjects: 'Загружаю проекты...',
@@ -579,6 +685,43 @@ export const dictionaries: Record<Language, Dictionary> = {
         'Настройте выбранный экземпляр пакета перед добавлением в текущий проект.',
       launchOllamaError: 'Не удалось запустить терминал Ollama.',
       noOllamaModels: 'Локальные модели Ollama не найдены.',
+      knowledgeBaseHeroTitle: 'Глобальные коллекции знаний',
+      knowledgeBaseHeroDescription:
+        'Создавайте переиспользуемые коллекции один раз, индексируйте локальные папки и подключайте их к одному или нескольким проектам.',
+      createKnowledgeBaseTitle: 'Создать базу знаний',
+      createKnowledgeBaseDescription:
+        'Добавьте глобальную коллекцию, которую потом можно будет подключать к одному или нескольким проектам.',
+      collectionIdLabel: 'ID коллекции',
+      collectionIdPlaceholder: 'crm_gym',
+      collectionNamePlaceholder: 'CRM Gym Codebase',
+      indexPathLabel: 'Путь индекса',
+      indexPathPlaceholder: '.mcpbox/rag/crm_gym.bleve',
+      noKnowledgeBasesCreated: 'Базы знаний еще не созданы.',
+      indexFolderTitle: 'Индексировать папку',
+      indexFolderDescription:
+        'Укажите локальную директорию для коллекции и проиндексируйте поддерживаемые файлы кода и текста.',
+      indexFolderPlaceholder: '/path/to/project',
+      searchCollectionTitle: 'Поиск по коллекции',
+      searchCollectionDescription:
+        'Выполните быстрый поиск по ключевым словам и просмотрите наиболее релевантные проиндексированные фрагменты.',
+      searchCollectionPlaceholder: 'payment gateway',
+      searchQueryRequired: 'Нужно указать поисковый запрос.',
+      deleteKnowledgeBaseConfirm: 'Удалить эту базу знаний?',
+      connectedKnowledgeBasesDescription:
+        'Подключите к этому проекту одну или несколько глобальных коллекций.',
+      connectKnowledgeBaseTitle: 'Подключить базу знаний',
+      connectKnowledgeBaseDescription:
+        'Выберите одну из глобальных коллекций и подключите ее к этому проекту.',
+      noAvailableCollections:
+        'Нет доступных коллекций. Сначала создайте одну во вкладке "База знаний".',
+      noKnowledgeBasesConnected: 'К этому проекту еще не подключены базы знаний.',
+      mcpToolReadyIntro:
+        'Этот проект теперь публикует внутренний MCP-инструмент ',
+      mcpToolReadyOutro:
+        '. Любая модель, подключенная через endpoint проекта, может вызывать его для поиска по всем подключенным базам знаний.',
+      otherConnectionOptions: 'Другие варианты подключения',
+      otherConnectionOptionsDescription:
+        'Используйте эти адреса для подключения по локальной сети или если нужен не основной локальный URL.',
     },
   },
 };
