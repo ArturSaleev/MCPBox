@@ -47,8 +47,8 @@ func (s *Server) handleLaunchProjectOllama(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if len(s.projectConnectServers(project)) == 0 {
-		writeError(w, http.StatusBadRequest, errors.New("project has no enabled MCP servers configured"))
+	if !s.projectConnectionReady(project) {
+		writeError(w, http.StatusBadRequest, errors.New("project has no enabled MCP servers or connected knowledge bases configured"))
 		return
 	}
 

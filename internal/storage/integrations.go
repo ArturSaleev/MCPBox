@@ -207,6 +207,48 @@ func (s *Store) DeleteProjectIntegrations(ctx context.Context, projectID uint) e
 		Delete(&models.InstalledIntegration{}).Error
 }
 
+func (s *Store) GetInstalledIntegrationByServerID(ctx context.Context, serverID uint) (*models.InstalledIntegration, error) {
+	var integration models.InstalledIntegration
+	err := s.db.WithContext(ctx).
+		Where("server_id = ?", serverID).
+		First(&integration).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &integration, err
+}
+
+func (s *Store) UpdateInstalledIntegration(ctx context.Context, integration *models.InstalledIntegration) error {
+	return s.db.WithContext(ctx).
+		Model(&models.InstalledIntegration{}).
+		Where("id = ?", integration.ID).
+		Updates(map[string]any{
+			"name":        integration.Name,
+			"config_json": integration.ConfigJSON,
+		}).Error
+}
+
+func (s *Store) GetProjectPackageInstanceByServerID(ctx context.Context, serverID uint) (*models.ProjectPackageInstance, error) {
+	var instance models.ProjectPackageInstance
+	err := s.db.WithContext(ctx).
+		Where("server_id = ?", serverID).
+		First(&instance).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &instance, err
+}
+
+func (s *Store) UpdateProjectPackageInstance(ctx context.Context, instance *models.ProjectPackageInstance) error {
+	return s.db.WithContext(ctx).
+		Model(&models.ProjectPackageInstance{}).
+		Where("id = ?", instance.ID).
+		Updates(map[string]any{
+			"name":        instance.Name,
+			"config_json": instance.ConfigJSON,
+		}).Error
+}
+
 func encodeRawJSON(value any) string {
 	payload, err := json.Marshal(value)
 	if err != nil {

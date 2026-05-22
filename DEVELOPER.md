@@ -42,6 +42,7 @@ Important behavior:
 - SQLite storage through GORM
 - orchestration for local `stdio` MCP processes
 - proxy support for remote `HTTP streaming` MCP servers
+- local Knowledge Base / RAG collections backed by on-disk Bleve full-text indexes
 - project-level `/mcp/{project_token}` endpoint
 - synchronous JSON-RPC request/response bridge for HTTP MCP clients
 - legacy SSE compatibility mode for older MCP clients
@@ -55,6 +56,13 @@ Important behavior:
 - catalog sync from external JSON manifests
 - installed integrations stored alongside regular MCP servers
 - embedded Ollama launcher powered by `github.com/mark3labs/mcphost/sdk`
+
+Knowledge Base note:
+- the current RAG layer uses classic local full-text search, not embedding indexes
+- collections are stored on disk and searched through Bleve
+- no external vector database is required
+- no embedding generation pipeline is required at this stage
+- future `Pro` capabilities are documented separately in [PRO-ROADMAP.md](./PRO-ROADMAP.md)
 
 ### Frontend
 

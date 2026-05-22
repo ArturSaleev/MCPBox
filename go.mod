@@ -112,6 +112,7 @@ require (
 	github.com/kaptinlin/jsonpointer v0.4.16 // indirect
 	github.com/kaptinlin/jsonschema v0.7.3 // indirect
 	github.com/kaptinlin/messageformat-go v0.4.18 // indirect
+	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728 // indirect
 	github.com/lucasb-eyer/go-colorful v1.3.0 // indirect
 	github.com/mailru/easyjson v0.9.1 // indirect
 	github.com/mark3labs/mcp-filesystem-server v0.11.1 // indirect

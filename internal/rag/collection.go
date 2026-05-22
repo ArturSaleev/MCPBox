@@ -21,11 +21,16 @@ const (
 )
 
 var supportedExtensions = map[string]struct{}{
-	".go":  {},
-	".js":  {},
-	".md":  {},
-	".php": {},
-	".txt": {},
+	".csv":  {},
+	".docx": {},
+	".go":   {},
+	".js":   {},
+	".md":   {},
+	".php":  {},
+	".pdf":  {},
+	".pptx": {},
+	".txt":  {},
+	".xlsx": {},
 }
 
 // Chunk is the smallest retrievable unit in a collection.
@@ -33,6 +38,7 @@ var supportedExtensions = map[string]struct{}{
 type Chunk struct {
 	ID       string `json:"id"`
 	FilePath string `json:"file_path"`
+	Section  string `json:"section,omitempty"`
 	Content  string `json:"content"`
 }
 
@@ -121,26 +127,31 @@ func (c *Collection) IndexFolder(dirPath string) error {
 			return nil
 		}
 
-		content, err := os.ReadFile(path)
+		document, err := extractDocument(path)
 		if err != nil {
-			return fmt.Errorf("read file %s: %w", path, err)
+			return fmt.Errorf("extract file %s: %w", path, err)
 		}
 
-		chunks := chunkText(string(content))
-		for i, chunkContent := range chunks {
-			chunk := Chunk{
-				ID:       chunkID(path, i),
-				FilePath: filepath.Clean(path),
-				Content:  chunkContent,
-			}
-			if err := batch.Index(chunk.ID, chunk); err != nil {
-				return fmt.Errorf("index chunk %s: %w", chunk.ID, err)
-			}
-			if batch.Size() >= 100 {
-				if err := c.index.Batch(batch); err != nil {
-					return fmt.Errorf("flush index batch: %w", err)
+		chunkIndex := 0
+		for fragmentIndex, fragment := range document.Fragments {
+			chunks := chunkText(fragment.Content)
+			for _, chunkContent := range chunks {
+				chunk := Chunk{
+					ID:       chunkID(path, fragmentIndex, chunkIndex),
+					FilePath: filepath.Clean(path),
+					Section:  fragment.Section,
+					Content:  chunkContent,
 				}
-				batch = c.index.NewBatch()
+				if err := batch.Index(chunk.ID, chunk); err != nil {
+					return fmt.Errorf("index chunk %s: %w", chunk.ID, err)
+				}
+				chunkIndex++
+				if batch.Size() >= 100 {
+					if err := c.index.Batch(batch); err != nil {
+						return fmt.Errorf("flush index batch: %w", err)
+					}
+					batch = c.index.NewBatch()
+				}
 			}
 		}
 
@@ -178,7 +189,7 @@ func (c *Collection) Search(query string, limit int) ([]Chunk, error) {
 	matchQuery.SetField("content")
 
 	request := bleve.NewSearchRequestOptions(matchQuery, limit, 0, false)
-	request.Fields = []string{"id", "file_path", "content"}
+	request.Fields = []string{"id", "file_path", "section", "content"}
 
 	result, err := c.index.Search(request)
 	if err != nil {
@@ -190,6 +201,7 @@ func (c *Collection) Search(query string, limit int) ([]Chunk, error) {
 		chunks = append(chunks, Chunk{
 			ID:       stringField(hit.Fields, "id", hit.ID),
 			FilePath: stringField(hit.Fields, "file_path", ""),
+			Section:  stringField(hit.Fields, "section", ""),
 			Content:  stringField(hit.Fields, "content", ""),
 		})
 	}
@@ -227,11 +239,15 @@ func newIndexMapping() *mapping.IndexMappingImpl {
 	filePathField := bleve.NewTextFieldMapping()
 	filePathField.Store = true
 
+	sectionField := bleve.NewTextFieldMapping()
+	sectionField.Store = true
+
 	contentField := bleve.NewTextFieldMapping()
 	contentField.Store = true
 
 	docMapping.AddFieldMappingsAt("id", idField)
 	docMapping.AddFieldMappingsAt("file_path", filePathField)
+	docMapping.AddFieldMappingsAt("section", sectionField)
 	docMapping.AddFieldMappingsAt("content", contentField)
 
 	indexMapping.DefaultMapping = docMapping
@@ -245,8 +261,8 @@ func isSupportedFile(path string) bool {
 	return ok
 }
 
-func chunkID(filePath string, index int) string {
-	return fmt.Sprintf("%s#%06d", filepath.Clean(filePath), index)
+func chunkID(filePath string, fragmentIndex, chunkIndex int) string {
+	return fmt.Sprintf("%s#%03d#%06d", filepath.Clean(filePath), fragmentIndex, chunkIndex)
 }
 
 func chunkText(content string) []string {

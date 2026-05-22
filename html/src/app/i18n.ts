@@ -208,9 +208,14 @@ type Dictionary = {
     indexFolderTitle: string;
     indexFolderDescription: string;
     indexFolderPlaceholder: string;
+    supportedFormatsLabel: string;
+    supportedFormatsValue: string;
     searchCollectionTitle: string;
     searchCollectionDescription: string;
     searchCollectionPlaceholder: string;
+    searchResultsTitle: string;
+    searchResultsDescription: (name: string) => string;
+    searchResultsEmpty: string;
     searchQueryRequired: string;
     deleteKnowledgeBaseConfirm: string;
     connectedKnowledgeBasesDescription: string;
@@ -438,24 +443,29 @@ export const dictionaries: Record<Language, Dictionary> = {
       noOllamaModels: 'No local Ollama models found.',
       knowledgeBaseHeroTitle: 'Global Knowledge Collections',
       knowledgeBaseHeroDescription:
-        'Create reusable collections once, index local folders, and then attach them to one or many projects.',
+        'Create reusable collections once, index local folders, and then attach them to one or many projects. Supported formats include code, text, CSV, XLSX, DOCX, PPTX, and text-based PDF.',
       createKnowledgeBaseTitle: 'Create Knowledge Base',
       createKnowledgeBaseDescription:
-        'Add a global collection that can later be connected to one or many projects.',
+        'Add a global collection that can later be connected to one or many projects. You can index code, text, spreadsheets, Office documents, and text-based PDFs.',
       collectionIdLabel: 'Collection ID',
       collectionIdPlaceholder: 'crm_gym',
       collectionNamePlaceholder: 'CRM Gym Codebase',
       indexPathLabel: 'Index path',
       indexPathPlaceholder: '.mcpbox/rag/crm_gym.bleve',
       noKnowledgeBasesCreated: 'No knowledge bases created yet.',
-      indexFolderTitle: 'Index Folder',
+      indexFolderTitle: 'Source Folder',
       indexFolderDescription:
-        'Point the collection at a local directory and index supported code and text files.',
+        'Choose the local folder whose files should be added to this knowledge base. Supported formats: code, text, CSV, XLSX, DOCX, PPTX, and text-based PDF.',
       indexFolderPlaceholder: '/path/to/project',
+      supportedFormatsLabel: 'Supported',
+      supportedFormatsValue: 'Code, Text, CSV, XLSX, DOCX, PPTX, PDF (text-based)',
       searchCollectionTitle: 'Search Collection',
       searchCollectionDescription:
         'Run a quick keyword search and inspect the most relevant indexed chunks.',
       searchCollectionPlaceholder: 'payment gateway',
+      searchResultsTitle: 'Search Results',
+      searchResultsDescription: (name: string) => `Top matches from ${name}.`,
+      searchResultsEmpty: 'No matching chunks were found for this query.',
       searchQueryRequired: 'Search query is required.',
       deleteKnowledgeBaseConfirm: 'Delete this knowledge base?',
       connectedKnowledgeBasesDescription:
@@ -687,24 +697,29 @@ export const dictionaries: Record<Language, Dictionary> = {
       noOllamaModels: 'Локальные модели Ollama не найдены.',
       knowledgeBaseHeroTitle: 'Глобальные коллекции знаний',
       knowledgeBaseHeroDescription:
-        'Создавайте переиспользуемые коллекции один раз, индексируйте локальные папки и подключайте их к одному или нескольким проектам.',
+        'Создавайте переиспользуемые коллекции один раз, индексируйте локальные папки и подключайте их к одному или нескольким проектам. Поддерживаются код, текст, CSV, XLSX, DOCX, PPTX и PDF с текстовым слоем.',
       createKnowledgeBaseTitle: 'Создать базу знаний',
       createKnowledgeBaseDescription:
-        'Добавьте глобальную коллекцию, которую потом можно будет подключать к одному или нескольким проектам.',
+        'Добавьте глобальную коллекцию, которую потом можно будет подключать к одному или нескольким проектам. Можно индексировать код, текст, таблицы, офисные документы и PDF с текстовым слоем.',
       collectionIdLabel: 'ID коллекции',
       collectionIdPlaceholder: 'crm_gym',
       collectionNamePlaceholder: 'CRM Gym Codebase',
       indexPathLabel: 'Путь индекса',
       indexPathPlaceholder: '.mcpbox/rag/crm_gym.bleve',
       noKnowledgeBasesCreated: 'Базы знаний еще не созданы.',
-      indexFolderTitle: 'Индексировать папку',
+      indexFolderTitle: 'Папка с файлами',
       indexFolderDescription:
-        'Укажите локальную директорию для коллекции и проиндексируйте поддерживаемые файлы кода и текста.',
+        'Укажите локальную папку, файлы из которой нужно добавить в эту базу знаний. Поддерживаются код, текст, CSV, XLSX, DOCX, PPTX и PDF с текстовым слоем.',
       indexFolderPlaceholder: '/path/to/project',
+      supportedFormatsLabel: 'Поддерживается',
+      supportedFormatsValue: 'Код, Текст, CSV, XLSX, DOCX, PPTX, PDF (с текстовым слоем)',
       searchCollectionTitle: 'Поиск по коллекции',
       searchCollectionDescription:
         'Выполните быстрый поиск по ключевым словам и просмотрите наиболее релевантные проиндексированные фрагменты.',
       searchCollectionPlaceholder: 'payment gateway',
+      searchResultsTitle: 'Результаты поиска',
+      searchResultsDescription: (name: string) => `Лучшие совпадения в коллекции ${name}.`,
+      searchResultsEmpty: 'По этому запросу совпадений не найдено.',
       searchQueryRequired: 'Нужно указать поисковый запрос.',
       deleteKnowledgeBaseConfirm: 'Удалить эту базу знаний?',
       connectedKnowledgeBasesDescription:

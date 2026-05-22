@@ -720,6 +720,79 @@ func TestLaunchProjectOllamaRejectsPausedProject(t *testing.T) {
 	}
 }
 
+func TestLaunchProjectOllamaWithConnectedKnowledgeBaseOnly(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	projectRoot := t.TempDir()
+	project := &models.Project{Name: "Workspace", RootPath: projectRoot}
+	if err := store.CreateProject(context.Background(), project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	collection := &models.RAGCollection{
+		CollectionID: "kb-only",
+		Name:         "KB Only",
+		IndexPath:    filepath.Join(t.TempDir(), "indexes", "kb-only.bleve"),
+	}
+	if err := store.CreateRAGCollection(context.Background(), collection); err != nil {
+		t.Fatalf("CreateRAGCollection() error = %v", err)
+	}
+	if err := store.LinkRAGCollectionToProject(context.Background(), project.ID, collection.ID); err != nil {
+		t.Fatalf("LinkRAGCollectionToProject() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	var launchedCWD string
+	var launchedCommand string
+	api.terminalLauncher = func(cwd, shellCommand string) error {
+		launchedCWD = cwd
+		launchedCommand = shellCommand
+		return nil
+	}
+
+	originalLookPath := execLookPath
+	originalExecutable := osExecutable
+	execLookPath = func(file string) (string, error) {
+		if file == "ollama" {
+			return "/usr/local/bin/ollama", nil
+		}
+		return "", errors.New("unexpected binary lookup")
+	}
+	osExecutable = func() (string, error) {
+		return "/Applications/MCPBox.app/Contents/MacOS/MCPBox", nil
+	}
+	defer func() {
+		execLookPath = originalLookPath
+		osExecutable = originalExecutable
+	}()
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/projects/"+jsonNumber(project.ID)+"/launch-ollama",
+		bytes.NewBufferString(`{"model":"qwen2.5:14b"}`),
+	)
+	request.Host = "mcpbox.local:38180"
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if launchedCWD != project.RootPath {
+		t.Fatalf("launched cwd = %q, want %q", launchedCWD, project.RootPath)
+	}
+	if !strings.Contains(launchedCommand, "ollama-chat --config") {
+		t.Fatalf("launch command = %q", launchedCommand)
+	}
+}
+
 func TestHelperProcess(t *testing.T) {
 	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
 		return
@@ -1392,5 +1465,81 @@ func TestFilesystemPackageAddToProjectPassesRootPathArgument(t *testing.T) {
 	}
 	if got := payload.Servers[0].Args; len(got) != 2 || got[1] != "C:/Work/App" {
 		t.Fatalf("filesystem args = %#v, want root path appended", got)
+	}
+
+	updateBody := bytes.NewBufferString(`{
+		"name":"Filesystem MCP",
+		"transport":"stdio",
+		"command":"node",
+		"args":["dist/index.js","D:/Code/embedservice"],
+		"env_vars":[],
+		"env_passthrough":[],
+		"working_dir":"",
+		"url":"",
+		"bearer_token_env_var":"",
+		"headers":[],
+		"header_env_vars":[],
+		"auth_type":"none",
+		"oauth_provider":"",
+		"oauth_authorize_url":"",
+		"oauth_token_url":"",
+		"oauth_refresh_url":"",
+		"oauth_client_id":"",
+		"oauth_client_secret":"",
+		"oauth_scopes":[],
+		"auto_start":false
+	}`)
+	updateRequest := httptest.NewRequest(http.MethodPut, "/api/servers/"+jsonNumber(payload.Servers[0].ID), updateBody)
+	updateRequest.Host = "mcpbox.local:38180"
+	updateResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(updateResponse, updateRequest)
+	if updateResponse.Code != http.StatusOK {
+		t.Fatalf("server update status = %d, body = %s", updateResponse.Code, updateResponse.Body.String())
+	}
+
+	loadedProject, err := store.GetProject(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("GetProject() error = %v", err)
+	}
+	if loadedProject == nil || len(loadedProject.Servers) != 1 {
+		t.Fatalf("loaded project servers = %#v", loadedProject)
+	}
+	if got := payload.Servers[0].ID; loadedProject.Servers[0].ID != got {
+		t.Fatalf("server id changed after update: got %d want %d", loadedProject.Servers[0].ID, got)
+	}
+	if args, err := decodeStringSlice(loadedProject.Servers[0].ArgsJSON); err != nil {
+		t.Fatalf("decodeStringSlice() error = %v", err)
+	} else if len(args) != 2 || args[1] != "D:/Code/embedservice" {
+		t.Fatalf("updated server args = %#v", args)
+	}
+
+	instances, err := store.ListProjectPackageInstances(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListProjectPackageInstances() error = %v", err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("len(instances) = %d, want 1", len(instances))
+	}
+	var instanceConfig map[string]any
+	if err := json.Unmarshal([]byte(instances[0].ConfigJSON), &instanceConfig); err != nil {
+		t.Fatalf("json.Unmarshal(instance config) error = %v", err)
+	}
+	if got := readConfigString(instanceConfig["root_path"]); got != "D:/Code/embedservice" {
+		t.Fatalf("instance root_path = %q, want updated path", got)
+	}
+
+	integrations, err := store.ListInstalledIntegrations(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListInstalledIntegrations() error = %v", err)
+	}
+	if len(integrations) != 1 {
+		t.Fatalf("len(integrations) = %d, want 1", len(integrations))
+	}
+	var integrationConfig map[string]any
+	if err := json.Unmarshal([]byte(integrations[0].ConfigJSON), &integrationConfig); err != nil {
+		t.Fatalf("json.Unmarshal(integration config) error = %v", err)
+	}
+	if got := readConfigString(integrationConfig["root_path"]); got != "D:/Code/embedservice" {
+		t.Fatalf("integration root_path = %q, want updated path", got)
 	}
 }

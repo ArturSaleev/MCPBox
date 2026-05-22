@@ -213,6 +213,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/rag/collections", s.handleListRAGCollections)
 	s.mux.HandleFunc("POST /api/rag/collections", s.handleCreateRAGCollection)
 	s.mux.HandleFunc("POST /api/rag/collections/", s.handleRAGCollectionAction)
+	s.mux.HandleFunc("PUT /api/rag/collections/", s.handleUpdateRAGCollection)
 	s.mux.HandleFunc("DELETE /api/rag/collections/", s.handleDeleteRAGCollection)
 	s.mux.HandleFunc("GET /api/projects", s.handleListProjects)
 	s.mux.HandleFunc("POST /api/projects", s.handleCreateProject)
@@ -662,6 +663,10 @@ func (s *Server) handleServerUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	if err := s.syncManagedServerConfig(r.Context(), *server); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	if oauthConfigChanged(*existing, *server) || normalizedAuthType(server.AuthType) != models.ServerAuthTypeOAuth2 {
 		_ = s.store.ClearServerOAuthTokens(r.Context(), server.ID)
 	}
@@ -990,7 +995,6 @@ func (s *Server) handleUI() http.Handler {
 }
 
 func (s *Server) projectStatus(r *http.Request, project models.Project) projectStatusResponse {
-	activeServers := s.projectConnectServers(project)
 	connectURLs := s.connectURLs(r, project.Token)
 	response := projectStatusResponse{
 		ProjectID:             project.ID,
@@ -1001,7 +1005,7 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 		IsPaused:              project.IsPaused,
 		ConnectURL:            firstOrEmpty(connectURLs),
 		ConnectURLs:           connectURLs,
-		ConnectionReady:       len(activeServers) > 0 || len(project.RAGCollections) > 0,
+		ConnectionReady:       s.projectConnectionReady(project),
 		Servers:               make([]serverStatusRecord, 0, len(project.Servers)),
 		RAGCollections:        make([]ragCollectionResponse, 0, len(project.RAGCollections)),
 		InstalledIntegrations: mapInstalledIntegrations(project.InstalledIntegrations),
@@ -1059,6 +1063,10 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 	}
 
 	return response
+}
+
+func (s *Server) projectConnectionReady(project models.Project) bool {
+	return len(s.projectConnectServers(project)) > 0 || len(project.RAGCollections) > 0
 }
 
 func (s *Server) connectURL(r *http.Request, token string) string {
@@ -1458,6 +1466,72 @@ func buildServerModel(projectID uint, req addServerRequest) (*models.MCPServer, 
 	}
 
 	return server, nil
+}
+
+func (s *Server) syncManagedServerConfig(ctx context.Context, server models.MCPServer) error {
+	integration, err := s.store.GetInstalledIntegrationByServerID(ctx, server.ID)
+	if err != nil {
+		return err
+	}
+	if integration != nil {
+		integration.Name = server.Name
+		nextConfig, err := syncedManagedServerConfig(integration.CatalogItemID, integration.ConfigJSON, server)
+		if err != nil {
+			return err
+		}
+		integration.ConfigJSON = nextConfig
+		if err := s.store.UpdateInstalledIntegration(ctx, integration); err != nil {
+			return err
+		}
+	}
+
+	instance, err := s.store.GetProjectPackageInstanceByServerID(ctx, server.ID)
+	if err != nil {
+		return err
+	}
+	if instance != nil {
+		instance.Name = server.Name
+		nextConfig, err := syncedManagedServerConfig(instance.CatalogItemID, instance.ConfigJSON, server)
+		if err != nil {
+			return err
+		}
+		instance.ConfigJSON = nextConfig
+		if err := s.store.UpdateProjectPackageInstance(ctx, instance); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func syncedManagedServerConfig(catalogItemID, rawConfig string, server models.MCPServer) (string, error) {
+	config := map[string]any{}
+	if strings.TrimSpace(rawConfig) != "" {
+		if err := json.Unmarshal([]byte(rawConfig), &config); err != nil {
+			return "", err
+		}
+	}
+
+	switch strings.ToLower(strings.TrimSpace(catalogItemID)) {
+	case "filesystem":
+		args, err := decodeStringSlice(server.ArgsJSON)
+		if err != nil {
+			return "", err
+		}
+		rootPath := strings.TrimSpace(lastString(args))
+		if rootPath != "" {
+			config["root_path"] = rootPath
+		}
+	}
+
+	return mustJSON(config), nil
+}
+
+func lastString(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(values[len(values)-1])
 }
 
 func sanitizeStrings(values []string) []string {

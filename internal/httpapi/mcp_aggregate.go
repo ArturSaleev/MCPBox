@@ -92,6 +92,7 @@ type projectKnowledgeSearchArguments struct {
 type projectKnowledgeSearchResultItem struct {
 	CollectionID string `json:"collection_id"`
 	FilePath     string `json:"file_path"`
+	Section      string `json:"section,omitempty"`
 	Content      string `json:"content"`
 }
 
@@ -684,6 +685,7 @@ func (s *Server) callProjectKnowledgeTool(ctx context.Context, project models.Pr
 			items = append(items, projectKnowledgeSearchResultItem{
 				CollectionID: collection.CollectionID,
 				FilePath:     chunk.FilePath,
+				Section:      chunk.Section,
 				Content:      chunk.Content,
 			})
 		}
@@ -695,7 +697,11 @@ func (s *Server) callProjectKnowledgeTool(ctx context.Context, project models.Pr
 
 	textParts := make([]string, 0, len(items))
 	for _, item := range items {
-		textParts = append(textParts, fmt.Sprintf("[%s] %s\n%s", item.CollectionID, item.FilePath, item.Content))
+		location := item.FilePath
+		if strings.TrimSpace(item.Section) != "" {
+			location = fmt.Sprintf("%s · %s", item.FilePath, item.Section)
+		}
+		textParts = append(textParts, fmt.Sprintf("[%s] %s\n%s", item.CollectionID, location, item.Content))
 	}
 	text := "No relevant knowledge chunks found."
 	if len(textParts) > 0 {

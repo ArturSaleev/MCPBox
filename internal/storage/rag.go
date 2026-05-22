@@ -31,6 +31,20 @@ func (s *Store) GetRAGCollectionByCollectionID(ctx context.Context, collectionID
 	return &collection, err
 }
 
+func (s *Store) UpdateRAGCollectionSourcePath(ctx context.Context, collectionID, sourcePath string) error {
+	return s.db.WithContext(ctx).
+		Model(&models.RAGCollection{}).
+		Where("collection_id = ?", collectionID).
+		Update("source_path", sourcePath).Error
+}
+
+func (s *Store) UpdateRAGCollectionName(ctx context.Context, collectionID, name string) error {
+	return s.db.WithContext(ctx).
+		Model(&models.RAGCollection{}).
+		Where("collection_id = ?", collectionID).
+		Update("name", name).Error
+}
+
 func (s *Store) LinkRAGCollectionToProject(ctx context.Context, projectID, collectionDBID uint) error {
 	link := &models.ProjectRAGCollection{
 		ProjectID:       projectID,

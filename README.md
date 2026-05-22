@@ -25,6 +25,7 @@ Managing several MCP servers quickly turns into a mix of JSON snippets, terminal
 Key capabilities:
 - Project-based organization for local `stdio` and remote `HTTP streaming` MCP servers
 - One project MCP endpoint at `/mcp/{project_token}` that aggregates all enabled servers in the project
+- Built-in Knowledge Base / RAG collections with local indexing for code, text, CSV, XLSX, DOCX, PPTX, and text-based PDF
 - Live inspection of `tools`, `resources`, `prompts`, and nearby README files for local `stdio` servers
 - Health checks on create, update, manual check, and local server start
 - Audit log for MCP traffic and control actions
@@ -33,7 +34,16 @@ Key capabilities:
 - One-click Ollama launcher for local MCP testing through embedded `mcphost/sdk`
 - Single-binary deployment with embedded React UI and local SQLite storage
 
-## What Is New In 1.1.1
+## What Is New In 1.2.0
+
+- Built-in Knowledge Base / RAG workflow with a dedicated `Knowledge Base` page in the UI
+- Global knowledge collections that can be connected to one or many projects
+- Local indexing and search for code, text, CSV, XLSX, DOCX, PPTX, and text-based PDF
+- Project-level MCP tool `search_project_knowledge` for querying connected knowledge bases through the project endpoint
+- Better audit visibility for Knowledge Base tool calls and search activity
+- Improved local document context with section metadata such as `Sheet`, `Slide`, and `Page`
+
+## What Was New In 1.1.1
 
 - Windows Ollama launch fix: the embedded `Launch Ollama` flow now starts correctly on Windows through a dedicated PowerShell path
 - Safer command execution on Windows: quoted paths and paths with spaces are handled more reliably
@@ -42,11 +52,10 @@ Key capabilities:
 
 ## What Was New In 1.1.0
 
-- Embedded Ollama support: launch a local `ollama + MCPBox` chat flow from the project UI without installing `mcphost` separately
-- Aggregated project endpoint: enabled project servers are exposed through the same project MCP URL
-- Better project startup: if a project has any enabled `stdio` server with `auto_start=true`, MCPBox starts all enabled `stdio` servers in that project
-- Cleaner Filesystem MCP handling: common informational stderr lines are no longer treated like access failures
-- New Market page and catalog flow: integration discovery, compact sync action, single-column cards, and tighter action placement
+- Embedded Ollama support for one-click local MCP testing
+- New Market page and catalog-based integration flow
+- Better project auto-start so all enabled local servers come up correctly
+- Cleaner Filesystem MCP logs during normal operation
 
 ## Quick Start
 
@@ -90,11 +99,16 @@ Default port: `38180`
 - [README-ru.md](./README-ru.md) - Russian user guide
 - [DEVELOPER.md](./DEVELOPER.md) - developer guide, API notes, and architecture
 - [DEVELOPER-ru.md](./DEVELOPER-ru.md) - Russian developer guide
+- [PRO-ROADMAP.md](./PRO-ROADMAP.md) - planned `Pro` roadmap and edition boundary
+- [PRO-ROADMAP-ru.md](./PRO-ROADMAP-ru.md) - Russian `Pro` roadmap
+- [RELEASE-1.2.0.md](./RELEASE-1.2.0.md) - release notes draft for version `1.2.0`
 - [RELEASE-1.1.1.md](./RELEASE-1.1.1.md) - release notes draft for version `1.1.1`
 - [RELEASE-1.1.0.md](./RELEASE-1.1.0.md) - release notes draft for version `1.1.0`
 
 ## Notes
 
 - MCPBox uses a local SQLite database by default.
+- The current Knowledge Base / RAG implementation uses local full-text indexing with Bleve. It does not build or require embedding indexes at this stage.
+- Future `Pro` capabilities are documented separately in `PRO-ROADMAP.md` and are not part of the current `1.2.0` implementation.
 - The Ollama launcher is shown only when `ollama` is installed on the machine.
 - Local server inspection is available for `stdio` servers only.

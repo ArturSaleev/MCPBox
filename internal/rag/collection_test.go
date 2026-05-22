@@ -1,6 +1,7 @@
 package rag
 
 import (
+	"archive/zip"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -133,4 +134,156 @@ func TestSearchRejectsEmptyQuery(t *testing.T) {
 	if err == nil {
 		t.Fatal("Search() error = nil, want validation error")
 	}
+}
+
+func TestCollectionIndexesOfficeAndTabularDocuments(t *testing.T) {
+	t.Parallel()
+
+	rootDir := t.TempDir()
+	indexPath := filepath.Join(rootDir, "indexes", "documents.bleve")
+	docsDir := filepath.Join(rootDir, "docs")
+	if err := os.MkdirAll(docsDir, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll() error = %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(docsDir, "members.csv"), []byte("name,plan\nIvan,Premium\n"), 0o644); err != nil {
+		t.Fatalf("write csv error = %v", err)
+	}
+	if err := writeZipFile(filepath.Join(docsDir, "report.xlsx"), map[string]string{
+		"xl/workbook.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Plans" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>`,
+		"xl/_rels/workbook.xml.rels": `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`,
+		"xl/sharedStrings.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<sst>
+  <si><t>Plan</t></si>
+  <si><t>Premium</t></si>
+  <si><t>Owner</t></si>
+  <si><t>Ivan</t></si>
+</sst>`,
+		"xl/worksheets/sheet1.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<worksheet>
+  <sheetData>
+    <row r="1"><c t="s"><v>0</v></c><c t="s"><v>1</v></c></row>
+    <row r="2"><c t="s"><v>2</v></c><c t="s"><v>3</v></c></row>
+  </sheetData>
+</worksheet>`,
+	}); err != nil {
+		t.Fatalf("write xlsx error = %v", err)
+	}
+	if err := writeZipFile(filepath.Join(docsDir, "contract.docx"), map[string]string{
+		"word/document.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:r><w:t>Membership contract for premium plan</w:t></w:r></w:p>
+  </w:body>
+</w:document>`,
+	}); err != nil {
+		t.Fatalf("write docx error = %v", err)
+	}
+	if err := writeZipFile(filepath.Join(docsDir, "pitch.pptx"), map[string]string{
+		"ppt/slides/slide1.xml": `<?xml version="1.0" encoding="UTF-8"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld>
+    <p:spTree>
+      <p:sp>
+        <p:txBody>
+          <a:p><a:r><a:t>Sales deck premium onboarding</a:t></a:r></a:p>
+        </p:txBody>
+      </p:sp>
+    </p:spTree>
+  </p:cSld>
+</p:sld>`,
+	}); err != nil {
+		t.Fatalf("write pptx error = %v", err)
+	}
+
+	collection, err := NewCollection("documents", "Documents", indexPath)
+	if err != nil {
+		t.Fatalf("NewCollection() error = %v", err)
+	}
+	defer func() { _ = collection.Close() }()
+
+	if err := collection.IndexFolder(docsDir); err != nil {
+		t.Fatalf("IndexFolder() error = %v", err)
+	}
+
+	assertSearchContainsFile(t, collection, "Ivan Premium", "members.csv")
+	assertSearchContainsFile(t, collection, "Plan Premium", "report.xlsx")
+	assertSearchSection(t, collection, "Plan Premium", "Sheet: Plans")
+	assertSearchContainsFile(t, collection, "membership contract premium", "contract.docx")
+	assertSearchContainsFile(t, collection, "sales deck onboarding", "pitch.pptx")
+	assertSearchSection(t, collection, "sales deck onboarding", "Slide: 1")
+}
+
+func assertSearchContainsFile(t *testing.T, collection *Collection, query, fileName string) {
+	t.Helper()
+
+	results, err := collection.Search(query, 5)
+	if err != nil {
+		t.Fatalf("Search(%q) error = %v", query, err)
+	}
+	if len(results) == 0 {
+		t.Fatalf("Search(%q) returned no results", query)
+	}
+
+	for _, result := range results {
+		if strings.HasSuffix(result.FilePath, fileName) {
+			return
+		}
+	}
+
+	t.Fatalf("Search(%q) did not return %s; results = %#v", query, fileName, results)
+}
+
+func assertSearchSection(t *testing.T, collection *Collection, query, wantSection string) {
+	t.Helper()
+
+	results, err := collection.Search(query, 5)
+	if err != nil {
+		t.Fatalf("Search(%q) error = %v", query, err)
+	}
+	if len(results) == 0 {
+		t.Fatalf("Search(%q) returned no results", query)
+	}
+	for _, result := range results {
+		if result.Section == wantSection {
+			return
+		}
+	}
+	t.Fatalf("Search(%q) missing section %q; results = %#v", query, wantSection, results)
+}
+
+func writeZipFile(path string, files map[string]string) error {
+	handle, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+
+	writer := zip.NewWriter(handle)
+	for name, content := range files {
+		entry, err := writer.Create(name)
+		if err != nil {
+			_ = writer.Close()
+			_ = handle.Close()
+			return err
+		}
+		if _, err := entry.Write([]byte(content)); err != nil {
+			_ = writer.Close()
+			_ = handle.Close()
+			return err
+		}
+	}
+
+	if err := writer.Close(); err != nil {
+		_ = handle.Close()
+		return err
+	}
+	return handle.Close()
 }

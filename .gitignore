@@ -18,6 +18,7 @@ dist/
 
 # Local runtime data
 package_store/
+knowledge_base/
 release/
 mcpbox.db
 *.db

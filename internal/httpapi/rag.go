@@ -10,13 +10,15 @@ import (
 
 	"MCPBox/internal/models"
 	"MCPBox/internal/rag"
+	"github.com/google/uuid"
 )
 
 type createRAGCollectionRequest struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	DataType  string `json:"data_type"`
-	IndexPath string `json:"index_path"`
+	Name string `json:"name"`
+}
+
+type updateRAGCollectionRequest struct {
+	Name string `json:"name"`
 }
 
 type linkRAGCollectionRequest struct {
@@ -37,6 +39,7 @@ type ragCollectionResponse struct {
 	CollectionID string `json:"collection_id"`
 	Name         string `json:"name"`
 	DataType     string `json:"data_type"`
+	SourcePath   string `json:"source_path"`
 	IndexPath    string `json:"index_path"`
 }
 
@@ -66,29 +69,15 @@ func (s *Server) handleCreateRAGCollection(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	collectionID := strings.TrimSpace(req.ID)
 	name := strings.TrimSpace(req.Name)
-	dataType := normalizedRAGDataType(req.DataType)
-	if collectionID == "" {
-		writeError(w, http.StatusBadRequest, errors.New("id is required"))
-		return
-	}
 	if name == "" {
 		writeError(w, http.StatusBadRequest, errors.New("name is required"))
 		return
 	}
 
-	existing, err := s.store.GetRAGCollectionByCollectionID(r.Context(), collectionID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	if existing != nil {
-		writeError(w, http.StatusBadRequest, errors.New("collection id already exists"))
-		return
-	}
+	collectionID := uuid.NewString()
 
-	indexPath, err := resolveRAGIndexPath(strings.TrimSpace(req.IndexPath), collectionID)
+	indexPath, err := resolveRAGIndexPath("", collectionID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -97,7 +86,7 @@ func (s *Server) handleCreateRAGCollection(w http.ResponseWriter, r *http.Reques
 	collection := &models.RAGCollection{
 		CollectionID: collectionID,
 		Name:         name,
-		DataType:     dataType,
+		DataType:     models.RAGDataTypeCode,
 		IndexPath:    indexPath,
 	}
 	if err := s.store.CreateRAGCollection(r.Context(), collection); err != nil {
@@ -160,6 +149,54 @@ func (s *Server) handleDeleteRAGCollection(w http.ResponseWriter, r *http.Reques
 
 	s.logAudit(r.Context(), nil, nil, "rag_collection_deleted", clientActor(r), collectionID)
 	writeJSON(w, http.StatusOK, map[string]any{"collection_id": collectionID, "deleted": true})
+}
+
+func (s *Server) handleUpdateRAGCollection(w http.ResponseWriter, r *http.Request) {
+	collectionID, ok := parseSingleStringID(r.URL.Path, "/api/rag/collections/")
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+
+	collection, err := s.store.GetRAGCollectionByCollectionID(r.Context(), collectionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if collection == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	var req updateRAGCollectionRequest
+	if err := decodeJSON(r.Body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, errors.New("name is required"))
+		return
+	}
+
+	if err := s.store.UpdateRAGCollectionName(r.Context(), collectionID, name); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	updatedCollection, err := s.store.GetRAGCollectionByCollectionID(r.Context(), collectionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if updatedCollection == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	s.logAudit(r.Context(), nil, nil, "rag_collection_updated", clientActor(r), collectionID)
+	writeJSON(w, http.StatusOK, mapRAGCollection(*updatedCollection))
 }
 
 func (s *Server) handleProjectRAGCollectionAction(w http.ResponseWriter, r *http.Request, projectID uint) {
@@ -258,6 +295,10 @@ func (s *Server) handleIndexRAGCollection(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	if err := s.store.UpdateRAGCollectionSourcePath(r.Context(), collection.CollectionID, dirPath); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 
 	s.logAudit(r.Context(), nil, nil, "rag_collection_indexed", clientActor(r), collection.CollectionID)
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -296,6 +337,7 @@ func mapRAGCollection(collection models.RAGCollection) ragCollectionResponse {
 		CollectionID: collection.CollectionID,
 		Name:         collection.Name,
 		DataType:     normalizedRAGDataType(collection.DataType),
+		SourcePath:   collection.SourcePath,
 		IndexPath:    collection.IndexPath,
 	}
 }
@@ -309,11 +351,11 @@ func resolveRAGIndexPath(indexPath, collectionID string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(cwd, ".mcpbox", "rag", sanitizeRAGPathSegment(collectionID)+".bleve"), nil
+	return filepath.Join(cwd, "knowledge_base", "indexes", sanitizeRAGPathSegment(collectionID)), nil
 }
 
 func sanitizeRAGPathSegment(value string) string {
-	value = strings.TrimSpace(value)
+	value = strings.ToLower(strings.TrimSpace(value))
 	if value == "" {
 		return "collection"
 	}

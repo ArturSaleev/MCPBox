@@ -43,9 +43,6 @@ func NewStore(dsn string) (*Store, error) {
 	if err := db.AutoMigrate(&models.AuditLog{}); err != nil {
 		return nil, err
 	}
-	if err := db.AutoMigrate(&models.RAGCollection{}, &models.ProjectRAGCollection{}); err != nil {
-		return nil, err
-	}
 	if err := db.AutoMigrate(
 		&models.ProjectCatalogSettings{},
 		&models.IntegrationCatalogItem{},
@@ -56,6 +53,15 @@ func NewStore(dsn string) (*Store, error) {
 		return nil, err
 	}
 	if err := migrateLegacyProjectSchema(db); err != nil {
+		return nil, err
+	}
+	if err := migrateLegacyMCPServerSchema(db); err != nil {
+		return nil, err
+	}
+	if err := migrateLegacyRAGCollectionSchema(db); err != nil {
+		return nil, err
+	}
+	if err := db.AutoMigrate(&models.RAGCollection{}, &models.ProjectRAGCollection{}); err != nil {
 		return nil, err
 	}
 
@@ -109,6 +115,136 @@ func migrateLegacyProjectSchema(db *gorm.DB) error {
 		}
 		return tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_token ON projects(token)`).Error
 	})
+}
+
+func migrateLegacyRAGCollectionSchema(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&models.RAGCollection{}) {
+		return nil
+	}
+	if !db.Migrator().HasColumn("rag_collections", "project_id") {
+		return nil
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		const replacementTable = "rag_collections__mcpbox_rebuild"
+
+		if err := tx.Exec(`CREATE TABLE IF NOT EXISTS project_rag_collections (
+			project_id INTEGER NOT NULL,
+			rag_collection_id INTEGER NOT NULL,
+			created_at DATETIME,
+			PRIMARY KEY (project_id, rag_collection_id)
+		)`).Error; err != nil {
+			return err
+		}
+		if !tx.Migrator().HasColumn("project_rag_collections", "created_at") {
+			if err := tx.Exec(`ALTER TABLE project_rag_collections ADD COLUMN created_at DATETIME`).Error; err != nil {
+				return err
+			}
+		}
+
+		if err := tx.Exec(fmt.Sprintf(`DROP TABLE IF EXISTS %s`, replacementTable)).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(fmt.Sprintf(`
+			CREATE TABLE %s (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				collection_id TEXT NOT NULL,
+				name TEXT NOT NULL,
+				data_type TEXT NOT NULL DEFAULT 'code',
+				index_path TEXT NOT NULL,
+				created_at DATETIME,
+				updated_at DATETIME
+			)
+		`, replacementTable)).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(fmt.Sprintf(`
+			INSERT INTO %s (id, collection_id, name, data_type, index_path, created_at, updated_at)
+			SELECT
+				id,
+				collection_id,
+				name,
+				CASE
+					WHEN COALESCE(TRIM(data_type), '') = '' THEN 'code'
+					ELSE data_type
+				END,
+				index_path,
+				created_at,
+				updated_at
+			FROM rag_collections
+		`, replacementTable)).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+			INSERT OR IGNORE INTO project_rag_collections (project_id, rag_collection_id, created_at)
+			SELECT project_id, id, created_at
+			FROM rag_collections
+			WHERE project_id IS NOT NULL
+		`).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`DROP TABLE rag_collections`).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(fmt.Sprintf(`ALTER TABLE %s RENAME TO rag_collections`, replacementTable)).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_rag_collections_collection_id ON rag_collections(collection_id)`).Error
+	})
+}
+
+func migrateLegacyMCPServerSchema(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&models.MCPServer{}) {
+		return nil
+	}
+
+	type columnSpec struct {
+		name       string
+		definition string
+	}
+
+	columns := []columnSpec{
+		{name: "bearer_token_env_var", definition: "TEXT"},
+		{name: "headers_json", definition: "TEXT"},
+		{name: "header_env_json", definition: "TEXT"},
+		{name: "auth_type", definition: "TEXT NOT NULL DEFAULT 'none'"},
+		{name: "oauth_provider", definition: "TEXT"},
+		{name: "oauth_authorize_url", definition: "TEXT"},
+		{name: "oauth_token_url", definition: "TEXT"},
+		{name: "oauth_refresh_url", definition: "TEXT"},
+		{name: "oauth_use_pkce", definition: "NUMERIC NOT NULL DEFAULT 1"},
+		{name: "oauth_scope_delimiter", definition: "TEXT NOT NULL DEFAULT ' '"},
+		{name: "oauth_client_auth_method", definition: "TEXT NOT NULL DEFAULT 'client_secret_basic'"},
+		{name: "oauth_authorize_params_json", definition: "TEXT"},
+		{name: "oauth_token_params_json", definition: "TEXT"},
+		{name: "oauth_client_id", definition: "TEXT"},
+		{name: "oauth_client_secret", definition: "TEXT"},
+		{name: "oauth_scopes_json", definition: "TEXT"},
+		{name: "oauth_access_token", definition: "TEXT"},
+		{name: "oauth_refresh_token", definition: "TEXT"},
+		{name: "oauth_token_expiry", definition: "DATETIME"},
+		{name: "oauth_connected_at", definition: "DATETIME"},
+		{name: "oauth_last_error", definition: "TEXT"},
+		{name: "is_enabled", definition: "NUMERIC NOT NULL DEFAULT 1"},
+		{name: "health_status", definition: "TEXT NOT NULL DEFAULT 'unknown'"},
+		{name: "health_error", definition: "TEXT"},
+		{name: "health_checked_at", definition: "DATETIME"},
+	}
+
+	for _, column := range columns {
+		if db.Migrator().HasColumn(&models.MCPServer{}, column.name) {
+			continue
+		}
+		if err := db.Exec(fmt.Sprintf(
+			`ALTER TABLE mcp_servers ADD COLUMN %s %s`,
+			column.name,
+			column.definition,
+		)).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s *Store) CreateProject(ctx context.Context, project *models.Project) error {
