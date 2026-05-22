@@ -16,6 +16,7 @@ import (
 
 	"MCPBox/internal/models"
 	"MCPBox/internal/orchestrator"
+	"MCPBox/internal/rag"
 )
 
 type projectRequestEnvelope struct {
@@ -82,6 +83,21 @@ type aggregatedToolResult struct {
 	OutputSchema json.RawMessage `json:"outputSchema,omitempty"`
 }
 
+type projectKnowledgeSearchArguments struct {
+	Query       string   `json:"query"`
+	Limit       int      `json:"limit,omitempty"`
+	Collections []string `json:"collections,omitempty"`
+}
+
+type projectKnowledgeSearchResultItem struct {
+	CollectionID string `json:"collection_id"`
+	FilePath     string `json:"file_path"`
+	Section      string `json:"section,omitempty"`
+	Content      string `json:"content"`
+}
+
+const projectKnowledgeSearchToolName = "search_project_knowledge"
+
 type listResourcesResult struct {
 	Resources  []orchestrator.InspectionItem `json:"resources"`
 	NextCursor string                        `json:"nextCursor,omitempty"`
@@ -99,6 +115,12 @@ func (s *Server) projectConnectServers(project models.Project) []models.MCPServe
 	for _, server := range project.Servers {
 		if !server.IsEnabled {
 			continue
+		}
+		if normalizedTransport(server.Transport) == models.ServerTransportSTDIO {
+			runner := s.registry.Runner(server.ID)
+			if runner == nil || !runner.Running() {
+				continue
+			}
 		}
 		servers = append(servers, server)
 	}
@@ -227,6 +249,9 @@ func (s *Server) dispatchProjectJSONRPC(
 		if err != nil {
 			return nil, false, err
 		}
+		if len(project.RAGCollections) > 0 {
+			tools = append(tools, s.projectKnowledgeAggregateTool())
+		}
 		result := struct {
 			Tools []aggregatedToolResult `json:"tools"`
 		}{
@@ -251,6 +276,17 @@ func (s *Server) dispatchProjectJSONRPC(
 		var params toolCallParams
 		if err := json.Unmarshal(request.Params, &params); err != nil {
 			return nil, false, errors.New("invalid tools/call params")
+		}
+		if params.Name == projectKnowledgeSearchToolName {
+			result, err := s.callProjectKnowledgeTool(ctx, project, params.Arguments)
+			if err != nil {
+				return nil, false, err
+			}
+			return mustMarshal(projectResponseEnvelope{
+				JSONRPC: "2.0",
+				ID:      request.ID,
+				Result:  result,
+			}), true, nil
 		}
 		tool, err := s.resolveAggregateTool(ctx, servers, params.Name)
 		if err != nil {
@@ -562,6 +598,145 @@ func (s *Server) aggregateTools(ctx context.Context, servers []models.MCPServer)
 	return tools, nil
 }
 
+func (s *Server) projectKnowledgeAggregateTool() aggregateTool {
+	return aggregateTool{
+		Origin: orchestrator.InspectionTool{
+			Name:        projectKnowledgeSearchToolName,
+			Title:       "Project Knowledge Search",
+			Description: "Searches across all knowledge base collections connected to the current project.",
+			InputSchema: json.RawMessage(`{
+				"type":"object",
+				"properties":{
+					"query":{"type":"string","description":"What to search for in the connected project knowledge bases."},
+					"limit":{"type":"integer","minimum":1,"maximum":20,"description":"Maximum number of chunks to return."},
+					"collections":{"type":"array","items":{"type":"string"},"description":"Optional subset of connected collection ids to search in."}
+				},
+				"required":["query"]
+			}`),
+		},
+		Alias: projectKnowledgeSearchToolName,
+	}
+}
+
+func (s *Server) callProjectKnowledgeTool(ctx context.Context, project models.Project, arguments map[string]any) (map[string]any, error) {
+	rawArgs, err := json.Marshal(arguments)
+	if err != nil {
+		return nil, err
+	}
+
+	var args projectKnowledgeSearchArguments
+	if err := json.Unmarshal(rawArgs, &args); err != nil {
+		return nil, errors.New("invalid search_project_knowledge arguments")
+	}
+
+	query := strings.TrimSpace(args.Query)
+	if query == "" {
+		return nil, errors.New("query is required")
+	}
+	limit := args.Limit
+	if limit <= 0 {
+		limit = 5
+	}
+	if limit > 20 {
+		limit = 20
+	}
+
+	allowed := make(map[string]models.RAGCollection, len(project.RAGCollections))
+	for _, collection := range project.RAGCollections {
+		allowed[collection.CollectionID] = collection
+	}
+	if len(allowed) == 0 {
+		return nil, errors.New("project has no connected knowledge bases")
+	}
+
+	targets := make([]models.RAGCollection, 0, len(allowed))
+	if len(args.Collections) == 0 {
+		for _, collection := range project.RAGCollections {
+			targets = append(targets, collection)
+		}
+	} else {
+		for _, collectionID := range args.Collections {
+			collectionID = strings.TrimSpace(collectionID)
+			collection, ok := allowed[collectionID]
+			if !ok {
+				return nil, fmt.Errorf("collection %q is not connected to the project", collectionID)
+			}
+			targets = append(targets, collection)
+		}
+	}
+
+	items := make([]projectKnowledgeSearchResultItem, 0)
+	for _, collection := range targets {
+		index, err := rag.NewCollection(collection.CollectionID, collection.Name, collection.IndexPath)
+		if err != nil {
+			return nil, err
+		}
+
+		chunks, searchErr := index.Search(query, limit)
+		closeErr := index.Close()
+		if searchErr != nil {
+			return nil, searchErr
+		}
+		if closeErr != nil {
+			return nil, closeErr
+		}
+
+		for _, chunk := range chunks {
+			items = append(items, projectKnowledgeSearchResultItem{
+				CollectionID: collection.CollectionID,
+				FilePath:     chunk.FilePath,
+				Section:      chunk.Section,
+				Content:      chunk.Content,
+			})
+		}
+	}
+
+	if len(items) > limit {
+		items = items[:limit]
+	}
+
+	textParts := make([]string, 0, len(items))
+	for _, item := range items {
+		location := item.FilePath
+		if strings.TrimSpace(item.Section) != "" {
+			location = fmt.Sprintf("%s · %s", item.FilePath, item.Section)
+		}
+		textParts = append(textParts, fmt.Sprintf("[%s] %s\n%s", item.CollectionID, location, item.Content))
+	}
+	text := "No relevant knowledge chunks found."
+	if len(textParts) > 0 {
+		text = strings.Join(textParts, "\n\n")
+	}
+
+	s.logAudit(ctx, &project.ID, nil, "tool_call_project_knowledge_search", "mcp-client", mustJSON(map[string]any{
+		"tool":        projectKnowledgeSearchToolName,
+		"query":       truncateDetail(query),
+		"collections": collectionIDs(targets),
+		"results":     len(items),
+	}))
+
+	return map[string]any{
+		"content": []map[string]any{
+			{
+				"type": "text",
+				"text": text,
+			},
+		},
+		"structuredContent": map[string]any{
+			"query": query,
+			"items": items,
+		},
+	}, nil
+}
+
+func collectionIDs(collections []models.RAGCollection) []string {
+	result := make([]string, 0, len(collections))
+	for _, collection := range collections {
+		result = append(result, collection.CollectionID)
+	}
+	return result
+}
+
 func (s *Server) aggregateResources(ctx context.Context, servers []models.MCPServer) ([]aggregateResource, error) {
 	resources := make([]aggregateResource, 0)
 	for _, server := range servers {
@@ -714,16 +889,114 @@ func (s *Server) resolveAggregatePrompt(ctx context.Context, servers []models.MC
 }
 
 func assignToolAliases(tools []aggregateTool) {
+	desiredAliases := make([]string, len(tools))
 	counts := make(map[string]int)
-	for _, tool := range tools {
-		counts[tool.Origin.Name]++
+	for index, tool := range tools {
+		alias := preferredDatabaseToolAlias(tool.Server, tool.Origin.Name)
+		if alias == "" {
+			alias = tool.Origin.Name
+		}
+		desiredAliases[index] = alias
+		counts[alias]++
 	}
 	for index := range tools {
-		if counts[tools[index].Origin.Name] == 1 {
-			tools[index].Alias = tools[index].Origin.Name
+		if description := preferredDatabaseToolDescription(tools[index].Server, tools[index].Origin.Name, tools[index].Origin.Description); description != "" {
+			tools[index].Origin.Description = description
+		}
+	}
+	for index := range tools {
+		if counts[desiredAliases[index]] == 1 {
+			tools[index].Alias = desiredAliases[index]
 			continue
 		}
-		tools[index].Alias = fmt.Sprintf("%s/%s", serverAliasPrefix(tools[index].Server), tools[index].Origin.Name)
+		tools[index].Alias = fmt.Sprintf("%s/%s", serverAliasPrefix(tools[index].Server), desiredAliases[index])
+	}
+}
+
+type databaseServerRole string
+
+const (
+	databaseServerRoleUnknown    databaseServerRole = ""
+	databaseServerRoleMySQLOps   databaseServerRole = "mysql_operational"
+	databaseServerRoleClickHouse databaseServerRole = "clickhouse_analytics"
+)
+
+var databaseToolAliasMap = map[databaseServerRole]map[string]string{
+	databaseServerRoleMySQLOps: {
+		"query":          "mysql_operational_query",
+		"schema":         "mysql_operational_schema",
+		"describe_table": "mysql_operational_describe_table",
+		"find_record":    "mysql_operational_find_record",
+	},
+	databaseServerRoleClickHouse: {
+		"query":          "clickhouse_analytics_query",
+		"schema":         "clickhouse_analytics_schema",
+		"describe_table": "clickhouse_analytics_describe_table",
+		"topn_report":    "clickhouse_analytics_topn_report",
+	},
+}
+
+func preferredDatabaseToolAlias(server models.MCPServer, toolName string) string {
+	role := inferDatabaseServerRole(server)
+	if role == databaseServerRoleUnknown {
+		return ""
+	}
+	aliases := databaseToolAliasMap[role]
+	if alias, ok := aliases[strings.ToLower(strings.TrimSpace(toolName))]; ok {
+		return alias
+	}
+	return ""
+}
+
+func preferredDatabaseToolDescription(server models.MCPServer, toolName, fallback string) string {
+	switch preferredDatabaseToolAlias(server, toolName) {
+	case "mysql_operational_query":
+		return mergePreferredToolDescription("Run read-only SQL against MySQL operational data. Use for current-state records, transactional entities, reference tables, exact lookups, and small-to-medium result sets.", fallback)
+	case "mysql_operational_schema":
+		return mergePreferredToolDescription("Inspect MySQL operational schema: list databases, tables, columns, keys, and relationships before querying transactional data.", fallback)
+	case "mysql_operational_describe_table":
+		return mergePreferredToolDescription("Describe a MySQL table structure, including columns, types, indexes, and constraints, before querying operational data.", fallback)
+	case "mysql_operational_find_record":
+		return mergePreferredToolDescription("Find one or a few operational records in MySQL by id, key, slug, email, code, or other exact identifiers.", fallback)
+	case "clickhouse_analytics_query":
+		return mergePreferredToolDescription("Run read-only SQL against ClickHouse analytical data. Use for aggregations, trends, dashboards, metrics, top-N reports, large historical datasets, event streams, logs, and time-range analysis.", fallback)
+	case "clickhouse_analytics_schema":
+		return mergePreferredToolDescription("Inspect ClickHouse analytical schema: list databases, tables, columns, partitions, and data layout for reporting workloads.", fallback)
+	case "clickhouse_analytics_describe_table":
+		return mergePreferredToolDescription("Describe a ClickHouse table structure, including columns, engine, partitions, sorting keys, and analytical storage details.", fallback)
+	case "clickhouse_analytics_topn_report":
+		return mergePreferredToolDescription("Generate top-N analytical reports from ClickHouse, such as top products, top customers, top endpoints, or top error sources over a time range.", fallback)
+	default:
+		return ""
+	}
+}
+
+func mergePreferredToolDescription(preferred, fallback string) string {
+	preferred = strings.TrimSpace(preferred)
+	fallback = strings.TrimSpace(fallback)
+	if preferred == "" {
+		return fallback
+	}
+	if fallback == "" {
+		return preferred
+	}
+	return preferred + " Upstream description: " + fallback
+}
+
+func inferDatabaseServerRole(server models.MCPServer) databaseServerRole {
+	fingerprint := strings.ToLower(strings.Join([]string{
+		server.Name,
+		server.Command,
+		server.LaunchCommand,
+		server.URL,
+	}, " "))
+	switch {
+	case strings.Contains(fingerprint, "clickhouse"):
+		return databaseServerRoleClickHouse
+	case strings.Contains(fingerprint, "mysql"), strings.Contains(fingerprint, "mariadb"):
+		return databaseServerRoleMySQLOps
+	default:
+		return databaseServerRoleUnknown
 	}
 }
 

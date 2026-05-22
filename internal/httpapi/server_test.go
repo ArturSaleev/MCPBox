@@ -21,7 +21,7 @@ import (
 	"MCPBox/internal/storage"
 )
 
-func TestProjectEndpointsExposeConnectURLForAllEnabledServers(t *testing.T) {
+func TestProjectEndpointsExposeConnectURLForConfiguredServers(t *testing.T) {
 	t.Parallel()
 
 	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
@@ -77,11 +77,65 @@ func TestProjectEndpointsExposeConnectURLForAllEnabledServers(t *testing.T) {
 	if got.ConnectURL != "http://mcpbox.local:38180/mcp/"+project.Token {
 		t.Fatalf("ConnectURL = %q", got.ConnectURL)
 	}
-	if !got.ConnectionReady {
-		t.Fatal("ConnectionReady = false, want true")
+	if len(got.ConnectURLs) == 0 {
+		t.Fatal("ConnectURLs is empty")
+	}
+	if got.ConnectURLs[0] != got.ConnectURL {
+		t.Fatalf("ConnectURLs[0] = %q, want %q", got.ConnectURLs[0], got.ConnectURL)
+	}
+	if got.ConnectionReady {
+		t.Fatal("ConnectionReady = true, want false for stopped stdio servers")
 	}
 	if len(got.Servers) != 2 {
 		t.Fatalf("len(got.Servers) = %d, want 2", len(got.Servers))
+	}
+}
+
+func TestProjectEndpointIgnoresStoppedSTDIOConnectors(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	project := &models.Project{Name: "Workspace", Description: "Stopped stdio test"}
+	if err := store.CreateProject(ctx, project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	server := &models.MCPServer{
+		ProjectID:     project.ID,
+		Name:          "Filesystem",
+		LaunchCommand: "echo first",
+	}
+	if err := store.AddServer(ctx, server); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/projects", nil)
+	listRequest.Host = "mcpbox.local:38180"
+	listResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(listResponse, listRequest)
+
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("list projects status = %d, body = %s", listResponse.Code, listResponse.Body.String())
+	}
+
+	var payload []projectStatusResponse
+	if err := json.Unmarshal(listResponse.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload) != 1 {
+		t.Fatalf("len(payload) = %d, want 1", len(payload))
+	}
+
+	if payload[0].ConnectionReady {
+		t.Fatal("ConnectionReady = true, want false for stopped stdio server")
 	}
 }
 
@@ -214,6 +268,149 @@ func TestProjectConnectAggregatesToolsAcrossServers(t *testing.T) {
 		if !gotNames[name] {
 			t.Fatalf("tool %q not found in aggregated response: %#v", name, payload.Result.Tools)
 		}
+	}
+}
+
+func TestProjectConnectRenamesGenericDatabaseTools(t *testing.T) {
+	t.Parallel()
+
+	newToolServer := func(toolName, description string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer r.Body.Close()
+
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode upstream payload: %v", err)
+			}
+
+			method, _ := payload["method"].(string)
+			id, hasID := payload["id"]
+
+			switch method {
+			case "initialize":
+				writeJSON(w, http.StatusOK, map[string]any{
+					"jsonrpc": "2.0",
+					"id":      id,
+					"result": map[string]any{
+						"protocolVersion": "2025-03-26",
+						"serverInfo": map[string]any{
+							"name":    toolName + "-server",
+							"version": "1.0.0",
+						},
+						"capabilities": map[string]any{
+							"tools": map[string]any{},
+						},
+					},
+				})
+			case "notifications/initialized":
+				w.WriteHeader(http.StatusAccepted)
+			case "tools/list":
+				if !hasID {
+					t.Fatalf("tools/list request for %s missing id", toolName)
+				}
+				writeJSON(w, http.StatusOK, map[string]any{
+					"jsonrpc": "2.0",
+					"id":      id,
+					"result": map[string]any{
+						"tools": []map[string]any{
+							{
+								"name":        toolName,
+								"description": description,
+								"inputSchema": map[string]any{"type": "object"},
+							},
+						},
+					},
+				})
+			default:
+				t.Fatalf("unexpected upstream method %q for %s", method, toolName)
+			}
+		}))
+	}
+
+	mysqlUpstream := newToolServer("query", "Generic SQL query tool")
+	defer mysqlUpstream.Close()
+
+	clickhouseUpstream := newToolServer("query", "Generic analytics query tool")
+	defer clickhouseUpstream.Close()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	project := &models.Project{Name: "Workspace", Description: "Database alias test"}
+	if err := store.CreateProject(ctx, project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	for _, server := range []*models.MCPServer{
+		{
+			ProjectID:     project.ID,
+			Name:          "MySQL Operational",
+			Transport:     models.ServerTransportHTTPStream,
+			URL:           mysqlUpstream.URL,
+			LaunchCommand: "mysql-mcp-server",
+			IsEnabled:     true,
+		},
+		{
+			ProjectID:     project.ID,
+			Name:          "ClickHouse Analytics",
+			Transport:     models.ServerTransportHTTPStream,
+			URL:           clickhouseUpstream.URL,
+			LaunchCommand: "clickhouse-mcp-server",
+			IsEnabled:     true,
+		},
+	} {
+		if err := store.AddServer(ctx, server); err != nil {
+			t.Fatalf("AddServer(%s) error = %v", server.Name, err)
+		}
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	requestBody := bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`)
+	request := httptest.NewRequest(http.MethodPost, "/mcp/"+project.Token, requestBody)
+	request.Host = "mcpbox.local:38180"
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("connect tools/list status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	gotDescriptions := map[string]string{}
+	for _, tool := range payload.Result.Tools {
+		gotDescriptions[tool.Name] = tool.Description
+	}
+
+	mysqlDescription, ok := gotDescriptions["mysql_operational_query"]
+	if !ok {
+		t.Fatalf("mysql_operational_query not found in aggregated response: %#v", payload.Result.Tools)
+	}
+	if !strings.Contains(mysqlDescription, "MySQL operational data") {
+		t.Fatalf("mysql_operational_query description = %q, want MySQL guidance", mysqlDescription)
+	}
+
+	clickhouseDescription, ok := gotDescriptions["clickhouse_analytics_query"]
+	if !ok {
+		t.Fatalf("clickhouse_analytics_query not found in aggregated response: %#v", payload.Result.Tools)
+	}
+	if !strings.Contains(clickhouseDescription, "ClickHouse analytical data") {
+		t.Fatalf("clickhouse_analytics_query description = %q, want ClickHouse guidance", clickhouseDescription)
 	}
 }
 
@@ -520,6 +717,79 @@ func TestLaunchProjectOllamaRejectsPausedProject(t *testing.T) {
 	}
 	if !strings.Contains(response.Body.String(), "project is paused") {
 		t.Fatalf("body = %s", response.Body.String())
+	}
+}
+
+func TestLaunchProjectOllamaWithConnectedKnowledgeBaseOnly(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	projectRoot := t.TempDir()
+	project := &models.Project{Name: "Workspace", RootPath: projectRoot}
+	if err := store.CreateProject(context.Background(), project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	collection := &models.RAGCollection{
+		CollectionID: "kb-only",
+		Name:         "KB Only",
+		IndexPath:    filepath.Join(t.TempDir(), "indexes", "kb-only.bleve"),
+	}
+	if err := store.CreateRAGCollection(context.Background(), collection); err != nil {
+		t.Fatalf("CreateRAGCollection() error = %v", err)
+	}
+	if err := store.LinkRAGCollectionToProject(context.Background(), project.ID, collection.ID); err != nil {
+		t.Fatalf("LinkRAGCollectionToProject() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	var launchedCWD string
+	var launchedCommand string
+	api.terminalLauncher = func(cwd, shellCommand string) error {
+		launchedCWD = cwd
+		launchedCommand = shellCommand
+		return nil
+	}
+
+	originalLookPath := execLookPath
+	originalExecutable := osExecutable
+	execLookPath = func(file string) (string, error) {
+		if file == "ollama" {
+			return "/usr/local/bin/ollama", nil
+		}
+		return "", errors.New("unexpected binary lookup")
+	}
+	osExecutable = func() (string, error) {
+		return "/Applications/MCPBox.app/Contents/MacOS/MCPBox", nil
+	}
+	defer func() {
+		execLookPath = originalLookPath
+		osExecutable = originalExecutable
+	}()
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/projects/"+jsonNumber(project.ID)+"/launch-ollama",
+		bytes.NewBufferString(`{"model":"qwen2.5:14b"}`),
+	)
+	request.Host = "mcpbox.local:38180"
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if launchedCWD != project.RootPath {
+		t.Fatalf("launched cwd = %q, want %q", launchedCWD, project.RootPath)
+	}
+	if !strings.Contains(launchedCommand, "ollama-chat --config") {
+		t.Fatalf("launch command = %q", launchedCommand)
 	}
 }
 
@@ -1195,5 +1465,81 @@ func TestFilesystemPackageAddToProjectPassesRootPathArgument(t *testing.T) {
 	}
 	if got := payload.Servers[0].Args; len(got) != 2 || got[1] != "C:/Work/App" {
 		t.Fatalf("filesystem args = %#v, want root path appended", got)
+	}
+
+	updateBody := bytes.NewBufferString(`{
+		"name":"Filesystem MCP",
+		"transport":"stdio",
+		"command":"node",
+		"args":["dist/index.js","D:/Code/embedservice"],
+		"env_vars":[],
+		"env_passthrough":[],
+		"working_dir":"",
+		"url":"",
+		"bearer_token_env_var":"",
+		"headers":[],
+		"header_env_vars":[],
+		"auth_type":"none",
+		"oauth_provider":"",
+		"oauth_authorize_url":"",
+		"oauth_token_url":"",
+		"oauth_refresh_url":"",
+		"oauth_client_id":"",
+		"oauth_client_secret":"",
+		"oauth_scopes":[],
+		"auto_start":false
+	}`)
+	updateRequest := httptest.NewRequest(http.MethodPut, "/api/servers/"+jsonNumber(payload.Servers[0].ID), updateBody)
+	updateRequest.Host = "mcpbox.local:38180"
+	updateResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(updateResponse, updateRequest)
+	if updateResponse.Code != http.StatusOK {
+		t.Fatalf("server update status = %d, body = %s", updateResponse.Code, updateResponse.Body.String())
+	}
+
+	loadedProject, err := store.GetProject(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("GetProject() error = %v", err)
+	}
+	if loadedProject == nil || len(loadedProject.Servers) != 1 {
+		t.Fatalf("loaded project servers = %#v", loadedProject)
+	}
+	if got := payload.Servers[0].ID; loadedProject.Servers[0].ID != got {
+		t.Fatalf("server id changed after update: got %d want %d", loadedProject.Servers[0].ID, got)
+	}
+	if args, err := decodeStringSlice(loadedProject.Servers[0].ArgsJSON); err != nil {
+		t.Fatalf("decodeStringSlice() error = %v", err)
+	} else if len(args) != 2 || args[1] != "D:/Code/embedservice" {
+		t.Fatalf("updated server args = %#v", args)
+	}
+
+	instances, err := store.ListProjectPackageInstances(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListProjectPackageInstances() error = %v", err)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("len(instances) = %d, want 1", len(instances))
+	}
+	var instanceConfig map[string]any
+	if err := json.Unmarshal([]byte(instances[0].ConfigJSON), &instanceConfig); err != nil {
+		t.Fatalf("json.Unmarshal(instance config) error = %v", err)
+	}
+	if got := readConfigString(instanceConfig["root_path"]); got != "D:/Code/embedservice" {
+		t.Fatalf("instance root_path = %q, want updated path", got)
+	}
+
+	integrations, err := store.ListInstalledIntegrations(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("ListInstalledIntegrations() error = %v", err)
+	}
+	if len(integrations) != 1 {
+		t.Fatalf("len(integrations) = %d, want 1", len(integrations))
+	}
+	var integrationConfig map[string]any
+	if err := json.Unmarshal([]byte(integrations[0].ConfigJSON), &integrationConfig); err != nil {
+		t.Fatalf("json.Unmarshal(integration config) error = %v", err)
+	}
+	if got := readConfigString(integrationConfig["root_path"]); got != "D:/Code/embedservice" {
+		t.Fatalf("integration root_path = %q, want updated path", got)
 	}
 }

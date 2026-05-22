@@ -21,6 +21,7 @@ type Project struct {
 	Token                 string                   `gorm:"size:64;uniqueIndex;not null" json:"token"`
 	IsPaused              bool                     `gorm:"not null;default:false" json:"is_paused"`
 	Servers               []MCPServer              `json:"servers,omitempty"`
+	RAGCollections        []RAGCollection          `gorm:"many2many:project_rag_collections;" json:"rag_collections,omitempty"`
 	InstalledIntegrations []InstalledIntegration   `json:"installed_integrations,omitempty"`
 	PackageInstances      []ProjectPackageInstance `json:"package_instances,omitempty"`
 	CreatedAt             time.Time                `json:"created_at"`

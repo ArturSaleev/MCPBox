@@ -186,3 +186,170 @@ func TestNewStoreDropsLegacyPrimaryServerColumn(t *testing.T) {
 		t.Fatal("primary_server_id column still exists after migration")
 	}
 }
+
+func TestNewStoreMigratesLegacyMCPServerOAuthColumns(t *testing.T) {
+	t.Parallel()
+
+	dsn := filepath.Join(t.TempDir(), "mcpbox.db")
+	legacyDB, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	if err := legacyDB.Exec(`
+		CREATE TABLE mcp_servers (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			transport TEXT NOT NULL DEFAULT 'stdio',
+			launch_command TEXT NOT NULL,
+			command TEXT,
+			args_json TEXT,
+			env_json TEXT,
+			env_passthrough_json TEXT,
+			working_dir TEXT,
+			url TEXT,
+			auto_start NUMERIC NOT NULL DEFAULT 0,
+			created_at DATETIME,
+			updated_at DATETIME
+		)
+	`).Error; err != nil {
+		t.Fatalf("create legacy mcp_servers table error = %v", err)
+	}
+
+	sqlDB, err := legacyDB.DB()
+	if err != nil {
+		t.Fatalf("legacyDB.DB() error = %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("legacy sql DB close error = %v", err)
+	}
+
+	store, err := NewStore(dsn)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	for _, column := range []string{
+		"bearer_token_env_var",
+		"headers_json",
+		"header_env_json",
+		"auth_type",
+		"oauth_provider",
+		"oauth_authorize_url",
+		"oauth_token_url",
+		"oauth_refresh_url",
+		"oauth_use_pkce",
+		"oauth_scope_delimiter",
+		"oauth_client_auth_method",
+		"oauth_authorize_params_json",
+		"oauth_token_params_json",
+		"oauth_client_id",
+		"oauth_client_secret",
+		"oauth_scopes_json",
+		"oauth_access_token",
+		"oauth_refresh_token",
+		"oauth_token_expiry",
+		"oauth_connected_at",
+		"oauth_last_error",
+		"is_enabled",
+		"health_status",
+		"health_error",
+		"health_checked_at",
+	} {
+		if !store.db.Migrator().HasColumn(&models.MCPServer{}, column) {
+			t.Fatalf("%s column missing after migration", column)
+		}
+	}
+}
+
+func TestNewStoreMigratesLegacyRAGCollectionsProjectOwnership(t *testing.T) {
+	t.Parallel()
+
+	dsn := filepath.Join(t.TempDir(), "mcpbox.db")
+	initialStore, err := NewStore(dsn)
+	if err != nil {
+		t.Fatalf("initial NewStore() error = %v", err)
+	}
+
+	project := &models.Project{Name: "Workspace"}
+	if err := initialStore.CreateProject(context.Background(), project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if err := initialStore.Close(); err != nil {
+		t.Fatalf("initial store Close() error = %v", err)
+	}
+
+	legacyDB, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+	if err := legacyDB.Exec(`DROP TABLE IF EXISTS project_rag_collections`).Error; err != nil {
+		t.Fatalf("drop project_rag_collections error = %v", err)
+	}
+	if err := legacyDB.Exec(`DROP TABLE IF EXISTS rag_collections`).Error; err != nil {
+		t.Fatalf("drop rag_collections error = %v", err)
+	}
+	if err := legacyDB.Exec(`
+		CREATE TABLE rag_collections (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id INTEGER NOT NULL,
+			collection_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			index_path TEXT NOT NULL,
+			created_at DATETIME,
+			updated_at DATETIME
+		)
+	`).Error; err != nil {
+		t.Fatalf("create legacy rag_collections table error = %v", err)
+	}
+	if err := legacyDB.Exec(`
+		INSERT INTO rag_collections (id, project_id, collection_id, name, index_path)
+		VALUES (1, ?, 'legacy-kb', 'Legacy KB', '/tmp/legacy-index')
+	`, project.ID).Error; err != nil {
+		t.Fatalf("insert legacy rag collection error = %v", err)
+	}
+
+	sqlDB, err := legacyDB.DB()
+	if err != nil {
+		t.Fatalf("legacyDB.DB() error = %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("legacy sql DB close error = %v", err)
+	}
+
+	store, err := NewStore(dsn)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	if store.db.Migrator().HasColumn("rag_collections", "project_id") {
+		t.Fatal("project_id column still exists on rag_collections after migration")
+	}
+
+	loadedProject, err := store.GetProject(context.Background(), project.ID)
+	if err != nil {
+		t.Fatalf("GetProject() error = %v", err)
+	}
+	if loadedProject == nil {
+		t.Fatal("GetProject() returned nil project")
+	}
+	if len(loadedProject.RAGCollections) != 1 {
+		t.Fatalf("len(project.RAGCollections) = %d, want 1", len(loadedProject.RAGCollections))
+	}
+	if loadedProject.RAGCollections[0].CollectionID != "legacy-kb" {
+		t.Fatalf("collection_id = %q, want %q", loadedProject.RAGCollections[0].CollectionID, "legacy-kb")
+	}
+
+	collection := &models.RAGCollection{
+		CollectionID: "new-kb",
+		Name:         "New KB",
+		DataType:     models.RAGDataTypeCode,
+		IndexPath:    filepath.Join(t.TempDir(), "knowledge_base", "indexes", "new-kb"),
+	}
+	if err := store.CreateRAGCollection(context.Background(), collection); err != nil {
+		t.Fatalf("CreateRAGCollection() after migration error = %v", err)
+	}
+}

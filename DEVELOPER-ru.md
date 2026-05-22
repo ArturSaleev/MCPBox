@@ -42,6 +42,7 @@ MCPBox — это control plane на Go для MCP-серверов.
 - SQLite через GORM
 - orchestration локальных `stdio` MCP-процессов
 - proxy для удалённых `HTTP streaming` MCP-серверов
+- локальные Базы знаний / RAG-коллекции на on-disk Bleve полнотекстовых индексах
 - project-level endpoint `/mcp/{project_token}`
 - synchronous JSON-RPC request/response bridge для HTTP MCP-клиентов
 - legacy SSE compatibility mode для старых MCP-клиентов
@@ -55,6 +56,13 @@ MCPBox — это control plane на Go для MCP-серверов.
 - sync каталога из внешнего JSON manifest
 - хранение installed integrations рядом с обычными MCP servers
 - встроенный запуск Ollama через `github.com/mark3labs/mcphost/sdk`
+
+Примечание по Базе знаний:
+- текущий RAG-слой использует классический локальный полнотекстовый поиск, а не embedding-индексы
+- коллекции хранятся на диске и ищутся через Bleve
+- внешняя векторная база не требуется
+- pipeline генерации embeddings на этом этапе тоже не нужен
+- будущие возможности `Pro` вынесены в отдельный документ [PRO-ROADMAP-ru.md](./PRO-ROADMAP-ru.md)
 
 ### Frontend
 

@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -115,8 +116,10 @@ type projectStatusResponse struct {
 	Token                 string                         `json:"token"`
 	IsPaused              bool                           `json:"is_paused"`
 	ConnectURL            string                         `json:"connect_url"`
+	ConnectURLs           []string                       `json:"connect_urls"`
 	ConnectionReady       bool                           `json:"connection_ready"`
 	Servers               []serverStatusRecord           `json:"servers"`
+	RAGCollections        []ragCollectionResponse        `json:"rag_collections"`
 	InstalledIntegrations []installedIntegrationResponse `json:"installed_integrations"`
 }
 
@@ -207,6 +210,11 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/catalog/items", s.handleCatalogList)
 	s.mux.HandleFunc("POST /api/catalog/items/", s.handleCatalogItemAction)
 	s.mux.HandleFunc("POST /api/catalog/sync", s.handleCatalogSync)
+	s.mux.HandleFunc("GET /api/rag/collections", s.handleListRAGCollections)
+	s.mux.HandleFunc("POST /api/rag/collections", s.handleCreateRAGCollection)
+	s.mux.HandleFunc("POST /api/rag/collections/", s.handleRAGCollectionAction)
+	s.mux.HandleFunc("PUT /api/rag/collections/", s.handleUpdateRAGCollection)
+	s.mux.HandleFunc("DELETE /api/rag/collections/", s.handleDeleteRAGCollection)
 	s.mux.HandleFunc("GET /api/projects", s.handleListProjects)
 	s.mux.HandleFunc("POST /api/projects", s.handleCreateProject)
 	s.mux.HandleFunc("GET /api/projects/", s.handleProjectStatus)
@@ -352,6 +360,8 @@ func (s *Server) handleProjectAction(w http.ResponseWriter, r *http.Request) {
 	switch tail {
 	case "servers":
 		s.handleAddServer(w, r, projectID)
+	case "rag-collections":
+		s.handleProjectRAGCollectionAction(w, r, projectID)
 	case "integrations":
 		s.handleProjectInstallIntegration(w, r, projectID)
 	case "launch-ollama":
@@ -416,6 +426,11 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleProjectDelete(w http.ResponseWriter, r *http.Request) {
+	if projectID, collectionID, ok := parseProjectStringTail(r.URL.Path, "/api/projects/", "rag-collections"); ok {
+		s.handleProjectRAGCollectionDelete(w, r, projectID, collectionID)
+		return
+	}
+
 	projectID, ok := parseSingleID(r.URL.Path, "/api/projects/")
 	if !ok {
 		http.NotFound(w, r)
@@ -648,6 +663,10 @@ func (s *Server) handleServerUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	if err := s.syncManagedServerConfig(r.Context(), *server); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	if oauthConfigChanged(*existing, *server) || normalizedAuthType(server.AuthType) != models.ServerAuthTypeOAuth2 {
 		_ = s.store.ClearServerOAuthTokens(r.Context(), server.ID)
 	}
@@ -783,7 +802,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	servers := s.projectConnectServers(*project)
-	if len(servers) == 0 {
+	if len(servers) == 0 && len(project.RAGCollections) == 0 {
 		err := errors.New("project has no enabled MCP servers configured")
 		s.logAudit(r.Context(), &project.ID, nil, "connect_failed", clientActor(r), truncateDetail(err.Error()))
 		writeError(w, http.StatusBadGateway, err)
@@ -976,7 +995,7 @@ func (s *Server) handleUI() http.Handler {
 }
 
 func (s *Server) projectStatus(r *http.Request, project models.Project) projectStatusResponse {
-	activeServers := s.projectConnectServers(project)
+	connectURLs := s.connectURLs(r, project.Token)
 	response := projectStatusResponse{
 		ProjectID:             project.ID,
 		Name:                  project.Name,
@@ -984,10 +1003,16 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 		RootPath:              project.RootPath,
 		Token:                 project.Token,
 		IsPaused:              project.IsPaused,
-		ConnectURL:            s.connectURL(r, project.Token),
-		ConnectionReady:       len(activeServers) > 0,
+		ConnectURL:            firstOrEmpty(connectURLs),
+		ConnectURLs:           connectURLs,
+		ConnectionReady:       s.projectConnectionReady(project),
 		Servers:               make([]serverStatusRecord, 0, len(project.Servers)),
+		RAGCollections:        make([]ragCollectionResponse, 0, len(project.RAGCollections)),
 		InstalledIntegrations: mapInstalledIntegrations(project.InstalledIntegrations),
+	}
+
+	for _, collection := range project.RAGCollections {
+		response.RAGCollections = append(response.RAGCollections, mapRAGCollection(collection))
 	}
 
 	for _, server := range project.Servers {
@@ -1040,8 +1065,57 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 	return response
 }
 
+func (s *Server) projectConnectionReady(project models.Project) bool {
+	return len(s.projectConnectServers(project)) > 0 || len(project.RAGCollections) > 0
+}
+
 func (s *Server) connectURL(r *http.Request, token string) string {
-	return s.absoluteURL(r, "/mcp/"+token)
+	return firstOrEmpty(s.connectURLs(r, token))
+}
+
+func (s *Server) connectURLs(r *http.Request, token string) []string {
+	requestPath := "/mcp/" + token
+	scheme, host, port := requestAddressParts(r)
+
+	urls := make([]string, 0, 8)
+	seen := make(map[string]struct{})
+
+	appendCandidate := func(candidateHost string) {
+		candidateHost = strings.TrimSpace(candidateHost)
+		if candidateHost == "" {
+			return
+		}
+
+		target := fmt.Sprintf("%s://%s%s", scheme, joinHostPort(candidateHost, port), requestPath)
+		if _, ok := seen[target]; ok {
+			return
+		}
+		seen[target] = struct{}{}
+		urls = append(urls, target)
+	}
+
+	appendCandidate(host)
+	appendCandidate("127.0.0.1")
+	appendCandidate("localhost")
+
+	if hostname, err := os.Hostname(); err == nil {
+		appendCandidate(hostname)
+	}
+
+	interfaceHosts := make([]string, 0, 8)
+	for _, iface := range networkIPv4Hosts() {
+		interfaceHosts = append(interfaceHosts, iface)
+	}
+	slices.Sort(interfaceHosts)
+	for _, iface := range interfaceHosts {
+		appendCandidate(iface)
+	}
+
+	if len(urls) == 0 {
+		urls = append(urls, requestPath)
+	}
+
+	return urls
 }
 
 func (s *Server) connectMessageURL(r *http.Request, token, sessionID string) string {
@@ -1049,7 +1123,16 @@ func (s *Server) connectMessageURL(r *http.Request, token, sessionID string) str
 }
 
 func (s *Server) absoluteURL(r *http.Request, requestPath string) string {
-	scheme := "http"
+	scheme, host, port := requestAddressParts(r)
+	if host == "" {
+		return requestPath
+	}
+
+	return fmt.Sprintf("%s://%s%s", scheme, joinHostPort(host, port), requestPath)
+}
+
+func requestAddressParts(r *http.Request) (scheme, host, port string) {
+	scheme = "http"
 	if r.TLS != nil {
 		scheme = "https"
 	}
@@ -1057,16 +1140,82 @@ func (s *Server) absoluteURL(r *http.Request, requestPath string) string {
 		scheme = forwardedProto
 	}
 
-	host := strings.TrimSpace(r.Host)
+	rawHost := strings.TrimSpace(r.Host)
 	if forwardedHost := strings.TrimSpace(r.Header.Get("X-Forwarded-Host")); forwardedHost != "" {
-		host = forwardedHost
+		rawHost = forwardedHost
 	}
 
+	host, port = splitHostPort(rawHost)
+	return scheme, host, port
+}
+
+func splitHostPort(rawHost string) (host, port string) {
+	rawHost = strings.TrimSpace(rawHost)
+	if rawHost == "" {
+		return "", ""
+	}
+
+	if parsedHost, parsedPort, err := net.SplitHostPort(rawHost); err == nil {
+		return strings.Trim(parsedHost, "[]"), parsedPort
+	}
+
+	if strings.Count(rawHost, ":") == 1 {
+		host, port, found := strings.Cut(rawHost, ":")
+		if found {
+			return strings.Trim(host, "[]"), strings.TrimSpace(port)
+		}
+	}
+
+	return strings.Trim(rawHost, "[]"), ""
+}
+
+func joinHostPort(host, port string) string {
+	host = strings.TrimSpace(host)
+	port = strings.TrimSpace(port)
 	if host == "" {
-		return requestPath
+		return ""
+	}
+	if port == "" {
+		return host
+	}
+	return net.JoinHostPort(host, port)
+}
+
+func networkIPv4Hosts() []string {
+	addresses, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
 	}
 
-	return fmt.Sprintf("%s://%s%s", scheme, host, requestPath)
+	hosts := make([]string, 0, len(addresses))
+	seen := make(map[string]struct{})
+	for _, address := range addresses {
+		ipNet, ok := address.(*net.IPNet)
+		if !ok || ipNet == nil || ipNet.IP == nil || ipNet.IP.IsLoopback() {
+			continue
+		}
+
+		ip := ipNet.IP.To4()
+		if ip == nil {
+			continue
+		}
+
+		value := ip.String()
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		hosts = append(hosts, value)
+	}
+
+	return hosts
+}
+
+func firstOrEmpty(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
 }
 
 func (s *Server) serverStatus(server models.MCPServer) string {
@@ -1317,6 +1466,72 @@ func buildServerModel(projectID uint, req addServerRequest) (*models.MCPServer, 
 	}
 
 	return server, nil
+}
+
+func (s *Server) syncManagedServerConfig(ctx context.Context, server models.MCPServer) error {
+	integration, err := s.store.GetInstalledIntegrationByServerID(ctx, server.ID)
+	if err != nil {
+		return err
+	}
+	if integration != nil {
+		integration.Name = server.Name
+		nextConfig, err := syncedManagedServerConfig(integration.CatalogItemID, integration.ConfigJSON, server)
+		if err != nil {
+			return err
+		}
+		integration.ConfigJSON = nextConfig
+		if err := s.store.UpdateInstalledIntegration(ctx, integration); err != nil {
+			return err
+		}
+	}
+
+	instance, err := s.store.GetProjectPackageInstanceByServerID(ctx, server.ID)
+	if err != nil {
+		return err
+	}
+	if instance != nil {
+		instance.Name = server.Name
+		nextConfig, err := syncedManagedServerConfig(instance.CatalogItemID, instance.ConfigJSON, server)
+		if err != nil {
+			return err
+		}
+		instance.ConfigJSON = nextConfig
+		if err := s.store.UpdateProjectPackageInstance(ctx, instance); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func syncedManagedServerConfig(catalogItemID, rawConfig string, server models.MCPServer) (string, error) {
+	config := map[string]any{}
+	if strings.TrimSpace(rawConfig) != "" {
+		if err := json.Unmarshal([]byte(rawConfig), &config); err != nil {
+			return "", err
+		}
+	}
+
+	switch strings.ToLower(strings.TrimSpace(catalogItemID)) {
+	case "filesystem":
+		args, err := decodeStringSlice(server.ArgsJSON)
+		if err != nil {
+			return "", err
+		}
+		rootPath := strings.TrimSpace(lastString(args))
+		if rootPath != "" {
+			config["root_path"] = rootPath
+		}
+	}
+
+	return mustJSON(config), nil
+}
+
+func lastString(values []string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(values[len(values)-1])
 }
 
 func sanitizeStrings(values []string) []string {
