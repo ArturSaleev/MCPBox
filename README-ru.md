@@ -120,11 +120,6 @@ go run .
 - [README.md](./README.md) - английская пользовательская документация
 - [DEVELOPER.md](./DEVELOPER.md) - техническое описание, API и архитектура
 - [DEVELOPER-ru.md](./DEVELOPER-ru.md) - русская версия developer guide
-- [PRO-ROADMAP.md](./PRO-ROADMAP.md) - roadmap будущей `Pro`-версии и граница редакций
-- [PRO-ROADMAP-ru.md](./PRO-ROADMAP-ru.md) - русская дорожная карта `Pro`
-- [RELEASE-1.2.0.md](./RELEASE-1.2.0.md) - черновик release notes для версии `1.2.0`
-- [RELEASE-1.1.1.md](./RELEASE-1.1.1.md) - черновик release notes для версии `1.1.1`
-- [RELEASE-1.1.0.md](./RELEASE-1.1.0.md) - черновик release notes для версии `1.1.0`
 
 ## Примечания
 

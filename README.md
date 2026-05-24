@@ -120,11 +120,6 @@ Default port: `38180`
 - [README-ru.md](./README-ru.md) - Russian user guide
 - [DEVELOPER.md](./DEVELOPER.md) - developer guide, API notes, and architecture
 - [DEVELOPER-ru.md](./DEVELOPER-ru.md) - Russian developer guide
-- [PRO-ROADMAP.md](./PRO-ROADMAP.md) - planned `Pro` roadmap and edition boundary
-- [PRO-ROADMAP-ru.md](./PRO-ROADMAP-ru.md) - Russian `Pro` roadmap
-- [RELEASE-1.2.0.md](./RELEASE-1.2.0.md) - release notes draft for version `1.2.0`
-- [RELEASE-1.1.1.md](./RELEASE-1.1.1.md) - release notes draft for version `1.1.1`
-- [RELEASE-1.1.0.md](./RELEASE-1.1.0.md) - release notes draft for version `1.1.0`
 
 ## Notes
 
