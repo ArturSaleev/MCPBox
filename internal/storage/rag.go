@@ -38,11 +38,24 @@ func (s *Store) UpdateRAGCollectionSourcePath(ctx context.Context, collectionID,
 		Update("source_path", sourcePath).Error
 }
 
-func (s *Store) UpdateRAGCollectionName(ctx context.Context, collectionID, name string) error {
+func (s *Store) UpdateRAGCollectionConfig(ctx context.Context, collectionID, name, sourcePath string, autoReindex bool) error {
 	return s.db.WithContext(ctx).
 		Model(&models.RAGCollection{}).
 		Where("collection_id = ?", collectionID).
-		Update("name", name).Error
+		Updates(map[string]any{
+			"name":         name,
+			"source_path":  sourcePath,
+			"auto_reindex": autoReindex,
+		}).Error
+}
+
+func (s *Store) ListAutoReindexRAGCollections(ctx context.Context) ([]models.RAGCollection, error) {
+	var collections []models.RAGCollection
+	err := s.db.WithContext(ctx).
+		Where("auto_reindex = ? AND TRIM(COALESCE(source_path, '')) <> ''", true).
+		Order("id asc").
+		Find(&collections).Error
+	return collections, err
 }
 
 func (s *Store) LinkRAGCollectionToProject(ctx context.Context, projectID, collectionDBID uint) error {

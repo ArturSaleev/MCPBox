@@ -33,6 +33,7 @@ type IntegrationCatalogItem struct {
 	Category                 string     `gorm:"size:128" json:"category"`
 	Description              string     `gorm:"type:text" json:"description"`
 	Icon                     string     `gorm:"size:2048" json:"icon"`
+	IconURL                  string     `gorm:"column:icon_url;size:2048" json:"icon_url"`
 	RuntimeType              string     `gorm:"column:runtime_type;size:64" json:"runtime_type"`
 	RuntimeVersion           string     `gorm:"column:runtime_version;size:64" json:"runtime_version"`
 	SourceType               string     `gorm:"column:source_type;size:64" json:"source_type"`
@@ -52,6 +53,8 @@ type IntegrationCatalogItem struct {
 	Command                  string     `gorm:"column:command;type:text" json:"command"`
 	ArgsJSON                 string     `gorm:"column:args_json;type:text" json:"args"`
 	EnvJSON                  string     `gorm:"column:env_json;type:text" json:"env"`
+	DefaultEnvJSON           string     `gorm:"column:default_env_json;type:text" json:"default_env"`
+	EnvSchemaJSON            string     `gorm:"column:env_schema_json;type:text" json:"env_schema"`
 	EnvPassthroughJSON       string     `gorm:"column:env_passthrough_json;type:text" json:"env_passthrough"`
 	WorkingDir               string     `gorm:"column:working_dir;size:1024" json:"working_dir"`
 	DefaultAutoStart         bool       `gorm:"column:default_auto_start;not null;default:false" json:"default_auto_start"`
@@ -69,6 +72,7 @@ type IntegrationCatalogItem struct {
 	DefaultHeadersJSON       string     `gorm:"column:default_headers_json;type:text" json:"default_headers"`
 	DefaultHeaderEnvJSON     string     `gorm:"column:default_header_env_json;type:text" json:"default_header_env_vars"`
 	DefaultBearerTokenEnvVar string     `gorm:"column:default_bearer_token_env_var;size:255" json:"default_bearer_token_env_var"`
+	SystemDependenciesJSON   string     `gorm:"column:system_dependencies_json;type:text" json:"system_dependencies"`
 	ConfigSchemaJSON         string     `gorm:"column:config_schema_json;type:text" json:"config_schema"`
 	CapabilitiesJSON         string     `gorm:"column:capabilities_json;type:text" json:"capabilities"`
 	TagsJSON                 string     `gorm:"column:tags_json;type:text" json:"tags"`

@@ -32,43 +32,6 @@ func TestRAGCollectionCreateIndexAndSearch(t *testing.T) {
 		t.Fatalf("CreateProject() error = %v", err)
 	}
 
-	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
-
-	createBody := bytes.NewBufferString(`{"name":"CRM Gym"}`)
-	createRequest := httptest.NewRequest(http.MethodPost, "/api/rag/collections", createBody)
-	createResponse := httptest.NewRecorder()
-	api.Handler().ServeHTTP(createResponse, createRequest)
-
-	if createResponse.Code != http.StatusCreated {
-		t.Fatalf("create collection status = %d, body = %s", createResponse.Code, createResponse.Body.String())
-	}
-	var createdCollection struct {
-		CollectionID string `json:"collection_id"`
-		SourcePath   string `json:"source_path"`
-		IndexPath    string `json:"index_path"`
-	}
-	if err := json.Unmarshal(createResponse.Body.Bytes(), &createdCollection); err != nil {
-		t.Fatalf("json.Unmarshal(create) error = %v", err)
-	}
-	if _, err := uuid.Parse(createdCollection.CollectionID); err != nil {
-		t.Fatalf("collection_id = %q is not a valid uuid: %v", createdCollection.CollectionID, err)
-	}
-	if createdCollection.IndexPath == "" {
-		t.Fatal("index_path is empty, want auto-generated path")
-	}
-	if !strings.Contains(createdCollection.IndexPath, filepath.Join("knowledge_base", "indexes")) {
-		t.Fatalf("index_path = %q, want path under knowledge_base/indexes", createdCollection.IndexPath)
-	}
-
-	updateBody := bytes.NewBufferString(`{"name":"CRM Gym Codebase"}`)
-	updateRequest := httptest.NewRequest(http.MethodPut, "/api/rag/collections/"+createdCollection.CollectionID, updateBody)
-	updateResponse := httptest.NewRecorder()
-	api.Handler().ServeHTTP(updateResponse, updateRequest)
-
-	if updateResponse.Code != http.StatusOK {
-		t.Fatalf("update collection status = %d, body = %s", updateResponse.Code, updateResponse.Body.String())
-	}
-
 	sourceDir := filepath.Join(projectRoot, "src")
 	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
 		t.Fatalf("os.MkdirAll() error = %v", err)
@@ -85,13 +48,51 @@ func retryPayments() {
 		t.Fatalf("os.WriteFile() error = %v", err)
 	}
 
-	indexBody := bytes.NewBufferString(`{"dir_path":"` + escapeJSON(projectRoot) + `"}`)
-	indexRequest := httptest.NewRequest(http.MethodPost, "/api/rag/collections/"+createdCollection.CollectionID+"/index", indexBody)
-	indexResponse := httptest.NewRecorder()
-	api.Handler().ServeHTTP(indexResponse, indexRequest)
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
 
-	if indexResponse.Code != http.StatusOK {
-		t.Fatalf("index collection status = %d, body = %s", indexResponse.Code, indexResponse.Body.String())
+	createBody := bytes.NewBufferString(`{"name":"CRM Gym","source_path":"` + escapeJSON(projectRoot) + `","auto_reindex":true}`)
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/rag/collections", createBody)
+	createResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(createResponse, createRequest)
+
+	if createResponse.Code != http.StatusCreated {
+		t.Fatalf("create collection status = %d, body = %s", createResponse.Code, createResponse.Body.String())
+	}
+	var createdCollection struct {
+		CollectionID string `json:"collection_id"`
+		SourcePath   string `json:"source_path"`
+		AutoReindex  bool   `json:"auto_reindex"`
+		IndexPath    string `json:"index_path"`
+	}
+	if err := json.Unmarshal(createResponse.Body.Bytes(), &createdCollection); err != nil {
+		t.Fatalf("json.Unmarshal(create) error = %v", err)
+	}
+	if _, err := uuid.Parse(createdCollection.CollectionID); err != nil {
+		t.Fatalf("collection_id = %q is not a valid uuid: %v", createdCollection.CollectionID, err)
+	}
+	if createdCollection.IndexPath == "" {
+		t.Fatal("index_path is empty, want auto-generated path")
+	}
+	if !strings.Contains(createdCollection.IndexPath, filepath.Join("knowledge_base", "indexes")) {
+		t.Fatalf("index_path = %q, want path under knowledge_base/indexes", createdCollection.IndexPath)
+	}
+	if _, err := os.Stat(createdCollection.IndexPath); err != nil {
+		t.Fatalf("expected index path to exist after create+index, stat error = %v", err)
+	}
+	if createdCollection.SourcePath != projectRoot {
+		t.Fatalf("source_path = %q, want %q", createdCollection.SourcePath, projectRoot)
+	}
+	if !createdCollection.AutoReindex {
+		t.Fatal("auto_reindex = false, want true")
+	}
+
+	updateBody := bytes.NewBufferString(`{"name":"CRM Gym Codebase","source_path":"` + escapeJSON(projectRoot) + `","auto_reindex":false}`)
+	updateRequest := httptest.NewRequest(http.MethodPut, "/api/rag/collections/"+createdCollection.CollectionID, updateBody)
+	updateResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(updateResponse, updateRequest)
+
+	if updateResponse.Code != http.StatusOK {
+		t.Fatalf("update collection status = %d, body = %s", updateResponse.Code, updateResponse.Body.String())
 	}
 
 	searchBody := bytes.NewBufferString(`{"query":"payment gateway","limit":5}`)
@@ -154,6 +155,7 @@ func retryPayments() {
 			CollectionID string `json:"collection_id"`
 			Name         string `json:"name"`
 			SourcePath   string `json:"source_path"`
+			AutoReindex  bool   `json:"auto_reindex"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(listResponse.Body.Bytes(), &listPayload); err != nil {
@@ -167,6 +169,9 @@ func retryPayments() {
 	}
 	if listPayload.Items[0].SourcePath != projectRoot {
 		t.Fatalf("source_path = %q, want %q", listPayload.Items[0].SourcePath, projectRoot)
+	}
+	if listPayload.Items[0].AutoReindex {
+		t.Fatal("auto_reindex = true after update, want false")
 	}
 
 	unlinkRequest := httptest.NewRequest(http.MethodDelete, "/api/projects/"+jsonNumber(project.ID)+"/rag-collections/"+createdCollection.CollectionID, nil)
@@ -194,6 +199,9 @@ func retryPayments() {
 	}
 	if !deletePayload.Deleted || deletePayload.CollectionID != createdCollection.CollectionID {
 		t.Fatalf("unexpected delete payload: %#v", deletePayload)
+	}
+	if _, err := os.Stat(createdCollection.IndexPath); !os.IsNotExist(err) {
+		t.Fatalf("expected index path to be removed after delete, stat error = %v", err)
 	}
 }
 

@@ -144,6 +144,133 @@ func TestInstalledPackageCanBeReusedAcrossProjects(t *testing.T) {
 	}
 }
 
+func TestDuplicateProjectClonesServersIntegrationsAndKnowledgeLinks(t *testing.T) {
+	t.Parallel()
+
+	store, err := NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	project := &models.Project{
+		Name:        "Workspace A",
+		Description: "Primary workspace",
+		RootPath:    "/tmp/workspace-a",
+	}
+	if err := store.CreateProject(ctx, project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	server := &models.MCPServer{
+		ProjectID:     project.ID,
+		Name:          "Filesystem",
+		Transport:     models.ServerTransportSTDIO,
+		LaunchCommand: "node dist/index.js",
+		Command:       "node",
+		ArgsJSON:      `["dist/index.js"]`,
+	}
+	if err := store.AddServer(ctx, server); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	collection := &models.RAGCollection{
+		CollectionID: "docs",
+		Name:         "Docs",
+		DataType:     models.RAGDataTypeDocuments,
+		IndexPath:    filepath.Join(t.TempDir(), "docs.bleve"),
+	}
+	if err := store.CreateRAGCollection(ctx, collection); err != nil {
+		t.Fatalf("CreateRAGCollection() error = %v", err)
+	}
+	if err := store.LinkRAGCollectionToProject(ctx, project.ID, collection.ID); err != nil {
+		t.Fatalf("LinkRAGCollectionToProject() error = %v", err)
+	}
+
+	pkg := &models.InstalledPackage{
+		CatalogItemID:   "filesystem",
+		Name:            "Filesystem MCP",
+		Version:         "latest",
+		RuntimeType:     "node",
+		SourceType:      "npm",
+		InstallStrategy: "npm",
+		InstallDir:      filepath.Join(t.TempDir(), "packages", "filesystem"),
+		Status:          models.PackageStatusInstalled,
+	}
+	if err := store.CreateInstalledPackage(ctx, pkg); err != nil {
+		t.Fatalf("CreateInstalledPackage() error = %v", err)
+	}
+
+	integration := &models.InstalledIntegration{
+		ProjectID:     project.ID,
+		CatalogItemID: "filesystem",
+		ServerID:      &server.ID,
+		Name:          "Filesystem",
+		Transport:     models.ServerTransportSTDIO,
+		Status:        "installed",
+		Enabled:       true,
+		Version:       "latest",
+		ConfigJSON:    `{"root_path":"/tmp/workspace-a"}`,
+	}
+	if err := store.db.WithContext(ctx).Create(integration).Error; err != nil {
+		t.Fatalf("create integration error = %v", err)
+	}
+
+	instance := &models.ProjectPackageInstance{
+		ProjectID:          project.ID,
+		InstalledPackageID: pkg.ID,
+		ServerID:           &server.ID,
+		CatalogItemID:      "filesystem",
+		Name:               "Filesystem",
+		Status:             models.InstanceStatusReady,
+		ConfigJSON:         `{"root_path":"/tmp/workspace-a"}`,
+	}
+	if err := store.CreateProjectPackageInstance(ctx, instance); err != nil {
+		t.Fatalf("CreateProjectPackageInstance() error = %v", err)
+	}
+
+	loadedProject, err := store.GetProject(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("GetProject() error = %v", err)
+	}
+
+	duplicated, err := store.DuplicateProject(ctx, loadedProject, "Workspace B")
+	if err != nil {
+		t.Fatalf("DuplicateProject() error = %v", err)
+	}
+	if duplicated.Name != "Workspace B" {
+		t.Fatalf("duplicated name = %q", duplicated.Name)
+	}
+	if duplicated.Token == project.Token {
+		t.Fatal("duplicated project token should differ from source")
+	}
+	if len(duplicated.Servers) != 1 {
+		t.Fatalf("len(duplicated.Servers) = %d, want 1", len(duplicated.Servers))
+	}
+	if duplicated.Servers[0].ProjectID != duplicated.ID {
+		t.Fatalf("duplicated server project id = %d, want %d", duplicated.Servers[0].ProjectID, duplicated.ID)
+	}
+	if duplicated.Servers[0].ID == server.ID {
+		t.Fatal("duplicated server id should differ from source")
+	}
+	if len(duplicated.InstalledIntegrations) != 1 || duplicated.InstalledIntegrations[0].ServerID == nil {
+		t.Fatalf("duplicated integrations = %#v", duplicated.InstalledIntegrations)
+	}
+	if *duplicated.InstalledIntegrations[0].ServerID != duplicated.Servers[0].ID {
+		t.Fatalf("duplicated integration server id = %d, want %d", *duplicated.InstalledIntegrations[0].ServerID, duplicated.Servers[0].ID)
+	}
+	if len(duplicated.PackageInstances) != 1 || duplicated.PackageInstances[0].ServerID == nil {
+		t.Fatalf("duplicated package instances = %#v", duplicated.PackageInstances)
+	}
+	if *duplicated.PackageInstances[0].ServerID != duplicated.Servers[0].ID {
+		t.Fatalf("duplicated package instance server id = %d, want %d", *duplicated.PackageInstances[0].ServerID, duplicated.Servers[0].ID)
+	}
+	if len(duplicated.RAGCollections) != 1 || duplicated.RAGCollections[0].CollectionID != "docs" {
+		t.Fatalf("duplicated RAG collections = %#v", duplicated.RAGCollections)
+	}
+}
+
 func TestNewStoreDropsLegacyPrimaryServerColumn(t *testing.T) {
 	t.Parallel()
 

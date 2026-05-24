@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/blevesearch/bleve/v2"
@@ -31,6 +32,28 @@ var supportedExtensions = map[string]struct{}{
 	".pptx": {},
 	".txt":  {},
 	".xlsx": {},
+}
+
+var skippedDirectoryNames = map[string]struct{}{
+	".git":           {},
+	".hg":            {},
+	".svn":           {},
+	".next":          {},
+	".nuxt":          {},
+	".cache":         {},
+	".idea":          {},
+	".vscode":        {},
+	"__pycache__":    {},
+	".pytest_cache":  {},
+	".mypy_cache":    {},
+	"node_modules":   {},
+	"vendor":         {},
+	"dist":           {},
+	"build":          {},
+	"target":         {},
+	"coverage":       {},
+	"package_store":  {},
+	"knowledge_base": {},
 }
 
 // Chunk is the smallest retrievable unit in a collection.
@@ -112,6 +135,9 @@ func (c *Collection) IndexFolder(dirPath string) error {
 	if !info.IsDir() {
 		return fmt.Errorf("path is not a directory: %s", dirPath)
 	}
+	if err := c.clearIndex(); err != nil {
+		return err
+	}
 
 	batch := c.index.NewBatch()
 
@@ -121,6 +147,9 @@ func (c *Collection) IndexFolder(dirPath string) error {
 		}
 
 		if d.IsDir() {
+			if shouldSkipDir(path, d) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if !isSupportedFile(path) {
@@ -169,6 +198,25 @@ func (c *Collection) IndexFolder(dirPath string) error {
 	}
 
 	return nil
+}
+
+func shouldSkipDir(path string, entry fs.DirEntry) bool {
+	name := strings.ToLower(strings.TrimSpace(entry.Name()))
+	if _, ok := skippedDirectoryNames[name]; ok {
+		return true
+	}
+	if isPythonVirtualEnvDir(path) {
+		return true
+	}
+	return false
+}
+
+func isPythonVirtualEnvDir(path string) bool {
+	info, err := os.Stat(filepath.Join(path, "pyvenv.cfg"))
+	if err != nil {
+		return false
+	}
+	return !info.IsDir()
 }
 
 // Search executes a keyword query within this collection and returns the most relevant chunks.
@@ -259,6 +307,39 @@ func newIndexMapping() *mapping.IndexMappingImpl {
 func isSupportedFile(path string) bool {
 	_, ok := supportedExtensions[strings.ToLower(filepath.Ext(path))]
 	return ok
+}
+
+func (c *Collection) clearIndex() error {
+	if c == nil || c.index == nil {
+		return errors.New("collection index is not initialized")
+	}
+
+	matchAll := bleve.NewMatchAllQuery()
+	request := bleve.NewSearchRequestOptions(matchAll, 1000, 0, false)
+
+	for {
+		result, err := c.index.Search(request)
+		if err != nil {
+			return fmt.Errorf("list indexed documents: %w", err)
+		}
+		if len(result.Hits) == 0 {
+			return nil
+		}
+
+		ids := make([]string, 0, len(result.Hits))
+		for _, hit := range result.Hits {
+			ids = append(ids, hit.ID)
+		}
+		slices.Sort(ids)
+
+		batch := c.index.NewBatch()
+		for _, id := range ids {
+			batch.Delete(id)
+		}
+		if err := c.index.Batch(batch); err != nil {
+			return fmt.Errorf("flush delete batch: %w", err)
+		}
+	}
 }
 
 func chunkID(filePath string, fragmentIndex, chunkIndex int) string {

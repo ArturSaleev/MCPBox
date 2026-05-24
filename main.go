@@ -22,10 +22,12 @@ import (
 	"MCPBox/internal/models"
 	"MCPBox/internal/ollamahost"
 	"MCPBox/internal/orchestrator"
+	"MCPBox/internal/rag"
 	"MCPBox/internal/storage"
 )
 
 const defaultPort = 38180
+const ragAutoReindexInterval = 10 * time.Minute
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "ollama-chat" {
@@ -66,6 +68,8 @@ func main() {
 		}
 	}
 
+	startRAGAutoReindexLoop(rootCtx, store)
+
 	api := httpapi.NewServerWithInstaller(store, registry, packageInstaller)
 	httpServer := &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
@@ -102,6 +106,59 @@ func main() {
 
 	if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("http server failed: %v", err)
+	}
+}
+
+func startRAGAutoReindexLoop(ctx context.Context, store *storage.Store) {
+	go func() {
+		ticker := time.NewTicker(ragAutoReindexInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				runRAGAutoReindexPass(ctx, store)
+			}
+		}
+	}()
+}
+
+func runRAGAutoReindexPass(ctx context.Context, store *storage.Store) {
+	collections, err := store.ListAutoReindexRAGCollections(ctx)
+	if err != nil {
+		log.Printf("rag auto reindex list failed: %v", err)
+		return
+	}
+
+	for _, collection := range collections {
+		index, err := rag.NewCollection(collection.CollectionID, collection.Name, collection.IndexPath)
+		if err != nil {
+			log.Printf("rag auto reindex open failed for %s: %v", collection.CollectionID, err)
+			writeSystemAuditLog(store, "rag_collection_auto_index_failed", fmt.Sprintf("%s: %v", collection.CollectionID, err))
+			continue
+		}
+
+		reindexErr := index.IndexFolder(collection.SourcePath)
+		_ = index.Close()
+		if reindexErr != nil {
+			log.Printf("rag auto reindex failed for %s: %v", collection.CollectionID, reindexErr)
+			writeSystemAuditLog(store, "rag_collection_auto_index_failed", fmt.Sprintf("%s: %v", collection.CollectionID, reindexErr))
+			continue
+		}
+
+		writeSystemAuditLog(store, "rag_collection_auto_indexed", collection.CollectionID)
+	}
+}
+
+func writeSystemAuditLog(store *storage.Store, action, detail string) {
+	if err := store.CreateAuditLog(context.Background(), &models.AuditLog{
+		Action: action,
+		Actor:  "system",
+		Detail: detail,
+	}); err != nil {
+		log.Printf("write audit log failed for %s: %v", action, err)
 	}
 }
 

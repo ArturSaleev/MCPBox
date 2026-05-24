@@ -14,11 +14,15 @@ import (
 )
 
 type createRAGCollectionRequest struct {
-	Name string `json:"name"`
+	Name        string `json:"name"`
+	SourcePath  string `json:"source_path"`
+	AutoReindex bool   `json:"auto_reindex"`
 }
 
 type updateRAGCollectionRequest struct {
-	Name string `json:"name"`
+	Name        string `json:"name"`
+	SourcePath  string `json:"source_path"`
+	AutoReindex bool   `json:"auto_reindex"`
 }
 
 type linkRAGCollectionRequest struct {
@@ -40,6 +44,7 @@ type ragCollectionResponse struct {
 	Name         string `json:"name"`
 	DataType     string `json:"data_type"`
 	SourcePath   string `json:"source_path"`
+	AutoReindex  bool   `json:"auto_reindex"`
 	IndexPath    string `json:"index_path"`
 }
 
@@ -74,6 +79,11 @@ func (s *Server) handleCreateRAGCollection(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, errors.New("name is required"))
 		return
 	}
+	sourcePath := strings.TrimSpace(req.SourcePath)
+	if sourcePath == "" {
+		writeError(w, http.StatusBadRequest, errors.New("source_path is required"))
+		return
+	}
 
 	collectionID := uuid.NewString()
 
@@ -87,14 +97,23 @@ func (s *Server) handleCreateRAGCollection(w http.ResponseWriter, r *http.Reques
 		CollectionID: collectionID,
 		Name:         name,
 		DataType:     models.RAGDataTypeCode,
+		SourcePath:   sourcePath,
+		AutoReindex:  req.AutoReindex,
 		IndexPath:    indexPath,
 	}
+
+	if err := reindexCollection(*collection, sourcePath); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	if err := s.store.CreateRAGCollection(r.Context(), collection); err != nil {
+		_ = os.RemoveAll(collection.IndexPath)
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	s.logAudit(r.Context(), nil, nil, "rag_collection_created", clientActor(r), collectionID)
+	s.logAudit(r.Context(), nil, nil, "rag_collection_indexed", clientActor(r), collectionID)
 	writeJSON(w, http.StatusCreated, mapRAGCollection(*collection))
 }
 
@@ -142,6 +161,10 @@ func (s *Server) handleDeleteRAGCollection(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if err := os.RemoveAll(collection.IndexPath); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	if err := s.store.DeleteRAGCollection(r.Context(), collectionID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -179,8 +202,23 @@ func (s *Server) handleUpdateRAGCollection(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, errors.New("name is required"))
 		return
 	}
+	sourcePath := strings.TrimSpace(req.SourcePath)
+	if sourcePath == "" {
+		writeError(w, http.StatusBadRequest, errors.New("source_path is required"))
+		return
+	}
 
-	if err := s.store.UpdateRAGCollectionName(r.Context(), collectionID, name); err != nil {
+	updatedPreview := *collection
+	updatedPreview.Name = name
+	updatedPreview.SourcePath = sourcePath
+	updatedPreview.AutoReindex = req.AutoReindex
+
+	if err := reindexCollection(updatedPreview, sourcePath); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	if err := s.store.UpdateRAGCollectionConfig(r.Context(), collectionID, name, sourcePath, req.AutoReindex); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -196,6 +234,7 @@ func (s *Server) handleUpdateRAGCollection(w http.ResponseWriter, r *http.Reques
 	}
 
 	s.logAudit(r.Context(), nil, nil, "rag_collection_updated", clientActor(r), collectionID)
+	s.logAudit(r.Context(), nil, nil, "rag_collection_indexed", clientActor(r), collectionID)
 	writeJSON(w, http.StatusOK, mapRAGCollection(*updatedCollection))
 }
 
@@ -284,18 +323,11 @@ func (s *Server) handleIndexRAGCollection(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	index, err := rag.NewCollection(collection.CollectionID, collection.Name, collection.IndexPath)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err)
-		return
-	}
-	defer func() { _ = index.Close() }()
-
-	if err := index.IndexFolder(dirPath); err != nil {
+	if err := reindexCollection(collection, dirPath); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.store.UpdateRAGCollectionSourcePath(r.Context(), collection.CollectionID, dirPath); err != nil {
+	if err := s.store.UpdateRAGCollectionConfig(r.Context(), collection.CollectionID, collection.Name, dirPath, collection.AutoReindex); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -338,8 +370,19 @@ func mapRAGCollection(collection models.RAGCollection) ragCollectionResponse {
 		Name:         collection.Name,
 		DataType:     normalizedRAGDataType(collection.DataType),
 		SourcePath:   collection.SourcePath,
+		AutoReindex:  collection.AutoReindex,
 		IndexPath:    collection.IndexPath,
 	}
+}
+
+func reindexCollection(collection models.RAGCollection, dirPath string) error {
+	index, err := rag.NewCollection(collection.CollectionID, collection.Name, collection.IndexPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = index.Close() }()
+
+	return index.IndexFolder(dirPath)
 }
 
 func resolveRAGIndexPath(indexPath, collectionID string) (string, error) {

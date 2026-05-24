@@ -1,43 +1,22 @@
 {
-  "schema_version": "2026-05-19",
-  "generated_at": "2026-05-19T12:00:00Z",
+  "schema_version": "2026-05-24",
+  "generated_at": "2026-05-24T15:30:00Z",
   "items": [
     {
       "id": "filesystem",
       "name": "Filesystem MCP",
       "category": "developer-tools",
-      "description": "Official filesystem MCP server for working with local directories.",
-      "runtime": {
-        "type": "node",
-        "version": ">=20"
-      },
-      "source": {
-        "type": "npm",
-        "package": "@modelcontextprotocol/server-filesystem",
-        "version": "latest",
-        "url": ""
-      },
-      "install": {
-        "strategy": "npm",
-        "metadata": {
-          "registry": "https://registry.npmjs.org"
-        }
-      },
-      "launch": {
-        "command": "node",
-        "args": [
-          "dist/index.js"
-        ],
-        "working_dir": "{install_dir}",
-        "entry_point": "dist/index.js"
-      },
+      "description": "Official filesystem MCP server for working with local directories. Provides read/write access to files and folders.",
+      "icon_url": "https://mcpbox.sh/assets/icons/filesystem.svg",
+      "runtime": { "type": "node", "version": ">=20" },
+      "source": { "type": "npm", "package": "@modelcontextprotocol/server-filesystem", "version": "latest", "url": "" },
+      "install": { "strategy": "npm", "metadata": { "registry": "https://registry.npmjs.org" } },
+      "launch": { "command": "node", "args": ["dist/index.js"], "working_dir": "{install_dir}", "entry_point": "dist/index.js" },
       "shared_install": true,
       "supports_multi_project": true,
       "transport": "stdio",
       "command": "node",
-      "args": [
-        "dist/index.js"
-      ],
+      "args": ["dist/index.js"],
       "env": [],
       "env_passthrough": [],
       "working_dir": "{install_dir}",
@@ -47,28 +26,160 @@
       "config_schema": {
         "type": "object",
         "properties": {
-          "root_path": {
-            "type": "string",
-            "title": "Root path",
-            "default": "C:/workspace"
-          }
+          "root_path": { "type": "string", "title": "Root path", "default": "C:/workspace" }
         },
-        "required": [
-          "root_path"
-        ]
+        "required": ["root_path"]
       },
-      "capabilities": [
-        "filesystem",
-        "local",
-        "stdio"
-      ],
-      "tags": [
-        "official",
-        "filesystem",
-        "node"
-      ],
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 10 },
+      "capabilities": ["filesystem", "local", "stdio"],
+      "tags": ["official", "filesystem", "node"],
       "website": "https://modelcontextprotocol.io",
-      "docs_url": "https://modelcontextprotocol.io",
+      "docs_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+      "enabled": true,
+      "version": "latest"
+    },
+    {
+      "id": "fetch",
+      "name": "Fetch MCP",
+      "category": "web",
+      "description": "Official Fetch MCP server for retrieving web content. Fetches URLs and converts HTML to clean markdown.",
+      "icon_url": "https://mcpbox.sh/assets/icons/fetch.svg",
+      "runtime": { "type": "node", "version": ">=20" },
+      "source": { "type": "npm", "package": "@modelcontextprotocol/server-fetch", "version": "latest", "url": "" },
+      "install": { "strategy": "npm", "metadata": { "registry": "https://registry.npmjs.org" } },
+      "launch": { "command": "node", "args": ["dist/index.js"], "working_dir": "{install_dir}", "entry_point": "dist/index.js" },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "node",
+      "args": ["dist/index.js"],
+      "env": [],
+      "env_passthrough": [],
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
+      "config_schema": { "type": "object", "properties": {}, "required": [] },
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 10 },
+      "capabilities": ["http", "web", "fetch"],
+      "tags": ["official", "fetch", "web", "node"],
+      "website": "https://modelcontextprotocol.io",
+      "docs_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
+      "enabled": true,
+      "version": "latest"
+    },
+    {
+      "id": "github",
+      "name": "GitHub MCP",
+      "category": "developer-tools",
+      "description": "Official GitHub MCP server. Create repositories, manage issues, read files, interact with GitHub API.",
+      "icon_url": "https://mcpbox.sh/assets/icons/github.svg",
+      "runtime": { "type": "node", "version": ">=20" },
+      "source": { "type": "npm", "package": "@modelcontextprotocol/server-github", "version": "latest", "url": "" },
+      "install": { "strategy": "npm", "metadata": { "registry": "https://registry.npmjs.org" } },
+      "launch": { "command": "node", "args": ["dist/index.js"], "working_dir": "{install_dir}", "entry_point": "dist/index.js" },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "node",
+      "args": ["dist/index.js"],
+      "env": [],
+      "env_passthrough": ["GITHUB_PERSONAL_ACCESS_TOKEN"],
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "token",
+      "auth_provider": "github",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "github_token": { "type": "string", "title": "GitHub Personal Access Token", "secret": true, "env_var": "GITHUB_PERSONAL_ACCESS_TOKEN" }
+        },
+        "required": ["github_token"]
+      },
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 15 },
+      "capabilities": ["github", "git", "api"],
+      "tags": ["official", "github", "node"],
+      "website": "https://github.com",
+      "docs_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/github",
+      "enabled": true,
+      "version": "latest"
+    },
+    {
+      "id": "brave-search",
+      "name": "Brave Search MCP",
+      "category": "web",
+      "description": "Brave Search MCP server. Web search and local business search. Free tier: 2,000 queries/month.",
+      "icon_url": "https://mcpbox.sh/assets/icons/brave.svg",
+      "runtime": { "type": "node", "version": ">=20" },
+      "source": { "type": "npm", "package": "@modelcontextprotocol/server-brave-search", "version": "latest", "url": "" },
+      "install": { "strategy": "npm", "metadata": { "registry": "https://registry.npmjs.org" } },
+      "launch": { "command": "node", "args": ["dist/index.js"], "working_dir": "{install_dir}", "entry_point": "dist/index.js" },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "node",
+      "args": ["dist/index.js"],
+      "env": [],
+      "env_passthrough": ["BRAVE_API_KEY"],
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "api_key",
+      "auth_provider": "brave",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "brave_api_key": { "type": "string", "title": "Brave Search API Key", "secret": true, "env_var": "BRAVE_API_KEY", "description": "Get from https://brave.com/search/api/" }
+        },
+        "required": ["brave_api_key"]
+      },
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 10 },
+      "capabilities": ["search", "web", "api"],
+      "tags": ["official", "search", "brave", "node"],
+      "website": "https://brave.com/search/api/",
+      "docs_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search",
+      "enabled": true,
+      "version": "latest"
+    },
+    {
+      "id": "postgresql",
+      "name": "PostgreSQL MCP",
+      "category": "databases",
+      "description": "Official PostgreSQL MCP server. Query and inspect PostgreSQL databases with read-only access.",
+      "icon_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/2/29/Postgresql_elephant.svg/1280px-Postgresql_elephant.svg.png?_=20080116191800",
+      "runtime": { "type": "node", "version": ">=20" },
+      "source": { "type": "npm", "package": "@modelcontextprotocol/server-postgres", "version": "latest", "url": "" },
+      "install": { "strategy": "npm", "metadata": { "registry": "https://registry.npmjs.org" } },
+      "launch": { "command": "node", "args": ["dist/index.js"], "working_dir": "{install_dir}", "entry_point": "dist/index.js" },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "node",
+      "args": ["dist/index.js"],
+      "env": [],
+      "env_passthrough": ["PGPASSWORD"],
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
+      "system_dependencies": [
+        { "executable": "psql", "min_version": "14.0.0", "critical": true, "install_hint": "Install PostgreSQL client tools (psql)" }
+      ],
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "postgres_host": { "type": "string", "title": "Host", "default": "127.0.0.1" },
+          "postgres_port": { "type": "string", "title": "Port", "default": "5432" },
+          "postgres_user": { "type": "string", "title": "User", "default": "postgres" },
+          "postgres_password": { "type": "string", "title": "Password", "secret": true, "env_var": "PGPASSWORD" },
+          "postgres_database": { "type": "string", "title": "Database" }
+        },
+        "required": ["postgres_host", "postgres_user", "postgres_database"]
+      },
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 15 },
+      "capabilities": ["postgresql", "database", "sql"],
+      "tags": ["official", "postgresql", "database", "node"],
+      "website": "https://www.postgresql.org",
+      "docs_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/postgres",
       "enabled": true,
       "version": "latest"
     },
@@ -76,38 +187,17 @@
       "id": "sqlite",
       "name": "SQLite MCP",
       "category": "databases",
-      "description": "Package-backed SQLite MCP server for local database inspection.",
-      "runtime": {
-        "type": "python",
-        "version": ">=3.11"
-      },
-      "source": {
-        "type": "python",
-        "package": "mcp-server-sqlite",
-        "version": "latest",
-        "url": ""
-      },
-      "install": {
-        "strategy": "python_venv",
-        "metadata": {}
-      },
-      "launch": {
-        "command": "python",
-        "args": [
-          "-m",
-          "mcp_server_sqlite"
-        ],
-        "working_dir": "{install_dir}",
-        "entry_point": "mcp_server_sqlite"
-      },
+      "description": "SQLite MCP server for local database inspection and queries.",
+      "icon_url": "https://mcpbox.sh/assets/icons/sqlite.svg",
+      "runtime": { "type": "python", "version": ">=3.11" },
+      "source": { "type": "python", "package": "mcp-server-sqlite", "version": "latest", "url": "" },
+      "install": { "strategy": "python_venv", "metadata": {} },
+      "launch": { "command": "python", "args": ["-m", "mcp_server_sqlite"], "working_dir": "{install_dir}", "entry_point": "mcp_server_sqlite" },
       "shared_install": true,
       "supports_multi_project": true,
       "transport": "stdio",
       "command": "python",
-      "args": [
-        "-m",
-        "mcp_server_sqlite"
-      ],
+      "args": ["-m", "mcp_server_sqlite"],
       "env": [],
       "env_passthrough": [],
       "working_dir": "{install_dir}",
@@ -117,28 +207,387 @@
       "config_schema": {
         "type": "object",
         "properties": {
-          "database_path": {
-            "type": "string",
-            "title": "Database path",
-            "default": "C:/data/app.db"
-          }
+          "database_path": { "type": "string", "title": "Database path", "default": "C:/data/app.db" }
         },
-        "required": [
-          "database_path"
-        ]
+        "required": ["database_path"]
       },
-      "capabilities": [
-        "sqlite",
-        "database",
-        "local"
-      ],
-      "tags": [
-        "sqlite",
-        "python",
-        "local"
-      ],
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 10 },
+      "capabilities": ["sqlite", "database", "local"],
+      "tags": ["sqlite", "python", "database"],
       "website": "https://sqlite.org",
-      "docs_url": "https://sqlite.org/docs.html",
+      "docs_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/sqlite",
+      "enabled": true,
+      "version": "latest"
+    },
+    {
+      "id": "sequential-thinking",
+      "name": "Sequential Thinking MCP",
+      "category": "ai",
+      "description": "Sequential thinking tool for complex problem-solving. Step-by-step reasoning with revisions and branching.",
+      "icon_url": "https://avatars.githubusercontent.com/u/182288589?s=200&v=4",
+      "runtime": { "type": "node", "version": ">=20" },
+      "source": { "type": "npm", "package": "@modelcontextprotocol/server-sequential-thinking", "version": "latest", "url": "" },
+      "install": { "strategy": "npm", "metadata": { "registry": "https://registry.npmjs.org" } },
+      "launch": { "command": "node", "args": ["dist/index.js"], "working_dir": "{install_dir}", "entry_point": "dist/index.js" },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "node",
+      "args": ["dist/index.js"],
+      "env": [],
+      "env_passthrough": [],
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
+      "config_schema": { "type": "object", "properties": {}, "required": [] },
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 10 },
+      "capabilities": ["thinking", "reasoning", "ai"],
+      "tags": ["official", "thinking", "reasoning", "node"],
+      "website": "https://modelcontextprotocol.io",
+      "docs_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking",
+      "enabled": true,
+      "version": "latest"
+    },
+    {
+      "id": "time",
+      "name": "Time MCP",
+      "category": "utilities",
+      "description": "Time server for current date/time in multiple timezones. Supports IANA timezones.",
+      "icon_url": "https://mcpbox.sh/assets/icons/time.svg",
+      "runtime": { "type": "node", "version": ">=20" },
+      "source": { "type": "npm", "package": "@guanxiong/mcp-server-time", "version": "latest", "url": "" },
+      "install": { "strategy": "npm", "metadata": { "registry": "https://registry.npmjs.org" } },
+      "launch": { "command": "node", "args": ["dist/index.js"], "working_dir": "{install_dir}", "entry_point": "dist/index.js" },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@guanxiong/mcp-server-time"],
+      "env": [],
+      "env_passthrough": [],
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
+      "config_schema": { "type": "object", "properties": {}, "required": [] },
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 10 },
+      "capabilities": ["time", "datetime", "timezone"],
+      "tags": ["time", "datetime", "timezone", "node"],
+      "website": "https://www.npmjs.com/package/@guanxiong/mcp-server-time",
+      "docs_url": "https://github.com/guanxiong/mcp-server-time",
+      "enabled": true,
+      "version": "latest"
+    },
+    {
+      "id": "puppeteer",
+      "name": "Puppeteer MCP",
+      "category": "automation",
+      "description": "Browser automation with Puppeteer. Navigate, screenshot, click, fill forms, execute JavaScript.",
+      "icon_url": "https://r2.trys.ai/imgs/ufh5xo0a-1733450066022.png",
+      "runtime": { "type": "node", "version": ">=20" },
+      "source": { "type": "npm", "package": "@imazhar101/mcp-puppeteer-server", "version": "latest", "url": "" },
+      "install": { "strategy": "npm", "metadata": { "registry": "https://registry.npmjs.org" } },
+      "launch": { "command": "node", "args": ["dist/index.js"], "working_dir": "{install_dir}", "entry_point": "dist/index.js" },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@imazhar101/mcp-puppeteer-server"],
+      "env": [],
+      "env_passthrough": [],
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
+      "config_schema": { "type": "object", "properties": {}, "required": [] },
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 20 },
+      "capabilities": ["browser", "automation", "puppeteer", "scraping"],
+      "tags": ["puppeteer", "browser", "automation", "node"],
+      "website": "https://pptr.dev",
+      "docs_url": "https://github.com/imazhar101/mcp-puppeteer-server",
+      "enabled": true,
+      "version": "latest"
+    },
+    {
+      "id": "slack",
+      "name": "Slack MCP",
+      "category": "communication",
+      "description": "Slack integration for reading and sending messages. Search channels, get threads, receive mentions.",
+      "icon_url": "https://upload.wikimedia.org/wikipedia/commons/d/d5/Slack_icon_2019.svg",
+      "runtime": { "type": "node", "version": ">=20" },
+      "source": { "type": "npm", "package": "@jict/slack-mcp-server", "version": "latest", "url": "" },
+      "install": { "strategy": "npm", "metadata": { "registry": "https://registry.npmjs.org" } },
+      "launch": { "command": "node", "args": ["dist/index.js"], "working_dir": "{install_dir}", "entry_point": "dist/index.js" },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@jict/slack-mcp-server"],
+      "env": [],
+      "env_passthrough": ["SLACK_USER_TOKEN"],
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "token",
+      "auth_provider": "slack",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "slack_user_token": { "type": "string", "title": "Slack User Token (xoxp-*)", "secret": true, "env_var": "SLACK_USER_TOKEN", "description": "Create at https://api.slack.com/apps" }
+        },
+        "required": ["slack_user_token"]
+      },
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 15 },
+      "capabilities": ["slack", "chat", "messaging", "communication"],
+      "tags": ["slack", "chat", "communication", "node"],
+      "website": "https://slack.com",
+      "docs_url": "https://github.com/jict/slack-mcp-server",
+      "enabled": true,
+      "version": "latest"
+    },
+    {
+      "id": "notion",
+      "name": "Notion MCP",
+      "category": "productivity",
+      "description": "Notion MCP server. Search pages, query databases, get page content, manage database entries.",
+      "icon_url": "https://mcpbox.sh/assets/icons/notion.svg",
+      "runtime": { "type": "node", "version": ">=20" },
+      "source": { "type": "npm", "package": "@imazhar101/mcp-notion-server", "version": "latest", "url": "" },
+      "install": { "strategy": "npm", "metadata": { "registry": "https://registry.npmjs.org" } },
+      "launch": { "command": "node", "args": ["dist/index.js"], "working_dir": "{install_dir}", "entry_point": "dist/index.js" },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@imazhar101/mcp-notion-server"],
+      "env": [],
+      "env_passthrough": ["NOTION_API_KEY"],
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "token",
+      "auth_provider": "notion",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "notion_api_key": { "type": "string", "title": "Notion API Key", "secret": true, "env_var": "NOTION_API_KEY", "description": "Get from https://www.notion.so/my-integrations" }
+        },
+        "required": ["notion_api_key"]
+      },
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 15 },
+      "capabilities": ["notion", "database", "docs", "knowledge"],
+      "tags": ["notion", "database", "productivity", "node"],
+      "website": "https://www.notion.so",
+      "docs_url": "https://github.com/imazhar101/mcp-notion-server",
+      "enabled": true,
+      "version": "latest"
+    },
+    {
+      "id": "memoryplugin",
+      "name": "MemoryPlugin MCP",
+      "category": "ai",
+      "description": "MemoryPlugin MCP server for persistent memory. Store, query, search memories with AI categories.",
+      "icon_url": "https://www.memoryplugin.com/_next/image?url=%2F_next%2Fstatic%2Fmedia%2Ficon.7053ea9f.png&w=64&q=75",
+      "runtime": { "type": "node", "version": ">=20" },
+      "source": { "type": "npm", "package": "@memoryplugin/mcp-server", "version": "latest", "url": "" },
+      "install": { "strategy": "npm", "metadata": { "registry": "https://registry.npmjs.org" } },
+      "launch": { "command": "node", "args": ["dist/index.js"], "working_dir": "{install_dir}", "entry_point": "dist/index.js" },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@memoryplugin/mcp-server"],
+      "env": [],
+      "env_passthrough": ["MEMORY_PLUGIN_TOKEN"],
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "token",
+      "auth_provider": "memoryplugin",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "memory_plugin_token": { "type": "string", "title": "MemoryPlugin API Token", "secret": true, "env_var": "MEMORY_PLUGIN_TOKEN", "description": "Get from https://www.memoryplugin.com/dashboard" }
+        },
+        "required": ["memory_plugin_token"]
+      },
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 10 },
+      "capabilities": ["memory", "storage", "knowledge", "rag"],
+      "tags": ["memory", "persistence", "knowledge", "node"],
+      "website": "https://www.memoryplugin.com",
+      "docs_url": "https://github.com/memoryplugin/mcp-server",
+      "enabled": true,
+      "version": "latest"
+    },
+
+    {
+      "id": "docker-filesystem",
+      "name": "Filesystem MCP (Docker)",
+      "category": "developer-tools",
+      "description": "Filesystem MCP server running in Docker. Isolated file operations with mount support.",
+      "icon_url": "https://mcpbox.sh/assets/icons/docker-filesystem.svg",
+      "runtime": { "type": "docker", "version": ">=20.10" },
+      "source": { "type": "docker", "package": "mcp/filesystem", "version": "latest", "url": "https://hub.docker.com/r/mcp/filesystem" },
+      "install": { "strategy": "docker_pull", "metadata": { "registry": "docker.io" } },
+      "launch": {
+        "command": "docker",
+        "args": ["run", "-i", "--rm", "-v", "{root_path}:{root_path}", "mcp/filesystem", "{root_path}"],
+        "working_dir": "",
+        "entry_point": ""
+      },
+      "shared_install": true,
+      "supports_multi_project": false,
+      "transport": "stdio",
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-v", "{root_path}:{root_path}", "mcp/filesystem", "{root_path}"],
+      "env": [],
+      "env_passthrough": [],
+      "working_dir": "",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "root_path": { "type": "string", "title": "Root path to mount", "default": "/workspace" }
+        },
+        "required": ["root_path"]
+      },
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 15 },
+      "capabilities": ["filesystem", "docker", "isolated"],
+      "tags": ["filesystem", "docker", "container"],
+      "website": "https://modelcontextprotocol.io",
+      "docs_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+      "enabled": true,
+      "version": "latest"
+    },
+    {
+      "id": "docker-postgres",
+      "name": "PostgreSQL MCP (Docker)",
+      "category": "databases",
+      "description": "PostgreSQL MCP server in Docker. Query databases with isolated environment.",
+      "icon_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/2/29/Postgresql_elephant.svg/1280px-Postgresql_elephant.svg.png?_=20080116191800",
+      "runtime": { "type": "docker", "version": ">=20.10" },
+      "source": { "type": "docker", "package": "mcp/postgres", "version": "latest", "url": "https://hub.docker.com/r/mcp/postgres" },
+      "install": { "strategy": "docker_pull", "metadata": { "registry": "docker.io" } },
+      "launch": {
+        "command": "docker",
+        "args": ["run", "-i", "--rm", "-e", "PGHOST={postgres_host}", "-e", "PGPORT={postgres_port}", "-e", "PGUSER={postgres_user}", "-e", "PGPASSWORD={postgres_password}", "-e", "PGDATABASE={postgres_database}", "mcp/postgres"],
+        "working_dir": "",
+        "entry_point": ""
+      },
+      "shared_install": true,
+      "supports_multi_project": false,
+      "transport": "stdio",
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-e", "PGHOST={postgres_host}", "-e", "PGPORT={postgres_port}", "-e", "PGUSER={postgres_user}", "-e", "PGPASSWORD={postgres_password}", "-e", "PGDATABASE={postgres_database}", "mcp/postgres"],
+      "env": [],
+      "env_passthrough": [],
+      "working_dir": "",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
+      "system_dependencies": [
+        { "executable": "docker", "min_version": "20.10.0", "critical": true, "install_hint": "Install Docker Desktop from https://docker.com" }
+      ],
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "postgres_host": { "type": "string", "title": "Host", "default": "host.docker.internal" },
+          "postgres_port": { "type": "string", "title": "Port", "default": "5432" },
+          "postgres_user": { "type": "string", "title": "User", "default": "postgres" },
+          "postgres_password": { "type": "string", "title": "Password", "secret": true },
+          "postgres_database": { "type": "string", "title": "Database" }
+        },
+        "required": ["postgres_host", "postgres_user", "postgres_database"]
+      },
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 15 },
+      "capabilities": ["postgresql", "database", "docker"],
+      "tags": ["postgresql", "database", "docker"],
+      "website": "https://www.postgresql.org",
+      "docs_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/postgres",
+      "enabled": true,
+      "version": "latest"
+    },
+    {
+      "id": "docker-redis",
+      "name": "Redis MCP (Docker)",
+      "category": "databases",
+      "description": "Redis MCP server in Docker. Query Redis keys, get/set values, inspect data structures.",
+      "icon_url": "https://mcpbox.sh/assets/icons/redis.svg",
+      "runtime": { "type": "docker", "version": ">=20.10" },
+      "source": { "type": "docker", "package": "redis/mcp", "version": "latest", "url": "https://hub.docker.com/r/redis/mcp" },
+      "install": { "strategy": "docker_pull", "metadata": { "registry": "docker.io" } },
+      "launch": {
+        "command": "docker",
+        "args": ["run", "-i", "--rm", "-e", "REDIS_HOST={redis_host}", "-e", "REDIS_PORT={redis_port}", "-e", "REDIS_PASSWORD={redis_password}", "redis/mcp"],
+        "working_dir": "",
+        "entry_point": ""
+      },
+      "shared_install": true,
+      "supports_multi_project": false,
+      "transport": "stdio",
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-e", "REDIS_HOST={redis_host}", "-e", "REDIS_PORT={redis_port}", "-e", "REDIS_PASSWORD={redis_password}", "redis/mcp"],
+      "env": [],
+      "env_passthrough": [],
+      "working_dir": "",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
+      "system_dependencies": [
+        { "executable": "docker", "min_version": "20.10.0", "critical": true, "install_hint": "Install Docker Desktop" }
+      ],
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "redis_host": { "type": "string", "title": "Redis Host", "default": "host.docker.internal" },
+          "redis_port": { "type": "string", "title": "Redis Port", "default": "6379" },
+          "redis_password": { "type": "string", "title": "Password (optional)", "secret": true }
+        },
+        "required": ["redis_host"]
+      },
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 10 },
+      "capabilities": ["redis", "database", "docker", "kvstore"],
+      "tags": ["redis", "database", "docker", "cache"],
+      "website": "https://redis.io",
+      "docs_url": "https://github.com/redis/mcp",
+      "enabled": true,
+      "version": "latest"
+    },
+    {
+      "id": "docker-playwright",
+      "name": "Playwright MCP (Docker)",
+      "category": "automation",
+      "description": "Playwright MCP server in Docker. Browser automation, screenshots, web scraping with full browser isolation.",
+      "icon_url": "https://pbs.twimg.com/profile_images/1318604600677527552/stk8sqYZ_400x400.png",
+      "runtime": { "type": "docker", "version": ">=20.10" },
+      "source": { "type": "docker", "package": "mcr.microsoft.com/playwright/mcp", "version": "latest", "url": "https://mcr.microsoft.com/playwright/mcp" },
+      "install": { "strategy": "docker_pull", "metadata": { "registry": "mcr.microsoft.com" } },
+      "launch": {
+        "command": "docker",
+        "args": ["run", "-i", "--rm", "mcr.microsoft.com/playwright/mcp"],
+        "working_dir": "",
+        "entry_point": ""
+      },
+      "shared_install": true,
+      "supports_multi_project": false,
+      "transport": "stdio",
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "mcr.microsoft.com/playwright/mcp"],
+      "env": [],
+      "env_passthrough": [],
+      "working_dir": "",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
+      "system_dependencies": [
+        { "executable": "docker", "min_version": "20.10.0", "critical": true, "install_hint": "Install Docker Desktop" }
+      ],
+      "config_schema": { "type": "object", "properties": {}, "required": [] },
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 20 },
+      "capabilities": ["playwright", "browser", "automation", "docker", "scraping"],
+      "tags": ["playwright", "browser", "automation", "docker"],
+      "website": "https://playwright.dev",
+      "docs_url": "https://github.com/microsoft/playwright-mcp",
       "enabled": true,
       "version": "latest"
     },
@@ -146,179 +595,99 @@
       "id": "mysql",
       "name": "MySQL MCP",
       "category": "databases",
-      "description": "Package-backed MySQL MCP server for reusable project connections.",
-      "runtime": {
-        "type": "node",
-        "version": ">=20"
-      },
-      "source": {
-        "type": "npm",
-        "package": "@example/mysql-mcp",
-        "version": "1.0.0",
-        "url": ""
-      },
-      "install": {
-        "strategy": "npm",
-        "metadata": {
-          "registry": "https://registry.npmjs.org"
-        }
-      },
-      "launch": {
-        "command": "node",
-        "args": [
-          "dist/index.js"
-        ],
-        "working_dir": "{install_dir}",
-        "entry_point": "dist/index.js"
-      },
+      "description": "MySQL MCP server based on @benborla29/mcp-server-mysql. Lets MCP clients inspect schemas and run SQL queries against MySQL.",
+      "icon_url": "https://labs.mysql.com/common/themes/sakila/mysql-ai.png",
+      "runtime": { "type": "node", "version": ">=20" },
+      "source": { "type": "npm", "package": "@benborla29/mcp-server-mysql", "version": "latest", "url": "" },
+      "install": { "strategy": "npm", "metadata": { "registry": "https://registry.npmjs.org" } },
+      "launch": { "command": "node", "args": ["dist/index.js"], "working_dir": "{install_dir}", "entry_point": "dist/index.js" },
       "shared_install": true,
       "supports_multi_project": true,
       "transport": "stdio",
       "command": "node",
-      "args": [
-        "dist/index.js"
-      ],
+      "args": ["dist/index.js"],
       "env": [],
-      "env_passthrough": [],
+      "default_env": {
+        "MYSQL_PORT": "3306",
+        "ALLOW_INSERT_OPERATION": "false",
+        "ALLOW_UPDATE_OPERATION": "false",
+        "ALLOW_DELETE_OPERATION": "false"
+      },
+      "env_passthrough": ["MYSQL_HOST", "MYSQL_PORT", "MYSQL_USER", "MYSQL_PASS", "MYSQL_DB", "ALLOW_INSERT_OPERATION", "ALLOW_UPDATE_OPERATION", "ALLOW_DELETE_OPERATION"],
+      "env_schema": {
+        "type": "object",
+        "properties": {
+          "MYSQL_HOST": { "type": "string", "title": "MySQL Host", "default": "127.0.0.1" },
+          "MYSQL_PORT": { "type": "string", "title": "Port", "default": "3306" },
+          "MYSQL_USER": { "type": "string", "title": "User", "default": "root" },
+          "MYSQL_PASS": { "type": "string", "title": "Password", "secret": true, "description": "MySQL password used by @benborla29/mcp-server-mysql" },
+          "MYSQL_DB": { "type": "string", "title": "Database" },
+          "ALLOW_INSERT_OPERATION": { "type": "string", "title": "Allow INSERT", "default": "false", "description": "Set to true only if you want write access." },
+          "ALLOW_UPDATE_OPERATION": { "type": "string", "title": "Allow UPDATE", "default": "false", "description": "Set to true only if you want write access." },
+          "ALLOW_DELETE_OPERATION": { "type": "string", "title": "Allow DELETE", "default": "false", "description": "Set to true only if you want write access." }
+        },
+        "required": ["MYSQL_HOST", "MYSQL_USER", "MYSQL_DB"]
+      },
       "working_dir": "{install_dir}",
       "default_auto_start": false,
       "auth_type": "none",
       "auth_provider": "",
-      "config_schema": {
-        "type": "object",
-        "properties": {
-          "mysql_host": {
-            "type": "string",
-            "title": "Host",
-            "default": "127.0.0.1"
-          },
-          "mysql_port": {
-            "type": "string",
-            "title": "Port",
-            "default": "3306"
-          },
-          "mysql_user": {
-            "type": "string",
-            "title": "User",
-            "default": "root"
-          },
-          "mysql_password": {
-            "type": "string",
-            "title": "Password"
-          },
-          "mysql_database": {
-            "type": "string",
-            "title": "Database"
-          }
-        },
-        "required": [
-          "mysql_host",
-          "mysql_user"
-        ]
-      },
-      "capabilities": [
-        "mysql",
-        "database",
-        "local"
-      ],
-      "tags": [
-        "mysql",
-        "node",
-        "shared-install"
-      ],
-      "website": "https://www.mysql.com",
-      "docs_url": "https://dev.mysql.com/doc/",
+      "config_schema": { "type": "object", "properties": {}, "required": [] },
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 15 },
+      "capabilities": ["mysql", "database", "sql", "node"],
+      "tags": ["mysql", "database", "node"],
+      "website": "https://www.npmjs.com/package/@benborla29/mcp-server-mysql",
+      "docs_url": "https://github.com/benborla/mcp-server-mysql#installation",
       "enabled": true,
-      "version": "1.0.0"
+      "version": "latest"
     },
     {
-      "id": "postgresql",
-      "name": "PostgreSQL MCP",
+      "id": "docker-mysql",
+      "name": "MySQL MCP (Docker)",
       "category": "databases",
-      "description": "Package-backed PostgreSQL MCP server for local and shared project setups.",
-      "runtime": {
-        "type": "node",
-        "version": ">=20"
-      },
-      "source": {
-        "type": "npm",
-        "package": "@example/postgres-mcp",
-        "version": "1.0.0",
-        "url": ""
-      },
-      "install": {
-        "strategy": "npm",
-        "metadata": {
-          "registry": "https://registry.npmjs.org"
-        }
-      },
+      "description": "MySQL MCP server in Docker. Query MySQL databases with isolated environment.",
+      "icon_url": "https://labs.mysql.com/common/themes/sakila/mysql-ai.png",
+      "runtime": { "type": "docker", "version": ">=20.10" },
+      "source": { "type": "docker", "package": "mysql/mcp-server", "version": "latest", "url": "https://hub.docker.com/r/mysql/mcp-server" },
+      "install": { "strategy": "docker_pull", "metadata": { "registry": "docker.io" } },
       "launch": {
-        "command": "node",
-        "args": [
-          "dist/index.js"
-        ],
-        "working_dir": "{install_dir}",
-        "entry_point": "dist/index.js"
+        "command": "docker",
+        "args": ["run", "-i", "--rm", "-e", "MYSQL_HOST={mysql_host}", "-e", "MYSQL_PORT={mysql_port}", "-e", "MYSQL_USER={mysql_user}", "-e", "MYSQL_PASSWORD={mysql_password}", "-e", "MYSQL_DATABASE={mysql_database}", "mysql/mcp-server"],
+        "working_dir": "",
+        "entry_point": ""
       },
       "shared_install": true,
-      "supports_multi_project": true,
+      "supports_multi_project": false,
       "transport": "stdio",
-      "command": "node",
-      "args": [
-        "dist/index.js"
-      ],
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-e", "MYSQL_HOST={mysql_host}", "-e", "MYSQL_PORT={mysql_port}", "-e", "MYSQL_USER={mysql_user}", "-e", "MYSQL_PASSWORD={mysql_password}", "-e", "MYSQL_DATABASE={mysql_database}", "mysql/mcp-server"],
       "env": [],
       "env_passthrough": [],
-      "working_dir": "{install_dir}",
+      "working_dir": "",
       "default_auto_start": false,
       "auth_type": "none",
       "auth_provider": "",
+      "system_dependencies": [
+        { "executable": "docker", "min_version": "20.10.0", "critical": true, "install_hint": "Install Docker Desktop" }
+      ],
       "config_schema": {
         "type": "object",
         "properties": {
-          "postgres_host": {
-            "type": "string",
-            "title": "Host",
-            "default": "127.0.0.1"
-          },
-          "postgres_port": {
-            "type": "string",
-            "title": "Port",
-            "default": "5432"
-          },
-          "postgres_user": {
-            "type": "string",
-            "title": "User",
-            "default": "postgres"
-          },
-          "postgres_password": {
-            "type": "string",
-            "title": "Password"
-          },
-          "postgres_database": {
-            "type": "string",
-            "title": "Database"
-          }
+          "mysql_host": { "type": "string", "title": "MySQL Host", "default": "host.docker.internal" },
+          "mysql_port": { "type": "string", "title": "Port", "default": "3306" },
+          "mysql_user": { "type": "string", "title": "User", "default": "root" },
+          "mysql_password": { "type": "string", "title": "Password", "secret": true },
+          "mysql_database": { "type": "string", "title": "Database" }
         },
-        "required": [
-          "postgres_host",
-          "postgres_user"
-        ]
+        "required": ["mysql_host", "mysql_user", "mysql_database"]
       },
-      "capabilities": [
-        "postgresql",
-        "database",
-        "local"
-      ],
-      "tags": [
-        "postgresql",
-        "node",
-        "shared-install"
-      ],
-      "website": "https://www.postgresql.org",
-      "docs_url": "https://www.postgresql.org/docs/",
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 15 },
+      "capabilities": ["mysql", "database", "docker", "sql"],
+      "tags": ["mysql", "database", "docker"],
+      "website": "https://www.mysql.com",
+      "docs_url": "https://github.com/mysql/mcp-server",
       "enabled": true,
-      "version": "1.0.0"
+      "version": "latest"
     }
   ]
 }

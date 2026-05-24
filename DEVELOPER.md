@@ -16,7 +16,7 @@ Today MCPBox is:
 
 Today MCPBox is not:
 - a multi-user platform with auth and roles
-- a full observability platform
+- a full observability platform, even though it now includes basic built-in latency, error, and traffic metrics
 - a distributed MCP orchestration system across many hosts
 
 ## Core Model
@@ -25,6 +25,9 @@ Today MCPBox is not:
 - `MCP Server`: either a local `stdio` server launched by MCPBox or a remote `HTTP streaming` server
 - `Catalog Item`: an integration definition synchronized from an external JSON manifest
 - `Installed Integration`: a project-level record that links a catalog item to a concrete `MCPServer`
+- `Installed Package`: a reusable installed runtime package that can be linked into one or more projects
+- `Project Package Instance`: a project-level attachment between an installed package and the concrete managed `MCPServer`
+- `Performance Metric`: a lightweight per-request record used for latency, error, and traffic summaries in the logs UI
 
 Important behavior:
 - each project has exactly one MCP URL
@@ -53,8 +56,14 @@ Important behavior:
 - server enable/disable
 - local server inspection
 - health verification on create, update, start, and manual check
-- catalog sync from external JSON manifests
+- catalog sync from external JSON manifests or local uploaded manifest files
 - installed integrations stored alongside regular MCP servers
+- package install and uninstall lifecycle with package reuse across projects
+- system dependency checks before package install
+- manifest-driven secret handling so sensitive config can be moved into environment variables instead of visible CLI args
+- manifest-driven post-install health checks
+- Docker runtime MVP for stdio-oriented container-backed catalog items
+- lightweight performance metrics for request count, error rate, latency, and traffic
 - embedded Ollama launcher powered by `github.com/mark3labs/mcphost/sdk`
 
 Knowledge Base note:
@@ -69,12 +78,14 @@ Knowledge Base note:
 - embedded React admin UI
 - project list and project overview
 - modal create-project flow
+- project duplication flow with rename-before-create
 - modal add-server flow for `stdio` and `HTTP streaming`
-- Market tab for catalog sync and integration install
+- Market tab for catalog sync, package install, uninstall, and add-to-project flows
 - project MCP URL display
 - start/stop controls for local servers
 - health-check status and manual `Check` action
 - audit log console with project filtering
+- built-in performance dashboard inside the logs screen
 - auto-refreshing log view
 - `Info` modal for `stdio` servers
 - local Ollama status detection and model picker
@@ -161,10 +172,34 @@ Relevant API routes:
 GET /api/catalog/items
 GET /api/catalog/items?enabled_only=1
 POST /api/catalog/sync
+GET /api/packages
+DELETE /api/packages/{id}
 POST /api/projects/{id}/integrations
 ```
 
 Installed catalog items create regular project-linked `MCPServer` records, so the project endpoint remains `/mcp/{project_token}` with no special transport case.
+
+Catalog sync notes:
+- `POST /api/catalog/sync` accepts either a remote `url` or `manifest_content` plus `file_name`
+- legacy catalog URLs such as `https://webeasy.kz/mcpbox/catalog.json` are normalized to `https://mcpbox.sh/catalog.json`
+- sync failures are written both to the UI and to the audit log
+
+Manifest notes:
+- `icon_url` is supported for catalog cards and dialogs
+- `system_dependencies` can block package install when required binaries such as `git`, `psql`, or `docker` are missing
+- `default_env` can be sent as an object or as an array of `{ key, value }` pairs
+- `env_schema` describes environment variables for the install/add-to-project dialog, including `secret: true`
+- config fields can also declare `secret: true` and `env_var` so MCPBox stores the secret in `server.EnvJSON` instead of leaving it in visible CLI args
+- `health_check` can force post-install verification and optionally block add-to-project when the integration does not come up cleanly
+- Docker catalog items currently target stdio-style `docker run --rm -i ...` flows and `docker_pull` installation
+
+Package lifecycle notes:
+- package install happens once per catalog item version
+- package uninstall is blocked while any project still references that package
+- `Add to project` creates a fresh project package instance and a regular managed `MCPServer`
+
+Project lifecycle note:
+- `POST /api/projects/{id}/duplicate` clones project metadata, servers, package instances, installed integrations, and connected knowledge-base links while generating a fresh token for the new project
 
 ## Ollama Integration
 
@@ -209,6 +244,23 @@ Currently it logs events such as:
 Operational note:
 - common informational stderr lines from Filesystem-style MCP servers are filtered so they do not appear as misleading access errors
 - SQL query logging from GORM is disabled by default so ordinary MCP traffic does not flood the console
+
+In addition to audit logs, MCPBox now stores lightweight performance metrics.
+
+Relevant API route:
+
+```http
+GET /api/logs/metrics
+GET /api/logs/metrics?project_id={id}&window=5m
+GET /api/logs/metrics?project_id={id}&window=1h
+GET /api/logs/metrics?project_id={id}&window=24h
+```
+
+Current metrics behavior:
+- metrics are recorded around proxied JSON-RPC calls and managed server method calls
+- each metric records project, server, transport, operation, latency, request bytes, response bytes, and success/failure
+- the logs screen uses these records to render summary cards, trend charts, top slow servers, top error servers, top traffic servers, and recent failures
+- this is intentionally a lightweight in-app operational view, not a Prometheus or OpenTelemetry-style external observability system
 
 ## Requirements
 

@@ -17,6 +17,7 @@ import (
 	"os"
 	"path"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -70,6 +71,10 @@ type updateProjectRequest struct {
 	RootPath    string `json:"root_path"`
 }
 
+type duplicateProjectRequest struct {
+	Name string `json:"name"`
+}
+
 type addServerRequest struct {
 	Name                  string         `json:"name"`
 	Transport             string         `json:"transport"`
@@ -108,6 +113,61 @@ type auditLogResponse struct {
 	CreatedAt string `json:"created_at"`
 }
 
+type performanceMetricsResponse struct {
+	Window          string                          `json:"window"`
+	Summary         performanceSummaryResponse      `json:"summary"`
+	Trends          []performanceTrendBucket        `json:"trends"`
+	TopSlowServers  []performanceServerMetricRecord `json:"top_slow_servers"`
+	TopErrorServers []performanceServerMetricRecord `json:"top_error_servers"`
+	TopTraffic      []performanceServerMetricRecord `json:"top_traffic_servers"`
+	RecentFailures  []performanceFailureRecord      `json:"recent_failures"`
+}
+
+type performanceSummaryResponse struct {
+	RequestCount int64   `json:"request_count"`
+	ErrorCount   int64   `json:"error_count"`
+	ErrorRate    float64 `json:"error_rate"`
+	AvgLatencyMS float64 `json:"avg_latency_ms"`
+	P95LatencyMS int64   `json:"p95_latency_ms"`
+	TrafficIn    int64   `json:"traffic_in"`
+	TrafficOut   int64   `json:"traffic_out"`
+}
+
+type performanceTrendBucket struct {
+	Timestamp    string  `json:"timestamp"`
+	RequestCount int64   `json:"request_count"`
+	ErrorCount   int64   `json:"error_count"`
+	AvgLatencyMS float64 `json:"avg_latency_ms"`
+	P95LatencyMS int64   `json:"p95_latency_ms"`
+	TrafficIn    int64   `json:"traffic_in"`
+	TrafficOut   int64   `json:"traffic_out"`
+}
+
+type performanceServerMetricRecord struct {
+	ServerID      uint    `json:"server_id"`
+	RequestCount  int64   `json:"request_count"`
+	ErrorCount    int64   `json:"error_count"`
+	ErrorRate     float64 `json:"error_rate"`
+	AvgLatencyMS  float64 `json:"avg_latency_ms"`
+	P95LatencyMS  int64   `json:"p95_latency_ms"`
+	RequestBytes  int64   `json:"request_bytes"`
+	ResponseBytes int64   `json:"response_bytes"`
+	TotalTraffic  int64   `json:"total_traffic"`
+}
+
+type performanceFailureRecord struct {
+	ID            uint   `json:"id"`
+	ProjectID     *uint  `json:"project_id,omitempty"`
+	ServerID      *uint  `json:"server_id,omitempty"`
+	Operation     string `json:"operation"`
+	Transport     string `json:"transport"`
+	LatencyMS     int64  `json:"latency_ms"`
+	RequestBytes  int64  `json:"request_bytes"`
+	ResponseBytes int64  `json:"response_bytes"`
+	ErrorDetail   string `json:"error_detail"`
+	CreatedAt     string `json:"created_at"`
+}
+
 type projectStatusResponse struct {
 	ProjectID             uint                           `json:"project_id"`
 	Name                  string                         `json:"name"`
@@ -128,6 +188,7 @@ type serverStatusRecord struct {
 	Name                  string         `json:"name"`
 	Transport             string         `json:"transport"`
 	LaunchCommand         string         `json:"launch_command"`
+	LaunchCommandDisplay  string         `json:"launch_command_display"`
 	Command               string         `json:"command"`
 	Args                  []string       `json:"args"`
 	EnvVars               []keyValuePair `json:"env_vars"`
@@ -205,8 +266,10 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("GET /api/logs", s.handleListLogs)
+	s.mux.HandleFunc("GET /api/logs/metrics", s.handleLogMetrics)
 	s.mux.HandleFunc("GET /api/ollama/status", s.handleOllamaStatus)
 	s.mux.HandleFunc("GET /api/packages", s.handleInstalledPackageList)
+	s.mux.HandleFunc("DELETE /api/packages/", s.handleInstalledPackageAction)
 	s.mux.HandleFunc("GET /api/catalog/items", s.handleCatalogList)
 	s.mux.HandleFunc("POST /api/catalog/items/", s.handleCatalogItemAction)
 	s.mux.HandleFunc("POST /api/catalog/sync", s.handleCatalogSync)
@@ -262,15 +325,10 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleListLogs(w http.ResponseWriter, r *http.Request) {
-	var projectID *uint
-	if rawProjectID := strings.TrimSpace(r.URL.Query().Get("project_id")); rawProjectID != "" {
-		value, err := strconv.ParseUint(rawProjectID, 10, 64)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, errors.New("invalid project_id"))
-			return
-		}
-		casted := uint(value)
-		projectID = &casted
+	projectID, err := queryProjectID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
 	}
 
 	limit := 200
@@ -303,6 +361,41 @@ func (s *Server) handleListLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleLogMetrics(w http.ResponseWriter, r *http.Request) {
+	projectID, err := queryProjectID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	windowName, since, bucketSize, err := parseMetricsWindow(r.URL.Query().Get("window"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	metrics, err := s.store.ListPerformanceMetrics(r.Context(), projectID, since)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	failures, err := s.store.ListRecentPerformanceFailures(r.Context(), projectID, since, 10)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, performanceMetricsResponse{
+		Window:          windowName,
+		Summary:         summarizePerformanceMetrics(metrics),
+		Trends:          buildPerformanceTrends(metrics, since, bucketSize),
+		TopSlowServers:  topPerformanceServers(metrics, performanceSortSlow),
+		TopErrorServers: topPerformanceServers(metrics, performanceSortErrors),
+		TopTraffic:      topPerformanceServers(metrics, performanceSortTraffic),
+		RecentFailures:  mapPerformanceFailures(failures),
+	})
 }
 
 func (s *Server) handleListProjects(w http.ResponseWriter, r *http.Request) {
@@ -370,9 +463,33 @@ func (s *Server) handleProjectAction(w http.ResponseWriter, r *http.Request) {
 		s.handleSetProjectPaused(w, r, projectID, true)
 	case "resume":
 		s.handleSetProjectPaused(w, r, projectID, false)
+	case "duplicate":
+		s.handleDuplicateProject(w, r, *project)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (s *Server) handleDuplicateProject(w http.ResponseWriter, r *http.Request, project models.Project) {
+	var req duplicateProjectRequest
+	if err := decodeJSON(r.Body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		name = strings.TrimSpace(project.Name) + " Copy"
+	}
+
+	duplicated, err := s.store.DuplicateProject(r.Context(), &project, name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	s.logAudit(r.Context(), &duplicated.ID, nil, "project_duplicated", clientActor(r), fmt.Sprintf("from %s", project.Name))
+	writeJSON(w, http.StatusCreated, s.projectStatus(r, *duplicated))
 }
 
 func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
@@ -934,12 +1051,27 @@ func (s *Server) forwardJSONRPC(w http.ResponseWriter, r *http.Request, runner *
 	server := runner.Server()
 	projectID := server.ProjectID
 	s.logAudit(r.Context(), &projectID, &server.ID, "jsonrpc_forward", clientActor(r), truncateDetail(string(payload)))
+	startedAt := time.Now()
+	var sendErr error
+	defer func() {
+		s.recordPerformanceMetric(
+			r.Context(),
+			&projectID,
+			&server.ID,
+			server.Transport,
+			"jsonrpc_forward",
+			int64(len(payload)),
+			0,
+			startedAt,
+			sendErr,
+		)
+	}()
 
 	sendCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	if err := runner.Send(sendCtx, payload); err != nil {
-		writeError(w, http.StatusBadGateway, err)
+	if sendErr = runner.Send(sendCtx, payload); sendErr != nil {
+		writeError(w, http.StatusBadGateway, sendErr)
 		return
 	}
 
@@ -962,11 +1094,23 @@ func (s *Server) forwardJSONRPCSync(w http.ResponseWriter, r *http.Request, runn
 	server := runner.Server()
 	projectID := server.ProjectID
 	s.logAudit(r.Context(), &projectID, &server.ID, "jsonrpc_forward_sync", clientActor(r), truncateDetail(string(payload)))
+	startedAt := time.Now()
 
 	sendCtx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
 	response, err := runner.SendAndWait(sendCtx, payload)
+	s.recordPerformanceMetric(
+		r.Context(),
+		&projectID,
+		&server.ID,
+		server.Transport,
+		"jsonrpc_forward_sync",
+		int64(len(payload)),
+		int64(len(response)),
+		startedAt,
+		err,
+	)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err)
 		return
@@ -1015,6 +1159,14 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 		response.RAGCollections = append(response.RAGCollections, mapRAGCollection(collection))
 	}
 
+	integrationsByServerID := make(map[uint]models.InstalledIntegration, len(project.InstalledIntegrations))
+	for _, integration := range project.InstalledIntegrations {
+		if integration.ServerID == nil || *integration.ServerID == 0 {
+			continue
+		}
+		integrationsByServerID[*integration.ServerID] = integration
+	}
+
 	for _, server := range project.Servers {
 		args, _ := decodeStringSlice(server.ArgsJSON)
 		envVars, _ := decodeKeyValuePairs(server.EnvJSON)
@@ -1022,12 +1174,14 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 		headers, _ := decodeKeyValuePairs(server.HeadersJSON)
 		headerEnvVars, _ := decodeKeyValuePairs(server.HeaderEnvJSON)
 		oauthScopes, _ := decodeStringSlice(server.OAuthScopesJSON)
+		managedIntegration := installedIntegrationForServer(integrationsByServerID, server.ID)
 
 		response.Servers = append(response.Servers, serverStatusRecord{
 			ID:                    server.ID,
 			Name:                  server.Name,
 			Transport:             normalizedTransport(server.Transport),
 			LaunchCommand:         server.LaunchCommand,
+			LaunchCommandDisplay:  displayLaunchCommand(server, args, envVars, managedIntegration),
 			Command:               server.Command,
 			Args:                  args,
 			EnvVars:               envVars,
@@ -1063,6 +1217,169 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 	}
 
 	return response
+}
+
+func installedIntegrationForServer(items map[uint]models.InstalledIntegration, serverID uint) *models.InstalledIntegration {
+	integration, ok := items[serverID]
+	if !ok {
+		return nil
+	}
+	return &integration
+}
+
+func displayLaunchCommand(
+	server models.MCPServer,
+	args []string,
+	envVars []keyValuePair,
+	integration *models.InstalledIntegration,
+) string {
+	if normalizedTransport(server.Transport) != models.ServerTransportSTDIO {
+		return server.LaunchCommand
+	}
+
+	command := strings.TrimSpace(server.Command)
+	if command == "" {
+		parts := strings.Fields(strings.TrimSpace(server.LaunchCommand))
+		if len(parts) == 0 {
+			return server.LaunchCommand
+		}
+		command = parts[0]
+		args = parts[1:]
+	}
+
+	secretValues := collectSecretValues(server, envVars, integration)
+	maskedArgs := maskCommandArgs(args, secretValues)
+	return strings.TrimSpace(strings.Join(append([]string{command}, maskedArgs...), " "))
+}
+
+func collectSecretValues(server models.MCPServer, envVars []keyValuePair, integration *models.InstalledIntegration) []string {
+	values := make([]string, 0, len(envVars)+2)
+	if secret := strings.TrimSpace(server.OAuthClientSecret); secret != "" {
+		values = append(values, secret)
+	}
+	for _, envVar := range envVars {
+		if isSensitiveSettingName(envVar.Key) {
+			if value := strings.TrimSpace(envVar.Value); value != "" {
+				values = append(values, value)
+			}
+		}
+	}
+	if integration != nil {
+		for _, value := range collectIntegrationSecretValues(integration.ConfigJSON) {
+			values = append(values, value)
+		}
+	}
+	return dedupeNonEmptyStrings(values)
+}
+
+func collectIntegrationSecretValues(rawConfig string) []string {
+	config := decodeJSONObject(rawConfig)
+	if len(config) == 0 {
+		return nil
+	}
+
+	values := make([]string, 0, len(config))
+	for key, rawValue := range config {
+		if !isSensitiveSettingName(key) {
+			continue
+		}
+		if value := strings.TrimSpace(readConfigString(rawValue)); value != "" {
+			values = append(values, value)
+		}
+	}
+	for key, value := range readConfigEnvMap(config["env"]) {
+		if !isSensitiveSettingName(key) {
+			continue
+		}
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			values = append(values, trimmed)
+		}
+	}
+	return values
+}
+
+func maskCommandArgs(args []string, secretValues []string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+
+	masked := append([]string(nil), args...)
+	for index := 0; index < len(masked); index++ {
+		current := masked[index]
+		if secretFlagName(current) {
+			if index+1 < len(masked) {
+				masked[index+1] = "********"
+				index++
+			}
+			continue
+		}
+		if key, _, found := strings.Cut(current, "="); found && secretFlagName(key) {
+			masked[index] = key + "=********"
+			continue
+		}
+		for _, secretValue := range secretValues {
+			if secretValue == "" || !strings.Contains(masked[index], secretValue) {
+				continue
+			}
+			masked[index] = strings.ReplaceAll(masked[index], secretValue, "********")
+		}
+	}
+	return masked
+}
+
+func secretFlagName(value string) bool {
+	trimmed := strings.TrimSpace(strings.TrimLeft(value, "-"))
+	if trimmed == "" {
+		return false
+	}
+	return isSensitiveSettingName(trimmed)
+}
+
+func isSensitiveSettingName(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return false
+	}
+
+	sensitiveFragments := []string{
+		"pass",
+		"password",
+		"passwd",
+		"secret",
+		"token",
+		"api_key",
+		"api-key",
+		"apikey",
+		"private_key",
+		"private-key",
+		"privatekey",
+		"authorization",
+		"cookie",
+	}
+	for _, fragment := range sensitiveFragments {
+		if strings.Contains(normalized, fragment) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func dedupeNonEmptyStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		result = append(result, trimmed)
+	}
+	return result
 }
 
 func (s *Server) projectConnectionReady(project models.Project) bool {
@@ -1602,7 +1919,7 @@ func normalizedTransport(raw string) string {
 	switch strings.TrimSpace(raw) {
 	case "", models.ServerTransportSTDIO:
 		return models.ServerTransportSTDIO
-	case models.ServerTransportHTTPStream:
+	case models.ServerTransportHTTPStream, "http":
 		return models.ServerTransportHTTPStream
 	default:
 		return strings.TrimSpace(raw)
@@ -1676,6 +1993,290 @@ func truncateDetail(detail string) string {
 	return detail[:maxDetailLength] + "...(truncated)"
 }
 
+func queryProjectID(r *http.Request) (*uint, error) {
+	if rawProjectID := strings.TrimSpace(r.URL.Query().Get("project_id")); rawProjectID != "" {
+		value, err := strconv.ParseUint(rawProjectID, 10, 64)
+		if err != nil {
+			return nil, errors.New("invalid project_id")
+		}
+		casted := uint(value)
+		return &casted, nil
+	}
+	return nil, nil
+}
+
+func parseMetricsWindow(raw string) (string, time.Time, time.Duration, error) {
+	now := time.Now().UTC()
+	switch strings.TrimSpace(raw) {
+	case "", "1h":
+		return "1h", now.Add(-1 * time.Hour), 5 * time.Minute, nil
+	case "5m":
+		return "5m", now.Add(-5 * time.Minute), time.Minute, nil
+	case "24h":
+		return "24h", now.Add(-24 * time.Hour), time.Hour, nil
+	default:
+		return "", time.Time{}, 0, errors.New("invalid window")
+	}
+}
+
+func summarizePerformanceMetrics(metrics []models.PerformanceMetric) performanceSummaryResponse {
+	if len(metrics) == 0 {
+		return performanceSummaryResponse{}
+	}
+
+	latencies := make([]int64, 0, len(metrics))
+	var requestCount int64
+	var errorCount int64
+	var totalLatency int64
+	var trafficIn int64
+	var trafficOut int64
+	for _, metric := range metrics {
+		requestCount++
+		if !metric.Success {
+			errorCount++
+		}
+		totalLatency += metric.LatencyMS
+		trafficIn += metric.RequestBytes
+		trafficOut += metric.ResponseBytes
+		latencies = append(latencies, metric.LatencyMS)
+	}
+
+	return performanceSummaryResponse{
+		RequestCount: requestCount,
+		ErrorCount:   errorCount,
+		ErrorRate:    ratioPercent(errorCount, requestCount),
+		AvgLatencyMS: float64(totalLatency) / float64(requestCount),
+		P95LatencyMS: percentileLatency(latencies, 0.95),
+		TrafficIn:    trafficIn,
+		TrafficOut:   trafficOut,
+	}
+}
+
+func buildPerformanceTrends(
+	metrics []models.PerformanceMetric,
+	since time.Time,
+	bucketSize time.Duration,
+) []performanceTrendBucket {
+	if bucketSize <= 0 {
+		return nil
+	}
+
+	type aggregate struct {
+		requestCount int64
+		errorCount   int64
+		totalLatency int64
+		trafficIn    int64
+		trafficOut   int64
+		latencies    []int64
+	}
+
+	now := time.Now().UTC()
+	start := floorTime(since.UTC(), bucketSize)
+	buckets := make(map[time.Time]*aggregate)
+	for bucketTime := start; !bucketTime.After(now); bucketTime = bucketTime.Add(bucketSize) {
+		buckets[bucketTime] = &aggregate{}
+	}
+
+	for _, metric := range metrics {
+		bucketTime := floorTime(metric.CreatedAt.UTC(), bucketSize)
+		aggregateBucket, ok := buckets[bucketTime]
+		if !ok {
+			continue
+		}
+		aggregateBucket.requestCount++
+		if !metric.Success {
+			aggregateBucket.errorCount++
+		}
+		aggregateBucket.totalLatency += metric.LatencyMS
+		aggregateBucket.trafficIn += metric.RequestBytes
+		aggregateBucket.trafficOut += metric.ResponseBytes
+		aggregateBucket.latencies = append(aggregateBucket.latencies, metric.LatencyMS)
+	}
+
+	keys := make([]time.Time, 0, len(buckets))
+	for bucketTime := range buckets {
+		keys = append(keys, bucketTime)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i].Before(keys[j]) })
+
+	result := make([]performanceTrendBucket, 0, len(keys))
+	for _, bucketTime := range keys {
+		aggregateBucket := buckets[bucketTime]
+		avgLatency := 0.0
+		if aggregateBucket.requestCount > 0 {
+			avgLatency = float64(aggregateBucket.totalLatency) / float64(aggregateBucket.requestCount)
+		}
+		result = append(result, performanceTrendBucket{
+			Timestamp:    bucketTime.Format(time.RFC3339),
+			RequestCount: aggregateBucket.requestCount,
+			ErrorCount:   aggregateBucket.errorCount,
+			AvgLatencyMS: avgLatency,
+			P95LatencyMS: percentileLatency(aggregateBucket.latencies, 0.95),
+			TrafficIn:    aggregateBucket.trafficIn,
+			TrafficOut:   aggregateBucket.trafficOut,
+		})
+	}
+	return result
+}
+
+type performanceSortMode string
+
+const (
+	performanceSortSlow    performanceSortMode = "slow"
+	performanceSortErrors  performanceSortMode = "errors"
+	performanceSortTraffic performanceSortMode = "traffic"
+)
+
+func topPerformanceServers(
+	metrics []models.PerformanceMetric,
+	mode performanceSortMode,
+) []performanceServerMetricRecord {
+	type aggregate struct {
+		requestCount  int64
+		errorCount    int64
+		totalLatency  int64
+		requestBytes  int64
+		responseBytes int64
+		latencies     []int64
+	}
+
+	byServer := make(map[uint]*aggregate)
+	for _, metric := range metrics {
+		if metric.ServerID == nil || *metric.ServerID == 0 {
+			continue
+		}
+		aggregateServer, ok := byServer[*metric.ServerID]
+		if !ok {
+			aggregateServer = &aggregate{}
+			byServer[*metric.ServerID] = aggregateServer
+		}
+		aggregateServer.requestCount++
+		if !metric.Success {
+			aggregateServer.errorCount++
+		}
+		aggregateServer.totalLatency += metric.LatencyMS
+		aggregateServer.requestBytes += metric.RequestBytes
+		aggregateServer.responseBytes += metric.ResponseBytes
+		aggregateServer.latencies = append(aggregateServer.latencies, metric.LatencyMS)
+	}
+
+	result := make([]performanceServerMetricRecord, 0, len(byServer))
+	for serverID, aggregateServer := range byServer {
+		if aggregateServer.requestCount == 0 {
+			continue
+		}
+		result = append(result, performanceServerMetricRecord{
+			ServerID:      serverID,
+			RequestCount:  aggregateServer.requestCount,
+			ErrorCount:    aggregateServer.errorCount,
+			ErrorRate:     ratioPercent(aggregateServer.errorCount, aggregateServer.requestCount),
+			AvgLatencyMS:  float64(aggregateServer.totalLatency) / float64(aggregateServer.requestCount),
+			P95LatencyMS:  percentileLatency(aggregateServer.latencies, 0.95),
+			RequestBytes:  aggregateServer.requestBytes,
+			ResponseBytes: aggregateServer.responseBytes,
+			TotalTraffic:  aggregateServer.requestBytes + aggregateServer.responseBytes,
+		})
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		switch mode {
+		case performanceSortErrors:
+			if result[i].ErrorCount == result[j].ErrorCount {
+				return result[i].ErrorRate > result[j].ErrorRate
+			}
+			return result[i].ErrorCount > result[j].ErrorCount
+		case performanceSortTraffic:
+			return result[i].TotalTraffic > result[j].TotalTraffic
+		default:
+			if result[i].P95LatencyMS == result[j].P95LatencyMS {
+				return result[i].AvgLatencyMS > result[j].AvgLatencyMS
+			}
+			return result[i].P95LatencyMS > result[j].P95LatencyMS
+		}
+	})
+
+	if len(result) > 5 {
+		return result[:5]
+	}
+	return result
+}
+
+func mapPerformanceFailures(metrics []models.PerformanceMetric) []performanceFailureRecord {
+	result := make([]performanceFailureRecord, 0, len(metrics))
+	for _, metric := range metrics {
+		result = append(result, performanceFailureRecord{
+			ID:            metric.ID,
+			ProjectID:     metric.ProjectID,
+			ServerID:      metric.ServerID,
+			Operation:     metric.Operation,
+			Transport:     metric.Transport,
+			LatencyMS:     metric.LatencyMS,
+			RequestBytes:  metric.RequestBytes,
+			ResponseBytes: metric.ResponseBytes,
+			ErrorDetail:   metric.ErrorDetail,
+			CreatedAt:     metric.CreatedAt.Format(time.RFC3339),
+		})
+	}
+	return result
+}
+
+func floorTime(value time.Time, bucketSize time.Duration) time.Time {
+	if bucketSize <= 0 {
+		return value
+	}
+	return value.Truncate(bucketSize)
+}
+
+func percentileLatency(values []int64, percentile float64) int64 {
+	if len(values) == 0 {
+		return 0
+	}
+	if percentile <= 0 {
+		percentile = 0.95
+	}
+	sorted := append([]int64(nil), values...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	index := int(float64(len(sorted)-1) * percentile)
+	if index < 0 {
+		index = 0
+	}
+	if index >= len(sorted) {
+		index = len(sorted) - 1
+	}
+	return sorted[index]
+}
+
+func ratioPercent(part, total int64) float64 {
+	if total <= 0 {
+		return 0
+	}
+	return (float64(part) / float64(total)) * 100
+}
+
+func (s *Server) recordPerformanceMetric(
+	ctx context.Context,
+	projectID, serverID *uint,
+	transport, operation string,
+	requestBytes, responseBytes int64,
+	startedAt time.Time,
+	err error,
+) {
+	metric := &models.PerformanceMetric{
+		ProjectID:     projectID,
+		ServerID:      serverID,
+		Transport:     strings.TrimSpace(transport),
+		Operation:     strings.TrimSpace(operation),
+		RequestBytes:  requestBytes,
+		ResponseBytes: responseBytes,
+		LatencyMS:     time.Since(startedAt).Milliseconds(),
+		Success:       err == nil,
+		ErrorDetail:   truncateDetail(errorString(err)),
+	}
+	if createErr := s.store.CreatePerformanceMetric(ctx, metric); createErr != nil {
+		log.Printf("performance metric write failed: %v", createErr)
+	}
+}
+
 func (s *Server) logAudit(ctx context.Context, projectID, serverID *uint, action, actor, detail string) {
 	entry := &models.AuditLog{
 		ProjectID: projectID,
@@ -1687,6 +2288,13 @@ func (s *Server) logAudit(ctx context.Context, projectID, serverID *uint, action
 	if err := s.store.CreateAuditLog(ctx, entry); err != nil {
 		log.Printf("audit log write failed: %v", err)
 	}
+}
+
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func (s *Server) handleServerOAuthStart(w http.ResponseWriter, r *http.Request, server models.MCPServer) {

@@ -392,8 +392,30 @@ func (s *Server) dispatchProjectJSONRPC(
 }
 
 func (s *Server) callServerMethod(ctx context.Context, server models.MCPServer, method string, params any) (json.RawMessage, error) {
+	projectID := server.ProjectID
+	serverID := server.ID
+	requestTransport := server.Transport
+	startedAt := time.Now()
+	var requestBytes int64
+	var responseBytes int64
+	var callErr error
+	defer func() {
+		s.recordPerformanceMetric(
+			ctx,
+			&projectID,
+			&serverID,
+			requestTransport,
+			method,
+			requestBytes,
+			responseBytes,
+			startedAt,
+			callErr,
+		)
+	}()
+
 	server, err := s.ensureServerInitialized(ctx, server)
 	if err != nil {
+		callErr = err
 		return nil, err
 	}
 
@@ -407,17 +429,21 @@ func (s *Server) callServerMethod(ctx context.Context, server models.MCPServer, 
 		request["params"] = params
 	}
 	payload := mustMarshal(request)
+	requestBytes = int64(len(payload))
 
 	switch server.Transport {
 	case models.ServerTransportSTDIO:
 		runner := s.registry.Runner(server.ID)
 		if runner == nil {
-			return nil, fmt.Errorf("server %d runner is unavailable", server.ID)
+			callErr = fmt.Errorf("server %d runner is unavailable", server.ID)
+			return nil, callErr
 		}
 		response, err := runner.SendAndWait(ctx, payload)
 		if err != nil {
+			callErr = err
 			return nil, err
 		}
+		responseBytes = int64(len(response))
 		var envelope struct {
 			Result json.RawMessage `json:"result"`
 			Error  *struct {
@@ -425,16 +451,22 @@ func (s *Server) callServerMethod(ctx context.Context, server models.MCPServer, 
 			} `json:"error"`
 		}
 		if err := json.Unmarshal(response, &envelope); err != nil {
+			callErr = err
 			return nil, err
 		}
 		if envelope.Error != nil {
-			return nil, errors.New(envelope.Error.Message)
+			callErr = errors.New(envelope.Error.Message)
+			return nil, callErr
 		}
 		return envelope.Result, nil
 	case models.ServerTransportHTTPStream:
-		return s.callHTTPServerMethod(ctx, server, payload)
+		result, bytesWritten, err := s.callHTTPServerMethod(ctx, server, payload)
+		responseBytes = bytesWritten
+		callErr = err
+		return result, err
 	default:
-		return nil, errors.New("unsupported server transport")
+		callErr = errors.New("unsupported server transport")
+		return nil, callErr
 	}
 }
 
@@ -493,10 +525,10 @@ func (s *Server) ensureServerInitialized(ctx context.Context, server models.MCPS
 			"method":  "initialize",
 			"params":  initParams,
 		}
-		if _, err := s.callHTTPServerMethod(ctx, server, mustMarshal(request)); err != nil {
+		if _, _, err := s.callHTTPServerMethod(ctx, server, mustMarshal(request)); err != nil {
 			return server, err
 		}
-		_, _ = s.callHTTPServerMethod(ctx, server, mustMarshal(map[string]any{
+		_, _, _ = s.callHTTPServerMethod(ctx, server, mustMarshal(map[string]any{
 			"jsonrpc": "2.0",
 			"method":  "notifications/initialized",
 		}))
@@ -538,29 +570,29 @@ func (s *Server) callRunnerMethod(ctx context.Context, runner *orchestrator.Serv
 	return nil
 }
 
-func (s *Server) callHTTPServerMethod(ctx context.Context, server models.MCPServer, payload []byte) (json.RawMessage, error) {
+func (s *Server) callHTTPServerMethod(ctx context.Context, server models.MCPServer, payload []byte) (json.RawMessage, int64, error) {
 	upstreamReq, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL, bytes.NewReader(payload))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	upstreamReq.Header.Set("Content-Type", "application/json")
 	applyConfiguredHeaders(upstreamReq.Header, server)
 
 	response, err := http.DefaultClient.Do(upstreamReq)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer response.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(response.Body, 1024*1024))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("upstream returned status %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
+		return nil, int64(len(body)), fmt.Errorf("upstream returned status %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
 	}
 	if len(body) == 0 {
-		return nil, nil
+		return nil, 0, nil
 	}
 
 	var envelope struct {
@@ -570,12 +602,12 @@ func (s *Server) callHTTPServerMethod(ctx context.Context, server models.MCPServ
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return nil, err
+		return nil, int64(len(body)), err
 	}
 	if envelope.Error != nil {
-		return nil, errors.New(envelope.Error.Message)
+		return nil, int64(len(body)), errors.New(envelope.Error.Message)
 	}
-	return envelope.Result, nil
+	return envelope.Result, int64(len(body)), nil
 }
 
 func (s *Server) aggregateTools(ctx context.Context, servers []models.MCPServer) ([]aggregateTool, error) {

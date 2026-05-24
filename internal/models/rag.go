@@ -16,6 +16,7 @@ type RAGCollection struct {
 	Name         string    `gorm:"size:255;not null" json:"name"`
 	DataType     string    `gorm:"size:64;not null;default:'code'" json:"data_type"`
 	SourcePath   string    `gorm:"size:2048" json:"source_path"`
+	AutoReindex  bool      `gorm:"not null;default:false" json:"auto_reindex"`
 	IndexPath    string    `gorm:"size:2048;not null" json:"index_path"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`

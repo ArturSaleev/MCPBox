@@ -100,6 +100,53 @@ The billing pipeline sends payment events to the gateway queue.
 	}
 }
 
+func TestCollectionSkipsSystemFoldersAndVirtualEnvs(t *testing.T) {
+	t.Parallel()
+
+	rootDir := t.TempDir()
+	indexPath := filepath.Join(rootDir, "indexes", "knowledge.bleve")
+	projectDir := filepath.Join(rootDir, "project")
+
+	mustMkdirAll(t, filepath.Join(projectDir, "src"))
+	mustMkdirAll(t, filepath.Join(projectDir, "node_modules", "pkg"))
+	mustMkdirAll(t, filepath.Join(projectDir, "vendor", "lib"))
+	mustMkdirAll(t, filepath.Join(projectDir, "myenv", "bin"))
+
+	mustWriteFile(t, filepath.Join(projectDir, "src", "billing.go"), `package billing
+
+func invoiceRetry() {
+	println("invoice retry token")
+}
+`)
+	mustWriteFile(t, filepath.Join(projectDir, "node_modules", "pkg", "skip.js"), `payment gateway hidden token`)
+	mustWriteFile(t, filepath.Join(projectDir, "vendor", "lib", "skip.php"), `payment gateway vendor token`)
+	mustWriteFile(t, filepath.Join(projectDir, "myenv", "pyvenv.cfg"), `home = /usr/bin/python3`)
+	mustWriteFile(t, filepath.Join(projectDir, "myenv", "lib.py"), `payment gateway myenv token`)
+
+	collection, err := NewCollection("crm_gym", "CRM Gym", indexPath)
+	if err != nil {
+		t.Fatalf("NewCollection() error = %v", err)
+	}
+	defer func() { _ = collection.Close() }()
+
+	if err := collection.IndexFolder(projectDir); err != nil {
+		t.Fatalf("IndexFolder() error = %v", err)
+	}
+
+	results, err := collection.Search("invoice retry token", 10)
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("Search() returned no results")
+	}
+	for _, result := range results {
+		if strings.Contains(result.FilePath, "node_modules") || strings.Contains(result.FilePath, "vendor") || strings.Contains(result.FilePath, "myenv") {
+			t.Fatalf("system or virtualenv path was indexed: %q", result.FilePath)
+		}
+	}
+}
+
 func TestChunkTextSplitsLongFilesWithOverlap(t *testing.T) {
 	t.Parallel()
 
@@ -286,4 +333,18 @@ func writeZipFile(path string, files map[string]string) error {
 		return err
 	}
 	return handle.Close()
+}
+
+func mustMkdirAll(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll(%q) error = %v", path, err)
+	}
+}
+
+func mustWriteFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("os.WriteFile(%q) error = %v", path, err)
+	}
 }

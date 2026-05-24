@@ -21,6 +21,25 @@ import (
 	"MCPBox/internal/storage"
 )
 
+func TestDisplayLaunchCommandMasksSensitiveArgs(t *testing.T) {
+	t.Parallel()
+
+	server := models.MCPServer{
+		Transport:     models.ServerTransportSTDIO,
+		Command:       "/usr/local/bin/mysql-mcp",
+		LaunchCommand: "/usr/local/bin/mysql-mcp --host localhost --pass 1234 --db sport_test",
+	}
+	args := []string{"--host", "localhost", "--pass", "1234", "--db", "sport_test"}
+
+	got := displayLaunchCommand(server, args, nil, nil)
+	if strings.Contains(got, "1234") {
+		t.Fatalf("displayLaunchCommand leaked secret: %q", got)
+	}
+	if !strings.Contains(got, "--pass ********") {
+		t.Fatalf("displayLaunchCommand = %q, want masked password flag", got)
+	}
+}
+
 func TestProjectEndpointsExposeConnectURLForConfiguredServers(t *testing.T) {
 	t.Parallel()
 
@@ -1102,15 +1121,19 @@ func TestCatalogSyncExposesPackageMetadata(t *testing.T) {
 					"description":            "MySQL package-backed MCP server",
 					"transport":              "stdio",
 					"runtime":                map[string]any{"type": "node", "version": ">=20"},
-					"source":                 map[string]any{"type": "npm", "package": "@example/mysql-mcp", "version": "1.2.3"},
+					"source":                 map[string]any{"type": "npm", "package": "@benborla29/mcp-server-mysql", "version": "latest"},
 					"install":                map[string]any{"strategy": "npm", "metadata": map[string]any{"registry": "https://registry.npmjs.org"}},
 					"launch":                 map[string]any{"command": "node", "args": []string{"dist/index.js"}, "working_dir": "{install_dir}", "entry_point": "dist/index.js"},
 					"shared_install":         true,
 					"supports_multi_project": true,
 					"command":                "node",
 					"args":                   []string{"dist/index.js"},
-					"working_dir":            "{install_dir}",
-					"auth_type":              "none",
+					"default_env": map[string]any{
+						"MYSQL_PORT":             "3306",
+						"ALLOW_INSERT_OPERATION": false,
+					},
+					"working_dir": "{install_dir}",
+					"auth_type":   "none",
 					"config_schema": map[string]any{
 						"type": "object",
 						"properties": map[string]any{
@@ -1149,8 +1172,11 @@ func TestCatalogSyncExposesPackageMetadata(t *testing.T) {
 	if item.Runtime.Type != "node" {
 		t.Fatalf("Runtime.Type = %q", item.Runtime.Type)
 	}
-	if item.Source.Package != "@example/mysql-mcp" {
+	if item.Source.Package != "@benborla29/mcp-server-mysql" {
 		t.Fatalf("Source.Package = %q", item.Source.Package)
+	}
+	if len(item.DefaultEnv) != 2 {
+		t.Fatalf("DefaultEnv = %#v, want 2 entries", item.DefaultEnv)
 	}
 	if item.Install.Strategy != "npm" {
 		t.Fatalf("Install.Strategy = %q", item.Install.Strategy)

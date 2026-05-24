@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
+import { Toaster, toast } from 'sonner';
 import {
   AlertCircle,
   Bot,
@@ -10,6 +11,7 @@ import {
   FolderKanban,
   Info,
   LoaderCircle,
+  MoreHorizontal,
   Pause,
   Pencil,
   Play,
@@ -30,6 +32,7 @@ import {
   Language,
 } from './i18n';
 import logo from '../styles/logo.png';
+import { MarketView } from './components/MarketView';
 import {
   Dialog,
   DialogContent,
@@ -46,13 +49,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from './components/ui/select';
+import {
+  Menubar,
+  MenubarContent,
+  MenubarItem,
+  MenubarMenu,
+  MenubarTrigger,
+} from './components/ui/menubar';
 import { Tooltip, TooltipContent, TooltipTrigger } from './components/ui/tooltip';
+import type {
+  CatalogItem,
+  CatalogSettings,
+  InstalledPackage,
+  ProjectOption,
+} from './market';
 
 type ServerStatus = {
   id: number;
   name: string;
   transport: 'stdio' | 'http_stream' | string;
   launch_command: string;
+  launch_command_display: string;
   command: string;
   args: string[];
   env_vars: KeyValuePair[];
@@ -103,6 +120,7 @@ type RAGCollection = {
   name: string;
   data_type: string;
   source_path: string;
+  auto_reindex: boolean;
   index_path: string;
 };
 
@@ -140,96 +158,9 @@ type ProjectPackageInstance = {
   config_json: string;
 };
 
-type ProjectOption = {
-  project_id: number;
-  name: string;
-  root_path: string;
-};
-
-type CatalogSettings = {
-  catalog_source_url: string;
-  last_sync_at: string;
-  last_sync_status: string;
-  last_sync_error: string;
-  last_manifest_url: string;
-  last_schema_version: string;
-};
-
-type CatalogItem = {
-  id: string;
-  name: string;
-  category: string;
-  description: string;
-  icon: string;
-  runtime: {
-    type: string;
-    version: string;
-  };
-  source: {
-    type: string;
-    package: string;
-    version: string;
-    url: string;
-  };
-  install: {
-    strategy: string;
-    metadata: Record<string, unknown>;
-  };
-  launch: {
-    command: string;
-    args: string[];
-    working_dir: string;
-    entry_point: string;
-  };
-  shared_install: boolean;
-  supports_multi_project: boolean;
-  transport: string;
-  mcp_url: string;
-  command?: string;
-  args?: string[];
-  env?: KeyValuePair[];
-  env_passthrough?: string[];
-  working_dir?: string;
-  default_auto_start?: boolean;
-  auth_type: string;
-  auth_provider: string;
-  oauth_authorize_url?: string;
-  oauth_token_url?: string;
-  oauth_refresh_url?: string;
-  default_oauth_scopes?: string[];
-  config_schema: Record<string, unknown>;
-  capabilities: string[];
-  tags: string[];
-  website: string;
-  docs_url: string;
-  enabled: boolean;
-  version: string;
-  manifest_source_url: string;
-  schema_version: string;
-  last_synced_at: string;
-};
-
 type CatalogResponse = {
   settings: CatalogSettings;
   items: CatalogItem[];
-};
-
-type InstalledPackage = {
-  id: number;
-  catalog_item_id: string;
-  name: string;
-  version: string;
-  runtime_type: string;
-  source_type: string;
-  install_strategy: string;
-  install_dir: string;
-  entry_point: string;
-  status: string;
-  last_error: string;
-  installed_at: string;
-  project_use_count: number;
-  created_at: string;
-  updated_at: string;
 };
 
 type InstalledPackageListResponse = {
@@ -248,6 +179,63 @@ type AuditLog = {
   actor: string;
   detail: string;
   created_at: string;
+};
+
+type MetricsWindow = '5m' | '1h' | '24h';
+
+type PerformanceSummary = {
+  request_count: number;
+  error_count: number;
+  error_rate: number;
+  avg_latency_ms: number;
+  p95_latency_ms: number;
+  traffic_in: number;
+  traffic_out: number;
+};
+
+type PerformanceTrendBucket = {
+  timestamp: string;
+  request_count: number;
+  error_count: number;
+  avg_latency_ms: number;
+  p95_latency_ms: number;
+  traffic_in: number;
+  traffic_out: number;
+};
+
+type PerformanceServerMetricRecord = {
+  server_id: number;
+  request_count: number;
+  error_count: number;
+  error_rate: number;
+  avg_latency_ms: number;
+  p95_latency_ms: number;
+  request_bytes: number;
+  response_bytes: number;
+  total_traffic: number;
+};
+
+type PerformanceFailureRecord = {
+  id: number;
+  project_id: number | null;
+  server_id: number | null;
+  operation: string;
+  transport: string;
+  latency_ms: number;
+  request_bytes: number;
+  response_bytes: number;
+  error_detail: string;
+  created_at: string;
+};
+
+type PerformanceMetricsResponse = {
+  window: MetricsWindow;
+  summary: PerformanceSummary;
+  trends: PerformanceTrendBucket[];
+  top_slow_servers: PerformanceServerMetricRecord[];
+  top_error_servers: PerformanceServerMetricRecord[];
+  top_traffic_servers: PerformanceServerMetricRecord[];
+  recent_failures: PerformanceFailureRecord[];
 };
 
 type ApiError = {
@@ -273,17 +261,6 @@ type OllamaStatus = {
   models: string[];
   default_model: string;
 };
-
-type CatalogConfigField = {
-  key: string;
-  label: string;
-  type: 'string' | 'array';
-  required: boolean;
-  secret: boolean;
-  defaultValue: string;
-};
-
-const projectPathConfigKeys = new Set(['root_path', 'project_path', 'workspace_path']);
 
 type ServerInspection = {
   protocol_version: string;
@@ -322,6 +299,9 @@ type ServerInspection = {
   readme: string;
 };
 
+const legacyCatalogSourceURL = 'https://webeasy.kz/mcpbox/catalog.json';
+const defaultCatalogSourceURL = 'https://mcpbox.sh/catalog.json';
+
 type ProjectFormState = {
   name: string;
   description: string;
@@ -356,6 +336,51 @@ type KeyValuePair = {
   value: string;
 };
 
+function isSecretLikeName(name: string) {
+  const normalized = name.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized.includes('password') ||
+    normalized.includes('passwd') ||
+    normalized.includes('secret') ||
+    normalized.includes('token') ||
+    normalized.includes('private_key') ||
+    normalized.includes('private-key') ||
+    normalized.includes('api_key') ||
+    normalized.includes('api-key') ||
+    normalized === 'authorization'
+  );
+}
+
+function isSecretLikeHeaderName(name: string) {
+  const normalized = name.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return (
+    normalized === 'authorization' ||
+    normalized === 'proxy-authorization' ||
+    normalized === 'cookie' ||
+    normalized === 'set-cookie' ||
+    normalized.includes('api-key') ||
+    normalized.includes('x-api-key') ||
+    normalized.includes('token') ||
+    normalized.includes('secret')
+  );
+}
+
+function normalizeCatalogSourceURL(url: string) {
+  const trimmed = url.trim();
+  if (trimmed === legacyCatalogSourceURL) {
+    return defaultCatalogSourceURL;
+  }
+  return trimmed;
+}
+
 const emptyProjectForm: ProjectFormState = {
   name: '',
   description: '',
@@ -387,6 +412,8 @@ const emptyServerForm: ServerFormState = {
 
 const emptyRAGCollectionForm = {
   name: '',
+  source_path: '',
+  auto_reindex: false,
 };
 
 async function apiRequest<T>(
@@ -498,78 +525,109 @@ function formatAuditDetail(entry: AuditLog) {
   }
 }
 
-function catalogConfigFields(item: CatalogItem): CatalogConfigField[] {
-  const schema = item.config_schema;
-  const properties =
-    schema && typeof schema === 'object' && 'properties' in schema && schema.properties && typeof schema.properties === 'object'
-      ? (schema.properties as Record<string, unknown>)
-      : {};
-  const requiredSet = new Set(
-    schema && typeof schema === 'object' && 'required' in schema && Array.isArray(schema.required)
-      ? schema.required.filter((value): value is string => typeof value === 'string')
-      : [],
-  );
-
-  return Object.entries(properties).flatMap(([key, rawProperty]) => {
-    if (!rawProperty || typeof rawProperty !== 'object') {
-      return [];
-    }
-
-    const property = rawProperty as Record<string, unknown>;
-    const rawType = typeof property.type === 'string' ? property.type : 'string';
-    if (rawType !== 'string' && rawType !== 'array') {
-      return [];
-    }
-
-    const title = typeof property.title === 'string' && property.title.trim() !== '' ? property.title.trim() : key;
-    const defaultValue =
-      rawType === 'array'
-        ? Array.isArray(property.default)
-          ? property.default.filter((value): value is string => typeof value === 'string').join('\n')
-          : key === 'oauth_scopes' && Array.isArray(item.default_oauth_scopes)
-            ? item.default_oauth_scopes.join('\n')
-            : ''
-        : typeof property.default === 'string'
-          ? property.default
-          : '';
-
-    return [{
-      key,
-      label: title,
-      type: rawType,
-      required: requiredSet.has(key),
-      secret: key.toLowerCase().includes('secret') || key.toLowerCase().includes('token'),
-      defaultValue,
-    }];
-  });
-}
-
-function normalizeInstallConfig(
-  fields: CatalogConfigField[],
-  rawValues: Record<string, string>,
-): Record<string, string | string[]> {
-  const config: Record<string, string | string[]> = {};
-
-  for (const field of fields) {
-    const rawValue = rawValues[field.key] ?? '';
-    if (field.type === 'array') {
-      const values = rawValue
-        .split(/\r?\n|,/)
-        .map((value) => value.trim())
-        .filter(Boolean);
-      if (values.length > 0) {
-        config[field.key] = values;
-      }
-      continue;
-    }
-
-    const value = rawValue.trim();
-    if (value !== '') {
-      config[field.key] = value;
-    }
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '0 B';
   }
 
-  return config;
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size >= 100 || unitIndex === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function formatLatency(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '0 ms';
+  }
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(2)} s`;
+  }
+  return `${Math.round(value)} ms`;
+}
+
+function formatPercent(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '0%';
+  }
+  return `${value.toFixed(value >= 10 ? 0 : 1)}%`;
+}
+
+function buildChartPath(values: number[], width: number, height: number) {
+  if (values.length === 0) {
+    return '';
+  }
+  const max = Math.max(...values, 1);
+  const step = values.length > 1 ? width / (values.length - 1) : width;
+  return values
+    .map((value, index) => {
+      const x = index * step;
+      const y = height - (value / max) * height;
+      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
+    })
+    .join(' ');
+}
+
+function TrendChart({
+  title,
+  subtitle,
+  primaryValues,
+  secondaryValues,
+  primaryColor,
+  secondaryColor,
+  labels,
+}: {
+  title: string;
+  subtitle: string;
+  primaryValues: number[];
+  secondaryValues: number[];
+  primaryColor: string;
+  secondaryColor: string;
+  labels: { primary: string; secondary: string };
+}) {
+  const width = 320;
+  const height = 120;
+  const hasData =
+    primaryValues.some((value) => value > 0) || secondaryValues.some((value) => value > 0);
+  const primaryPath = buildChartPath(primaryValues, width, height);
+  const secondaryPath = buildChartPath(secondaryValues, width, height);
+
+  return (
+    <div className="rounded-2xl border border-border bg-card p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-semibold">{title}</h3>
+          <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: primaryColor }} />
+            {labels.primary}
+          </span>
+          <span className="inline-flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: secondaryColor }} />
+            {labels.secondary}
+          </span>
+        </div>
+      </div>
+      <div className="mt-4">
+        {hasData ? (
+          <svg viewBox={`0 0 ${width} ${height}`} className="h-32 w-full">
+            <path d={secondaryPath} fill="none" stroke={secondaryColor} strokeWidth="3" strokeLinecap="round" />
+            <path d={primaryPath} fill="none" stroke={primaryColor} strokeWidth="3" strokeLinecap="round" />
+          </svg>
+        ) : (
+          <div className="flex h-32 items-center justify-center rounded-xl bg-background text-sm text-muted-foreground">
+            {subtitle}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function OllamaIcon({ className }: { className?: string }) {
@@ -587,7 +645,9 @@ export default function App() {
   const [language, setLanguage] = useState<Language>(detectInitialLanguage);
   const [projects, setProjects] = useState<ProjectStatus[]>([]);
   const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [logMetrics, setLogMetrics] = useState<PerformanceMetricsResponse | null>(null);
   const [selectedLogsProjectId, setSelectedLogsProjectId] = useState<number | null>(null);
+  const [metricsWindow, setMetricsWindow] = useState<MetricsWindow>('1h');
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [projectForm, setProjectForm] = useState<ProjectFormState>(emptyProjectForm);
   const [serverForm, setServerForm] = useState<ServerFormState>(emptyServerForm);
@@ -598,7 +658,10 @@ export default function App() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [creatingProject, setCreatingProject] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [duplicateProjectOpen, setDuplicateProjectOpen] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<number | null>(null);
+  const [duplicatingProjectId, setDuplicatingProjectId] = useState<number | null>(null);
+  const [duplicateProjectName, setDuplicateProjectName] = useState('');
   const [addingServer, setAddingServer] = useState(false);
   const [addServerOpen, setAddServerOpen] = useState(false);
   const [, setOAuthAdvancedOpen] = useState(false);
@@ -617,22 +680,22 @@ export default function App() {
   const [indexingCollectionId, setIndexingCollectionId] = useState<string | null>(null);
   const [searchingCollectionId, setSearchingCollectionId] = useState<string | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
+  const [metricsLoading, setMetricsLoading] = useState(false);
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [catalogSettings, setCatalogSettings] = useState<CatalogSettings | null>(null);
   const [installedPackages, setInstalledPackages] = useState<InstalledPackage[]>([]);
   const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null);
   const [selectedOllamaModel, setSelectedOllamaModel] = useState('');
-  const [catalogURL, setCatalogURL] = useState('https://webeasy.kz/mcpbox/catalog.json');
+  const [catalogURL, setCatalogURL] = useState(defaultCatalogSourceURL);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogSyncing, setCatalogSyncing] = useState(false);
   const [catalogURLVisible, setCatalogURLVisible] = useState(false);
-  const [selectedCatalogCategory, setSelectedCatalogCategory] = useState('all');
+  const [catalogSourceMode, setCatalogSourceMode] = useState<'server' | 'file'>('server');
+  const [localCatalogFileName, setLocalCatalogFileName] = useState('');
+  const [localCatalogContent, setLocalCatalogContent] = useState('');
   const [installingCatalogItemId, setInstallingCatalogItemId] = useState<string | null>(null);
   const [addingCatalogItemId, setAddingCatalogItemId] = useState<string | null>(null);
-  const [installDialogOpen, setInstallDialogOpen] = useState(false);
-  const [installDialogItem, setInstallDialogItem] = useState<CatalogItem | null>(null);
-  const [installDialogProjectId, setInstallDialogProjectId] = useState<number | null>(null);
-  const [installDialogValues, setInstallDialogValues] = useState<Record<string, string>>({});
+  const [uninstallingCatalogItemId, setUninstallingCatalogItemId] = useState<string | null>(null);
   const [busyProjectId, setBusyProjectId] = useState<number | null>(null);
   const [launchingOllamaProjectId, setLaunchingOllamaProjectId] = useState<number | null>(null);
   const [busyServerId, setBusyServerId] = useState<number | null>(null);
@@ -651,6 +714,11 @@ export default function App() {
   const languageOptions: Array<{ value: Language; label: string }> = [
     { value: 'en', label: labels.english },
     { value: 'ru', label: labels.russian },
+  ];
+  const metricsWindowOptions: Array<{ value: MetricsWindow; label: string }> = [
+    { value: '5m', label: labels.last5Minutes },
+    { value: '1h', label: labels.lastHour },
+    { value: '24h', label: labels.last24Hours },
   ];
   const navigationItems = [
     { id: 'projects' as const, label: labels.projects, icon: FolderKanban },
@@ -673,6 +741,9 @@ export default function App() {
       project.servers.map((server) => [server.id, server.name] as const),
     ),
   );
+  const projectNamesById = Object.fromEntries(
+    projects.map((project) => [project.project_id, project.name] as const),
+  );
   const selectedProjectHealthyCount = selectedProject
     ? selectedProject.servers.filter((server) => server.health_status === 'healthy').length
     : 0;
@@ -690,14 +761,6 @@ export default function App() {
   );
   const authServer =
     selectedProject?.servers.find((server) => server.id === authServerId) ?? null;
-  const installedCatalogIDs = new Set(
-    (selectedProject?.installed_integrations ?? []).map((integration) => integration.catalog_item_id),
-  );
-  const installedPackageCatalogIDs = new Set(
-    installedPackages
-      .filter((pkg) => pkg.status === 'installed')
-      .map((pkg) => pkg.catalog_item_id),
-  );
   const connectedRAGCollectionIDs = new Set(
     (selectedProject?.rag_collections ?? []).map((collection) => collection.collection_id),
   );
@@ -713,22 +776,19 @@ export default function App() {
     : [];
   const editingServerIntegration =
     editingServerId !== null ? serverIntegrationsByServerID[editingServerId] ?? null : null;
-  const catalogCategories = ['all', ...Array.from(new Set(catalogItems.map((item) => item.category || labels.generalCategory))).sort((left, right) => left.localeCompare(right))];
-  const filteredCatalogItems = selectedCatalogCategory === 'all'
-    ? catalogItems
-    : catalogItems.filter((item) => (item.category || labels.generalCategory) === selectedCatalogCategory);
-  const installDialogFields = installDialogItem ? catalogConfigFields(installDialogItem) : [];
   const projectOptions: ProjectOption[] = projects.map((project) => ({
     project_id: project.project_id,
     name: project.name,
     root_path: project.root_path,
   }));
-  const installDialogProject =
-    projectOptions.find((project) => project.project_id === installDialogProjectId) ?? null;
   const shouldShowOllamaControls = ollamaStatus?.installed ?? false;
   const canLaunchOllama =
     !!selectedOllamaModel &&
     (ollamaStatus?.models.length ?? 0) > 0;
+  const requestTrendValues = logMetrics?.trends.map((entry) => entry.request_count) ?? [];
+  const errorTrendValues = logMetrics?.trends.map((entry) => entry.error_count) ?? [];
+  const avgLatencyTrendValues = logMetrics?.trends.map((entry) => entry.avg_latency_ms) ?? [];
+  const p95LatencyTrendValues = logMetrics?.trends.map((entry) => entry.p95_latency_ms) ?? [];
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -812,8 +872,9 @@ export default function App() {
   useEffect(() => {
     if (view === 'logs') {
       void loadLogs();
+      void loadLogMetrics();
     }
-  }, [view, selectedLogsProjectId]);
+  }, [view, selectedLogsProjectId, metricsWindow]);
 
   useEffect(() => {
     if (view !== 'logs') {
@@ -822,10 +883,11 @@ export default function App() {
 
     const intervalID = window.setInterval(() => {
       void loadLogs({ silent: true });
+      void loadLogMetrics({ silent: true });
     }, 5000);
 
     return () => window.clearInterval(intervalID);
-  }, [view, selectedLogsProjectId]);
+  }, [view, selectedLogsProjectId, metricsWindow]);
 
   useEffect(() => {
     if (view !== 'logs' || !logsViewportRef.current) {
@@ -848,22 +910,6 @@ export default function App() {
       setSelectedProjectId(projects[0].project_id);
     }
   }, [projects, selectedProjectId]);
-
-  useEffect(() => {
-    if (projects.length === 0) {
-      setInstallDialogProjectId(null);
-      return;
-    }
-
-    if (
-      installDialogProjectId &&
-      projects.some((project) => project.project_id === installDialogProjectId)
-    ) {
-      return;
-    }
-
-    setInstallDialogProjectId(selectedProjectId ?? projects[0].project_id);
-  }, [projects, selectedProjectId, installDialogProjectId]);
 
   async function loadProjects(initial = false) {
     if (initial) {
@@ -929,6 +975,30 @@ export default function App() {
     }
   }
 
+  async function loadLogMetrics(options?: { silent?: boolean }) {
+    if (!options?.silent) {
+      setMetricsLoading(true);
+    }
+    try {
+      const params = new URLSearchParams();
+      params.set('window', metricsWindow);
+      if (selectedLogsProjectId !== null) {
+        params.set('project_id', String(selectedLogsProjectId));
+      }
+      const nextMetrics = await apiRequest<PerformanceMetricsResponse>(
+        `/api/logs/metrics?${params.toString()}`,
+        messages.requestFailed,
+      );
+      setLogMetrics(nextMetrics);
+    } catch (loadError) {
+      setActionError(loadError instanceof Error ? loadError.message : messages.loadProjectsError);
+    } finally {
+      if (!options?.silent) {
+        setMetricsLoading(false);
+      }
+    }
+  }
+
   async function loadCatalog(initial = false) {
     if (initial) {
       setCatalogLoading(true);
@@ -942,7 +1012,13 @@ export default function App() {
       setCatalogItems(response.items);
       setCatalogSettings(response.settings);
       if (response.settings.catalog_source_url) {
-        setCatalogURL(response.settings.catalog_source_url);
+        if (response.settings.catalog_source_url.startsWith('local-file://')) {
+          setCatalogSourceMode('file');
+          setLocalCatalogFileName(response.settings.catalog_source_url.replace('local-file://', ''));
+        } else {
+          setCatalogSourceMode('server');
+          setCatalogURL(normalizeCatalogSourceURL(response.settings.catalog_source_url));
+        }
       }
     } catch (loadError) {
       setActionError(loadError instanceof Error ? loadError.message : 'Failed to load catalog');
@@ -982,12 +1058,20 @@ export default function App() {
     setActionError(null);
 
     try {
+      if (catalogSourceMode === 'file' && localCatalogContent.trim() === '') {
+        toast.error(messages.localCatalogFileMissing);
+        return;
+      }
       const response = await apiRequest<CatalogResponse>(
         '/api/catalog/sync',
         messages.requestFailed,
         {
           method: 'POST',
-          body: JSON.stringify({ url: catalogURL }),
+          body: JSON.stringify(
+            catalogSourceMode === 'file'
+              ? { manifest_content: localCatalogContent, file_name: localCatalogFileName }
+              : { url: normalizeCatalogSourceURL(catalogURL) || defaultCatalogSourceURL },
+          ),
         },
       );
       setCatalogItems(response.items);
@@ -995,49 +1079,22 @@ export default function App() {
       await loadInstalledPackages();
       await loadLogs({ silent: true });
     } catch (syncError) {
-      setActionError(syncError instanceof Error ? syncError.message : 'Failed to sync catalog');
+      toast.error(syncError instanceof Error ? syncError.message : 'Failed to sync catalog');
     } finally {
       setCatalogSyncing(false);
     }
   }
 
-  function applyProjectDefaultsToInstallValues(
-    values: Record<string, string>,
-    fields: CatalogConfigField[],
-    project: ProjectOption | null,
-  ) {
-    if (!project || project.root_path.trim() === '') {
-      return values;
+  async function pickLocalCatalogFile(file: File | null) {
+    if (!file) {
+      setLocalCatalogFileName('');
+      setLocalCatalogContent('');
+      return;
     }
-
-    const nextValues = { ...values };
-    for (const field of fields) {
-      if (field.type !== 'string' || !projectPathConfigKeys.has(field.key)) {
-        continue;
-      }
-      nextValues[field.key] = project.root_path;
-    }
-
-    return nextValues;
-  }
-
-  function openInstallDialog(item: CatalogItem, preferredProjectId?: number | null) {
-    const fields = catalogConfigFields(item);
-    const baseValues = Object.fromEntries(
-      fields.map((field) => [field.key, field.defaultValue]),
-    );
-    const resolvedProjectId =
-      preferredProjectId && projects.some((project) => project.project_id === preferredProjectId)
-        ? preferredProjectId
-        : selectedProjectId && projects.some((project) => project.project_id === selectedProjectId)
-          ? selectedProjectId
-          : projects[0]?.project_id ?? null;
-    const project =
-      projectOptions.find((entry) => entry.project_id === resolvedProjectId) ?? null;
-    setInstallDialogItem(item);
-    setInstallDialogProjectId(resolvedProjectId);
-    setInstallDialogValues(applyProjectDefaultsToInstallValues(baseValues, fields, project));
-    setInstallDialogOpen(true);
+    const text = await file.text();
+    setLocalCatalogFileName(file.name);
+    setLocalCatalogContent(text);
+    setCatalogSourceMode('file');
   }
 
   async function installCatalogPackage(item: CatalogItem) {
@@ -1056,7 +1113,7 @@ export default function App() {
       await loadLogs({ silent: true });
       return true;
     } catch (installError) {
-      setActionError(
+      toast.error(
         installError instanceof Error ? installError.message : messages.installPackageError,
       );
       return false;
@@ -1065,10 +1122,46 @@ export default function App() {
     }
   }
 
+  async function uninstallCatalogPackage(item: CatalogItem, pkg: InstalledPackage) {
+    if (pkg.project_use_count > 0) {
+      toast.error(messages.packageInUseCannotUninstall);
+      return false;
+    }
+
+    const confirmed = window.confirm(`${labels.uninstallPackage}: ${item.name}?`);
+    if (!confirmed) {
+      return false;
+    }
+
+    setUninstallingCatalogItemId(item.id);
+    setActionError(null);
+
+    try {
+      await apiRequest<{ deleted: boolean }>(
+        `/api/packages/${pkg.id}`,
+        messages.requestFailed,
+        {
+          method: 'DELETE',
+        },
+      );
+      await loadInstalledPackages();
+      await loadCatalog();
+      await loadLogs({ silent: true });
+      return true;
+    } catch (uninstallError) {
+      toast.error(
+        uninstallError instanceof Error ? uninstallError.message : messages.uninstallPackageError,
+      );
+      return false;
+    } finally {
+      setUninstallingCatalogItemId(null);
+    }
+  }
+
   async function performCatalogInstall(
     item: CatalogItem,
     projectId: number,
-    config: Record<string, string | string[]>,
+    config: Record<string, unknown>,
   ) {
     const targetProject = projects.find((project) => project.project_id === projectId);
     if (!targetProject) {
@@ -1098,45 +1191,36 @@ export default function App() {
           project.project_id === updatedProject.project_id ? updatedProject : project,
         ),
       );
+      const installedServerId =
+        updatedProject.installed_integrations.find(
+          (integration) => integration.catalog_item_id === item.id && integration.server_id,
+        )?.server_id ?? null;
+      const installedServer =
+        (installedServerId
+          ? updatedProject.servers.find((server) => server.id === installedServerId)
+          : updatedProject.servers.find((server) => server.name === item.name)) ?? null;
+      if (installedServer?.health_status === 'healthy') {
+        toast.success(messages.catalogHealthCheckPassed(item.name));
+      } else if (installedServer?.health_status === 'failed') {
+        toast.warning(
+          installedServer.health_error
+            ? messages.catalogHealthCheckFailedWithReason(item.name, installedServer.health_error)
+            : messages.catalogHealthCheckFailed(item.name),
+        );
+      } else {
+        toast.success(messages.catalogInstallAdded(item.name));
+      }
       await loadInstalledPackages();
       await loadLogs({ silent: true });
       return true;
     } catch (installError) {
-      setActionError(
+      toast.error(
         installError instanceof Error ? installError.message : messages.addPackageToProjectError,
       );
       return false;
     } finally {
       setAddingCatalogItemId(null);
     }
-  }
-
-  async function installCatalogItem(item: CatalogItem, preferredProjectId?: number | null) {
-    const targetProjectId =
-      preferredProjectId && projects.some((project) => project.project_id === preferredProjectId)
-        ? preferredProjectId
-        : selectedProjectId && projects.some((project) => project.project_id === selectedProjectId)
-          ? selectedProjectId
-          : projects[0]?.project_id ?? null;
-    if (!targetProjectId) {
-      setActionError(messages.selectProjectBeforeInstall);
-      return;
-    }
-
-    const packageInstalled = installedPackageCatalogIDs.has(item.id);
-    if (!packageInstalled) {
-      const ok = await installCatalogPackage(item);
-      if (!ok) {
-        return;
-      }
-    }
-    const fields = catalogConfigFields(item);
-    if (fields.length > 0) {
-      openInstallDialog(item, targetProjectId);
-      return;
-    }
-
-    await performCatalogInstall(item, targetProjectId, {});
   }
 
   function projectNameFromLog(projectId: number | null) {
@@ -1157,38 +1241,6 @@ export default function App() {
 
     return serverNamesById[serverId] ?? messages.serverTag(serverId);
   }
-
-  const projectActivity = Object.entries(
-    logs.reduce<Record<string, number>>((accumulator, entry) => {
-      if (entry.project_id) {
-        const key = String(entry.project_id);
-        accumulator[key] = (accumulator[key] ?? 0) + 1;
-      }
-      return accumulator;
-    }, {}),
-  )
-    .map(([projectId, count]) => ({
-      id: Number(projectId),
-      name: projectNameFromLog(Number(projectId)) ?? messages.projectTag(Number(projectId)),
-      count,
-    }))
-    .sort((left, right) => right.count - left.count);
-
-  const serverActivity = Object.entries(
-    logs.reduce<Record<string, number>>((accumulator, entry) => {
-      if (entry.server_id) {
-        const key = String(entry.server_id);
-        accumulator[key] = (accumulator[key] ?? 0) + 1;
-      }
-      return accumulator;
-    }, {}),
-  )
-    .map(([serverId, count]) => ({
-      id: Number(serverId),
-      name: serverNameFromLog(Number(serverId)) ?? messages.serverTag(Number(serverId)),
-      count,
-    }))
-    .sort((left, right) => right.count - left.count);
 
   async function createProject(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1476,6 +1528,48 @@ export default function App() {
     setCreateProjectOpen(true);
   }
 
+  function startDuplicateProject() {
+    if (!selectedProject) {
+      return;
+    }
+
+    setDuplicateProjectName(`${selectedProject.name} Copy`);
+    setDuplicateProjectOpen(true);
+  }
+
+  async function duplicateProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedProject) {
+      return;
+    }
+
+    setDuplicatingProjectId(selectedProject.project_id);
+    setActionError(null);
+
+    try {
+      const duplicatedProject = await apiRequest<ProjectStatus>(
+        `/api/projects/${selectedProject.project_id}/duplicate`,
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({ name: duplicateProjectName }),
+        },
+      );
+      setProjects((current) => [...current, duplicatedProject]);
+      setSelectedProjectId(duplicatedProject.project_id);
+      setDuplicateProjectOpen(false);
+      setDuplicateProjectName('');
+      await loadInstalledPackages();
+      await loadLogs({ silent: true });
+    } catch (submitError) {
+      setActionError(
+        submitError instanceof Error ? submitError.message : messages.duplicateProjectError,
+      );
+    } finally {
+      setDuplicatingProjectId(null);
+    }
+  }
+
   async function deleteProject(projectId: number) {
     const confirmed = window.confirm('Delete this project and all its servers?');
     if (!confirmed) {
@@ -1702,7 +1796,11 @@ export default function App() {
 
   function startEditRAGCollection(collection: RAGCollection) {
     setEditingRAGCollectionId(collection.collection_id);
-    setRAGCollectionForm({ name: collection.name });
+    setRAGCollectionForm({
+      name: collection.name,
+      source_path: collection.source_path ?? '',
+      auto_reindex: collection.auto_reindex ?? false,
+    });
     setCreateRAGCollectionOpen(true);
   }
 
@@ -1720,6 +1818,8 @@ export default function App() {
           method: editingRAGCollectionId ? 'PUT' : 'POST',
           body: JSON.stringify({
             name: ragCollectionForm.name,
+            source_path: ragCollectionForm.source_path,
+            auto_reindex: ragCollectionForm.auto_reindex,
           }),
         },
       );
@@ -1731,6 +1831,10 @@ export default function App() {
             )
           : [...current, savedCollection],
       );
+      setRAGIndexPaths((current) => ({
+        ...current,
+        [savedCollection.collection_id]: savedCollection.source_path,
+      }));
       setRAGCollectionForm(emptyRAGCollectionForm);
       setEditingRAGCollectionId(null);
       setCreateRAGCollectionOpen(false);
@@ -1936,6 +2040,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      <Toaster position="top-right" richColors />
       <div className="flex min-h-screen w-full">
         <aside className="sticky top-0 flex h-screen w-20 shrink-0 flex-col items-center border-r border-border bg-sidebar/55 px-3 py-6">
           <div className="flex h-full flex-col items-center gap-3">
@@ -2067,21 +2172,6 @@ export default function App() {
                           />
                         </label>
 
-                        <label className="block space-y-2">
-                          <span className="text-sm text-muted-foreground">{labels.workingDirectory}</span>
-                          <input
-                            value={projectForm.root_path}
-                            onChange={(event) =>
-                              setProjectForm((current) => ({
-                                ...current,
-                                root_path: event.target.value,
-                              }))
-                            }
-                            className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                            placeholder={messages.workingDirectoryPlaceholder}
-                          />
-                        </label>
-
                         <button
                           type="submit"
                           disabled={creatingProject}
@@ -2096,6 +2186,48 @@ export default function App() {
                             </button>
                           </form>
                         </DialogContent>
+                  </Dialog>
+                  <Dialog
+                    open={duplicateProjectOpen}
+                    onOpenChange={(open) => {
+                      setDuplicateProjectOpen(open);
+                      if (!open) {
+                        setDuplicateProjectName('');
+                      }
+                    }}
+                  >
+                    <DialogContent className="sm:max-w-xl">
+                      <DialogHeader>
+                        <DialogTitle>{labels.duplicateProject}</DialogTitle>
+                        <DialogDescription>{messages.duplicateProjectDescription}</DialogDescription>
+                      </DialogHeader>
+
+                      <form className="space-y-3" onSubmit={duplicateProject}>
+                        <label className="block space-y-2">
+                          <span className="text-sm text-muted-foreground">{labels.name}</span>
+                          <input
+                            required
+                            value={duplicateProjectName}
+                            onChange={(event) => setDuplicateProjectName(event.target.value)}
+                            className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
+                            placeholder={messages.duplicateProjectNamePlaceholder}
+                          />
+                        </label>
+
+                        <button
+                          type="submit"
+                          disabled={!selectedProject || duplicatingProjectId === selectedProject?.project_id}
+                          className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          {duplicatingProjectId === selectedProject?.project_id ? (
+                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Copy className="h-4 w-4" />
+                          )}
+                          {labels.duplicateProject}
+                        </button>
+                      </form>
+                    </DialogContent>
                   </Dialog>
                 </div>
               </div>
@@ -2175,12 +2307,15 @@ export default function App() {
           ) : null}
 
           {view === 'logs' ? (
-            <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+            <section className="space-y-6">
               <div className="rounded-2xl border border-border bg-card p-6">
-                <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-                <div>
-                  <h2 className="text-2xl font-semibold">{labels.auditLogs}</h2>
-                </div>
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+                  <div>
+                    <h2 className="text-2xl font-semibold">{labels.performance}</h2>
+                    <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
+                      {messages.performanceDescription}
+                    </p>
+                  </div>
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                     <div className="min-w-[220px]">
                       <Select
@@ -2202,144 +2337,276 @@ export default function App() {
                         </SelectContent>
                       </Select>
                     </div>
+                    <div className="min-w-[200px]">
+                      <Select value={metricsWindow} onValueChange={(value) => setMetricsWindow(value as MetricsWindow)}>
+                        <SelectTrigger className="h-10 rounded-md border-border bg-background text-sm">
+                          <SelectValue placeholder={labels.timeWindow} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {metricsWindowOptions.map((option) => (
+                            <SelectItem key={`metrics-window-${option.value}`} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                     <button
-                      onClick={() => void loadLogs()}
+                      onClick={() => {
+                        void loadLogs();
+                        void loadLogMetrics();
+                      }}
                       className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent"
                     >
-                      <RefreshCw className={`h-4 w-4 ${logsLoading ? 'animate-spin' : ''}`} />
+                      <RefreshCw className={`h-4 w-4 ${(logsLoading || metricsLoading) ? 'animate-spin' : ''}`} />
                       {labels.refresh}
                     </button>
                   </div>
                 </div>
-
-                <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-border bg-background px-4 py-3 text-sm">
-                  <div>
-                    <div className="font-medium">{labels.consoleFeed}</div>
-                    <div className="text-muted-foreground">
-                      {filteredLogsProject?.name ?? labels.allProjects}
-                    </div>
-                  </div>
-                  <div className="rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
-                    {logs.length} {labels.requests}
-                  </div>
-                </div>
-
-                {logsLoading ? (
-                  <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-4 py-5 text-sm text-muted-foreground">
-                    <LoaderCircle className="h-4 w-4 animate-spin" />
-                    {messages.loadingLogs}
-                  </div>
-                ) : logs.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border bg-background px-4 py-8 text-center text-muted-foreground">
-                    {messages.noLogs}
-                  </div>
-                ) : (
-                  <div className="overflow-hidden rounded-xl border border-border bg-[#0b0f14]">
-                    <div ref={logsViewportRef} className="max-h-[70vh] overflow-y-auto">
-                      {logs.map((entry) => (
-                        <div
-                          key={entry.id}
-                          className="border-b border-white/5 px-4 py-3 font-mono text-xs text-slate-200 last:border-b-0"
-                        >
-                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                            <span className="text-slate-500">
-                              {new Date(entry.created_at).toLocaleTimeString()}
-                            </span>
-                            <span className="text-electric-blue">{formatAuditAction(entry.action)}</span>
-                            <span className="text-slate-400">
-                              {entry.actor || labels.unknownActor}
-                            </span>
-                            {entry.project_id ? (
-                              <span className="text-emerald-400">
-                                {projectNameFromLog(entry.project_id)}
-                              </span>
-                            ) : null}
-                            {entry.server_id ? (
-                              <span className="text-amber-300">
-                                {serverNameFromLog(entry.server_id)}
-                              </span>
-                            ) : null}
-                          </div>
-                          {entry.detail ? (
-                            <div className="mt-1 break-words text-slate-300/85">
-                              {formatAuditDetail(entry)}
-                            </div>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
               </div>
 
-              <aside className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 <div className="rounded-2xl border border-border bg-card p-5">
-                  <h3 className="text-lg font-semibold">{labels.activityOverview}</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {messages.popularityDescription}
-                  </p>
+                  <div className="text-sm text-muted-foreground">{labels.requests}</div>
+                  <div className="mt-2 text-2xl font-semibold">{logMetrics?.summary.request_count ?? 0}</div>
+                </div>
+                <div className="rounded-2xl border border-border bg-card p-5">
+                  <div className="text-sm text-muted-foreground">{labels.errors}</div>
+                  <div className="mt-2 text-2xl font-semibold">{logMetrics?.summary.error_count ?? 0}</div>
+                  <div className="mt-1 text-sm text-muted-foreground">
+                    {formatPercent(logMetrics?.summary.error_rate ?? 0)} {labels.errorRate.toLowerCase()}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-border bg-card p-5">
+                  <div className="text-sm text-muted-foreground">{labels.avgLatency}</div>
+                  <div className="mt-2 text-2xl font-semibold">
+                    {formatLatency(logMetrics?.summary.avg_latency_ms ?? 0)}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-border bg-card p-5">
+                  <div className="text-sm text-muted-foreground">{labels.p95Latency}</div>
+                  <div className="mt-2 text-2xl font-semibold">
+                    {formatLatency(logMetrics?.summary.p95_latency_ms ?? 0)}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-border bg-card p-5">
+                  <div className="text-sm text-muted-foreground">{labels.trafficIn}</div>
+                  <div className="mt-2 text-2xl font-semibold">
+                    {formatBytes(logMetrics?.summary.traffic_in ?? 0)}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-border bg-card p-5">
+                  <div className="text-sm text-muted-foreground">{labels.trafficOut}</div>
+                  <div className="mt-2 text-2xl font-semibold">
+                    {formatBytes(logMetrics?.summary.traffic_out ?? 0)}
+                  </div>
+                </div>
+              </div>
+
+              {metricsLoading && !logMetrics ? (
+                <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-5 text-sm text-muted-foreground">
+                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                  {messages.loadingMetrics}
+                </div>
+              ) : null}
+
+              {logMetrics && logMetrics.trends.length > 0 ? (
+                <div className="grid gap-4 xl:grid-cols-2">
+                  <TrendChart
+                    title={labels.requestVolume}
+                    subtitle={`${filteredLogsProject?.name ?? labels.allProjects} · ${metricsWindowOptions.find((option) => option.value === metricsWindow)?.label ?? ''}`}
+                    primaryValues={requestTrendValues}
+                    secondaryValues={errorTrendValues}
+                    primaryColor="#22c55e"
+                    secondaryColor="#f97316"
+                    labels={{ primary: labels.requests, secondary: labels.errors }}
+                  />
+                  <TrendChart
+                    title={labels.latencyTrend}
+                    subtitle={`${filteredLogsProject?.name ?? labels.allProjects} · ${metricsWindowOptions.find((option) => option.value === metricsWindow)?.label ?? ''}`}
+                    primaryValues={avgLatencyTrendValues}
+                    secondaryValues={p95LatencyTrendValues}
+                    primaryColor="#0ea5e9"
+                    secondaryColor="#a855f7"
+                    labels={{ primary: labels.avgLatency, secondary: labels.p95Latency }}
+                  />
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed border-border bg-card px-4 py-8 text-center text-muted-foreground">
+                  {messages.noMetrics}
+                </div>
+              )}
+
+              <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+                <div className="rounded-2xl border border-border bg-card p-6">
+                  <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-border bg-background px-4 py-3 text-sm">
+                    <div>
+                      <div className="font-medium">{labels.auditLogs}</div>
+                      <div className="text-muted-foreground">
+                        {filteredLogsProject?.name ?? labels.allProjects}
+                      </div>
+                    </div>
+                    <div className="rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
+                      {logs.length} {labels.requests}
+                    </div>
+                  </div>
+
+                  {logsLoading ? (
+                    <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-4 py-5 text-sm text-muted-foreground">
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                      {messages.loadingLogs}
+                    </div>
+                  ) : logs.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-border bg-background px-4 py-8 text-center text-muted-foreground">
+                      {messages.noLogs}
+                    </div>
+                  ) : (
+                    <div className="overflow-hidden rounded-xl border border-border bg-[#0b0f14]">
+                      <div ref={logsViewportRef} className="max-h-[70vh] overflow-y-auto">
+                        {logs.map((entry) => (
+                          <div
+                            key={entry.id}
+                            className="border-b border-white/5 px-4 py-3 font-mono text-xs text-slate-200 last:border-b-0"
+                          >
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                              <span className="text-slate-500">
+                                {new Date(entry.created_at).toLocaleTimeString()}
+                              </span>
+                              <span className="text-electric-blue">{formatAuditAction(entry.action)}</span>
+                              <span className="text-slate-400">
+                                {entry.actor || labels.unknownActor}
+                              </span>
+                              {entry.project_id ? (
+                                <span className="text-emerald-400">
+                                  {projectNameFromLog(entry.project_id)}
+                                </span>
+                              ) : null}
+                              {entry.server_id ? (
+                                <span className="text-amber-300">
+                                  {serverNameFromLog(entry.server_id)}
+                                </span>
+                              ) : null}
+                            </div>
+                            {entry.detail ? (
+                              <div className="mt-1 break-words text-slate-300/85">
+                                {formatAuditDetail(entry)}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                <div className="rounded-2xl border border-border bg-card p-5">
-                  <div className="text-sm text-muted-foreground">{labels.hottestProject}</div>
-                  <div className="mt-2 text-lg font-semibold">
-                    {projectActivity[0]?.name ?? labels.noActivity}
+                <aside className="space-y-4">
+                  <div className="rounded-2xl border border-border bg-card p-5">
+                    <h3 className="text-lg font-semibold">{labels.topSlowServers}</h3>
+                    <div className="mt-3 space-y-2">
+                      {(logMetrics?.top_slow_servers ?? []).map((entry) => (
+                        <div
+                          key={`slow-server-${entry.server_id}`}
+                          className="rounded-lg bg-background px-3 py-3 text-sm"
+                        >
+                          <div className="font-medium">
+                            {serverNamesById[entry.server_id] ?? messages.serverTag(entry.server_id)}
+                          </div>
+                          <div className="mt-1 flex items-center justify-between gap-3 text-muted-foreground">
+                            <span>{entry.request_count} {labels.requests}</span>
+                            <span>{formatLatency(entry.p95_latency_ms)}</span>
+                          </div>
+                        </div>
+                      ))}
+                      {(logMetrics?.top_slow_servers.length ?? 0) === 0 ? (
+                        <div className="rounded-lg bg-background px-3 py-2 text-sm text-muted-foreground">
+                          {messages.noMetrics}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
-                  <div className="mt-1 text-sm text-electric-blue">
-                    {projectActivity[0]?.count ?? 0} {labels.requests}
-                  </div>
-                </div>
 
-                <div className="rounded-2xl border border-border bg-card p-5">
-                  <div className="text-sm text-muted-foreground">{labels.hottestServer}</div>
-                  <div className="mt-2 text-lg font-semibold">
-                    {serverActivity[0]?.name ?? labels.noActivity}
+                  <div className="rounded-2xl border border-border bg-card p-5">
+                    <h3 className="text-lg font-semibold">{labels.topErrorServers}</h3>
+                    <div className="mt-3 space-y-2">
+                      {(logMetrics?.top_error_servers ?? []).map((entry) => (
+                        <div
+                          key={`error-server-${entry.server_id}`}
+                          className="rounded-lg bg-background px-3 py-3 text-sm"
+                        >
+                          <div className="font-medium">
+                            {serverNamesById[entry.server_id] ?? messages.serverTag(entry.server_id)}
+                          </div>
+                          <div className="mt-1 flex items-center justify-between gap-3 text-muted-foreground">
+                            <span>{entry.error_count} {labels.errors.toLowerCase()}</span>
+                            <span>{formatPercent(entry.error_rate)}</span>
+                          </div>
+                        </div>
+                      ))}
+                      {(logMetrics?.top_error_servers.length ?? 0) === 0 ? (
+                        <div className="rounded-lg bg-background px-3 py-2 text-sm text-muted-foreground">
+                          {messages.noMetrics}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
-                  <div className="mt-1 text-sm text-electric-blue">
-                    {serverActivity[0]?.count ?? 0} {labels.requests}
-                  </div>
-                </div>
 
-                <div className="rounded-2xl border border-border bg-card p-5">
-                  <div className="text-sm font-medium">{labels.projects}</div>
-                  <div className="mt-3 space-y-2">
-                    {projectActivity.slice(0, 5).map((entry) => (
-                      <div
-                        key={`project-activity-${entry.id}`}
-                        className="flex items-center justify-between gap-3 rounded-lg bg-background px-3 py-2 text-sm"
-                      >
-                        <span className="truncate">{entry.name}</span>
-                        <span className="text-muted-foreground">{entry.count}</span>
-                      </div>
-                    ))}
-                    {projectActivity.length === 0 ? (
-                      <div className="rounded-lg bg-background px-3 py-2 text-sm text-muted-foreground">
-                        {labels.noActivity}
-                      </div>
-                    ) : null}
+                  <div className="rounded-2xl border border-border bg-card p-5">
+                    <h3 className="text-lg font-semibold">{labels.topTrafficServers}</h3>
+                    <div className="mt-3 space-y-2">
+                      {(logMetrics?.top_traffic_servers ?? []).map((entry) => (
+                        <div
+                          key={`traffic-server-${entry.server_id}`}
+                          className="rounded-lg bg-background px-3 py-3 text-sm"
+                        >
+                          <div className="font-medium">
+                            {serverNamesById[entry.server_id] ?? messages.serverTag(entry.server_id)}
+                          </div>
+                          <div className="mt-1 flex items-center justify-between gap-3 text-muted-foreground">
+                            <span>{formatBytes(entry.total_traffic)}</span>
+                            <span>{entry.request_count} {labels.requests}</span>
+                          </div>
+                        </div>
+                      ))}
+                      {(logMetrics?.top_traffic_servers.length ?? 0) === 0 ? (
+                        <div className="rounded-lg bg-background px-3 py-2 text-sm text-muted-foreground">
+                          {messages.noMetrics}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
 
-                <div className="rounded-2xl border border-border bg-card p-5">
-                  <div className="text-sm font-medium">{labels.servers}</div>
-                  <div className="mt-3 space-y-2">
-                    {serverActivity.slice(0, 5).map((entry) => (
-                      <div
-                        key={`server-activity-${entry.id}`}
-                        className="flex items-center justify-between gap-3 rounded-lg bg-background px-3 py-2 text-sm"
-                      >
-                        <span className="truncate">{entry.name}</span>
-                        <span className="text-muted-foreground">{entry.count}</span>
-                      </div>
-                    ))}
-                    {serverActivity.length === 0 ? (
-                      <div className="rounded-lg bg-background px-3 py-2 text-sm text-muted-foreground">
-                        {labels.noActivity}
-                      </div>
-                    ) : null}
+                  <div className="rounded-2xl border border-border bg-card p-5">
+                    <h3 className="text-lg font-semibold">{labels.recentFailures}</h3>
+                    <div className="mt-3 space-y-2">
+                      {(logMetrics?.recent_failures ?? []).map((entry) => (
+                        <div
+                          key={`failure-${entry.id}`}
+                          className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-3 text-sm"
+                        >
+                          <div className="font-medium">
+                            {entry.server_id
+                              ? serverNamesById[entry.server_id] ?? messages.serverTag(entry.server_id)
+                              : entry.project_id
+                                ? projectNamesById[entry.project_id] ?? messages.projectTag(entry.project_id)
+                                : labels.performance}
+                          </div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {entry.operation} · {formatLatency(entry.latency_ms)} · {new Date(entry.created_at).toLocaleTimeString()}
+                          </div>
+                          <div className="mt-2 break-words text-xs text-foreground/80">
+                            {entry.error_detail}
+                          </div>
+                        </div>
+                      ))}
+                      {(logMetrics?.recent_failures.length ?? 0) === 0 ? (
+                        <div className="rounded-lg bg-background px-3 py-2 text-sm text-muted-foreground">
+                          {messages.noMetrics}
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-              </aside>
+                </aside>
+              </div>
             </section>
           ) : view === 'knowledge' ? (
             <section className="space-y-6">
@@ -2379,7 +2646,7 @@ export default function App() {
                         <DialogHeader>
                           <DialogTitle>{editingRAGCollectionId ? 'Edit Knowledge Base' : messages.createKnowledgeBaseTitle}</DialogTitle>
                           <DialogDescription>
-                            {editingRAGCollectionId ? 'Update the collection name. The indexed files and search data will stay intact.' : messages.createKnowledgeBaseDescription}
+                            {editingRAGCollectionId ? messages.editKnowledgeBaseDescription : messages.createKnowledgeBaseDescription}
                           </DialogDescription>
                         </DialogHeader>
                         <form className="space-y-4" onSubmit={createRAGCollection}>
@@ -2394,6 +2661,32 @@ export default function App() {
                               className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
                               placeholder={messages.collectionNamePlaceholder}
                             />
+                          </label>
+                          <label className="block space-y-2">
+                            <span className="text-sm text-muted-foreground">{messages.sourceFolderTitle}</span>
+                            <input
+                              required
+                              value={ragCollectionForm.source_path}
+                              onChange={(event) =>
+                                setRAGCollectionForm((current) => ({ ...current, source_path: event.target.value }))
+                              }
+                              className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
+                              placeholder={messages.sourceFolderPlaceholder}
+                            />
+                          </label>
+                          <label className="flex items-center gap-3 rounded-md border border-border bg-background px-3 py-3 text-sm">
+                            <input
+                              type="checkbox"
+                              checked={ragCollectionForm.auto_reindex}
+                              onChange={(event) =>
+                                setRAGCollectionForm((current) => ({ ...current, auto_reindex: event.target.checked }))
+                              }
+                              className="h-4 w-4 rounded border-border"
+                            />
+                            <div>
+                              <div className="font-medium">{messages.autoReindexTitle}</div>
+                              <div className="text-muted-foreground">{messages.autoReindexDescription}</div>
+                            </div>
                           </label>
                           <DialogFooter>
                             <button
@@ -2431,6 +2724,11 @@ export default function App() {
                               <span className="rounded-full border border-electric-blue/20 bg-electric-blue/8 px-2.5 py-1 text-[11px] font-medium text-electric-blue">
                                 {messages.supportedFormatsLabel}: {messages.supportedFormatsValue}
                               </span>
+                              {collection.auto_reindex ? (
+                                <span className="rounded-full border border-status-running/30 bg-status-running/10 px-2.5 py-1 text-[11px] font-medium text-status-running">
+                                  {messages.autoReindexBadge}
+                                </span>
+                              ) : null}
                             </div>
                             <div className="mt-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
                               {collection.collection_id} · {collection.data_type}
@@ -2568,392 +2866,35 @@ export default function App() {
               </Dialog>
             </section>
           ) : view === 'market' ? (
-            <section className="grid gap-6 xl:grid-cols-[260px_minmax(0,1fr)] xl:items-start">
-              <aside className="rounded-2xl border border-border bg-card p-4 xl:sticky xl:top-8 xl:h-[calc(100vh-4rem)] xl:overflow-hidden">
-                <div className="flex h-full flex-col gap-4">
-                  <div>
-                    <div className="text-sm uppercase tracking-[0.24em] text-electric-blue">
-                      {labels.catalog}
-                    </div>
-                    <div className="mt-2 text-lg font-semibold">{labels.integrations}</div>
-                  </div>
-
-                  <div className="space-y-2 overflow-y-auto pr-1 xl:flex-1">
-                    {catalogCategories.map((category) => (
-                      <button
-                        key={`catalog-category-${category}`}
-                        onClick={() => setSelectedCatalogCategory(category)}
-                        className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-xs font-medium transition-colors ${
-                          selectedCatalogCategory === category
-                            ? 'border-electric-blue bg-electric-blue text-white'
-                            : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground'
-                        }`}
-                      >
-                        <span>{category === 'all' ? labels.allCategories : category}</span>
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="mt-auto pt-2">
-                    <button
-                      onClick={() => void syncCatalog()}
-                      disabled={catalogSyncing}
-                      className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      {catalogSyncing ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-4 w-4" />
-                      )}
-                      {labels.syncCatalog}
-                    </button>
-                  </div>
-                </div>
-              </aside>
-
-              <div className="space-y-6">
-              <div className="rounded-2xl border border-border bg-card p-6">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                  <div>
-                    <p className="text-sm uppercase tracking-[0.24em] text-electric-blue">
-                      {labels.integrations}
-                    </p>
-                    <h2 className="mt-2 text-3xl font-semibold">{labels.market} / {labels.catalog}</h2>
-                    <p className="mt-2 max-w-3xl text-muted-foreground">
-                      {messages.marketDescription}
-                    </p>
-                  </div>
-
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <div className="rounded-xl border border-border bg-background px-4 py-3">
-                      <div className="text-sm text-muted-foreground">{labels.catalogItems}</div>
-                      <div className="mt-1 text-2xl font-semibold">{catalogItems.length}</div>
-                    </div>
-                    <div className="rounded-xl border border-border bg-background px-4 py-3">
-                      <div className="text-sm text-muted-foreground">{labels.installed}</div>
-                      <div className="mt-1 text-2xl font-semibold">
-                        {selectedProject?.installed_integrations.length ?? 0}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-border bg-background px-4 py-3">
-                      <div className="text-sm text-muted-foreground">{labels.lastSync}</div>
-                      <div className="mt-1 text-sm font-medium">
-                        {catalogSettings?.last_sync_at
-                          ? new Date(catalogSettings.last_sync_at).toLocaleString()
-                          : messages.notSynced}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className={`mt-6 grid gap-4 ${catalogURLVisible ? 'lg:grid-cols-[minmax(0,1fr)]' : 'lg:grid-cols-[auto]'}`}>
-                  {catalogURLVisible ? (
-                    <label className="block space-y-2">
-                      <span className="text-sm text-muted-foreground">{labels.externalManifestUrl}</span>
-                      <input
-                        value={catalogURL}
-                        onChange={(event) => setCatalogURL(event.target.value)}
-                        className="h-11 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                        placeholder="https://webeasy.kz/mcpbox/catalog.json"
-                      />
-                    </label>
-                  ) : null}
-                </div>
-
-                {catalogURLVisible ? (
-                  <div className="mt-3 text-xs text-muted-foreground">
-                    {messages.advancedModeEnabled}
-                  </div>
-                ) : null}
-
-                {catalogSettings?.last_sync_status === 'failed' && catalogSettings.last_sync_error ? (
-                  <div className="mt-4 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-                    {catalogSettings.last_sync_error}
-                  </div>
-                ) : null}
-              </div>
-
-              {!selectedProject ? (
-                <div className="rounded-2xl border border-dashed border-border bg-card/50 px-6 py-10 text-center text-muted-foreground">
-                  {messages.selectProjectBeforeInstall}
-                </div>
-              ) : null}
-
-              <div className="grid gap-4">
-                {filteredCatalogItems.map((item) => {
-                  const packageInstalling = installingCatalogItemId === item.id;
-                  const addingToProject = addingCatalogItemId === item.id;
-                  const packageInstalled = installedPackageCatalogIDs.has(item.id);
-                  const addedToProject = installedCatalogIDs.has(item.id);
-                  const transportLabel = item.transport === 'stdio' ? 'STDIO' : item.transport;
-                  const primaryInfoLabel = item.transport === 'stdio' ? labels.command : labels.endpoint;
-                  const primaryInfoValue = item.transport === 'stdio'
-                    ? [item.command, ...(item.args ?? [])].filter(Boolean).join(' ')
-                    : item.mcp_url || messages.noValue;
-                  const authLabel = item.auth_type === 'mcp_discovery' ? labels.mcpDiscovery : item.auth_type;
-
-                  return (
-                    <div key={item.id} className="rounded-2xl border border-border bg-card p-5">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <h3 className="text-lg font-semibold">{item.name}</h3>
-                            <div className="flex flex-wrap justify-end gap-2">
-                              <button
-                                onClick={() => void installCatalogPackage(item)}
-                                disabled={packageInstalling || packageInstalled || !item.enabled}
-                                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-electric-blue bg-electric-blue/10 px-4 text-sm font-medium text-electric-blue transition-colors hover:bg-electric-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {packageInstalling ? (
-                                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Plus className="h-4 w-4" />
-                                )}
-                                {packageInstalled ? labels.packageInstalled : labels.installPackage}
-                              </button>
-                              <button
-                                onClick={() => void installCatalogItem(item)}
-                                disabled={projects.length === 0 || addingToProject || !packageInstalled || addedToProject || !item.enabled}
-                                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-60"
-                              >
-                                {addingToProject ? (
-                                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Plus className="h-4 w-4" />
-                                )}
-                                {addedToProject ? labels.addedToProject : labels.addToProject}
-                              </button>
-                            </div>
-                          </div>
-                          <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
-                                {transportLabel}
-                              </span>
-                              <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
-                                {authLabel}
-                              </span>
-                              <span className={`rounded-full border px-2 py-1 text-xs ${packageInstalled ? 'border-status-running/30 bg-status-running/12 text-status-running' : 'border-border bg-muted text-muted-foreground'}`}>
-                                {packageInstalled ? labels.packageInstalled : labels.packageNotInstalled}
-                              </span>
-                              {selectedProject ? (
-                                <span className={`rounded-full border px-2 py-1 text-xs ${addedToProject ? 'border-electric-blue/30 bg-electric-blue/12 text-electric-blue' : 'border-border bg-muted text-muted-foreground'}`}>
-                                  {addedToProject ? labels.addedToProject : labels.notInProject}
-                                </span>
-                              ) : null}
-                            </div>
-                            <div className="flex flex-wrap items-center justify-end gap-3 text-sm">
-                              {item.docs_url ? (
-                                <a
-                                  className="text-electric-blue underline-offset-4 hover:underline"
-                                  href={item.docs_url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  {labels.docs}
-                                </a>
-                              ) : null}
-                              {item.website ? (
-                                <a
-                                  className="text-electric-blue underline-offset-4 hover:underline"
-                                  href={item.website}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  {labels.website}
-                                </a>
-                              ) : null}
-                            </div>
-                          </div>
-                          <div className="mt-1 text-sm text-electric-blue">{item.category || labels.generalCategory}</div>
-                        </div>
-                      </div>
-
-                      <p className="mt-4 text-sm text-muted-foreground">
-                        {item.description || messages.noDescriptionProvided}
-                      </p>
-                      {item.auth_type === 'mcp_discovery' ? (
-                        <div className="mt-4 rounded-xl border border-electric-blue/20 bg-electric-blue/8 px-4 py-3 text-sm text-muted-foreground">
-                          {messages.upstreamAuthNotice}
-                        </div>
-                      ) : null}
-
-                      <div className="mt-4 rounded-xl border border-border bg-background p-3">
-                        <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">{primaryInfoLabel}</div>
-                        <code className="mt-2 block overflow-x-auto text-xs text-electric-blue">
-                          {primaryInfoValue || messages.noValue}
-                        </code>
-                        {item.transport === 'stdio' && item.working_dir ? (
-                          <div className="mt-3 text-sm text-muted-foreground">
-                            {messages.workingDirectoryValue(item.working_dir)}
-                          </div>
-                        ) : null}
-                        {item.transport === 'stdio' && item.default_auto_start ? (
-                          <div className="mt-2 text-sm text-muted-foreground">
-                            {messages.autoStartAfterInstall}
-                          </div>
-                        ) : null}
-                      </div>
-
-                      {(item.tags?.length ?? 0) > 0 ? (
-                        <div className="mt-4 flex flex-wrap gap-2">
-                          {item.tags.map((tag) => (
-                            <span
-                              key={`${item.id}-${tag}`}
-                              className="rounded-full border border-electric-blue/30 bg-electric-blue/12 px-2 py-1 text-xs font-medium text-electric-blue"
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {!catalogLoading && catalogItems.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-border bg-card/50 px-6 py-10 text-center text-muted-foreground">
-                  {messages.syncManifestToPopulateCatalog}
-                </div>
-              ) : null}
-              {!catalogLoading && catalogItems.length > 0 && filteredCatalogItems.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-border bg-card/50 px-6 py-10 text-center text-muted-foreground">
-                  {messages.noIntegrationsInCategory}
-                </div>
-              ) : null}
-
-              <Dialog
-                open={installDialogOpen}
-                onOpenChange={(open) => {
-                  setInstallDialogOpen(open);
-                  if (!open) {
-                    setInstallDialogItem(null);
-                    setInstallDialogProjectId(null);
-                    setInstallDialogValues({});
-                  }
-                }}
-              >
-                <DialogContent className="sm:max-w-xl">
-                  <DialogHeader>
-                    <DialogTitle>
-                      {installDialogItem
-                        ? messages.addPackageDialogTitle(installDialogItem.name)
-                        : messages.addPackageDialogFallbackTitle}
-                    </DialogTitle>
-                    <DialogDescription>
-                      {messages.addPackageDialogDescription}
-                    </DialogDescription>
-                  </DialogHeader>
-
-                  {installDialogItem ? (
-                    <form
-                      className="space-y-4"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        if (!installDialogProjectId) {
-                          setActionError(messages.selectProjectBeforeInstall);
-                          return;
-                        }
-                        const config = normalizeInstallConfig(installDialogFields, installDialogValues);
-                        void performCatalogInstall(installDialogItem, installDialogProjectId, config).then((success) => {
-                          if (!success) {
-                            return;
-                          }
-                          setInstallDialogOpen(false);
-                          setInstallDialogItem(null);
-                          setInstallDialogProjectId(null);
-                          setInstallDialogValues({});
-                        });
-                      }}
-                    >
-                      <label className="block space-y-2">
-                        <span className="text-sm text-muted-foreground">{labels.projects}</span>
-                        <Select
-                          value={installDialogProjectId ? String(installDialogProjectId) : undefined}
-                          onValueChange={(value) => {
-                            const nextProjectId = Number(value);
-                            const nextProject =
-                              projectOptions.find((project) => project.project_id === nextProjectId) ?? null;
-                            setInstallDialogProjectId(nextProjectId);
-                            setInstallDialogValues((current) =>
-                              applyProjectDefaultsToInstallValues(current, installDialogFields, nextProject),
-                            );
-                          }}
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue placeholder={labels.notSelected} />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {projectOptions.map((project) => (
-                              <SelectItem key={`install-project-${project.project_id}`} value={String(project.project_id)}>
-                                {project.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {installDialogProject?.root_path ? (
-                          <div className="text-xs text-muted-foreground">
-                            {messages.workingDirectoryValue(installDialogProject.root_path)}
-                          </div>
-                        ) : null}
-                      </label>
-
-                      {installDialogFields.map((field) => (
-                        <label key={`install-field-${field.key}`} className="block space-y-2">
-                          <span className="text-sm text-muted-foreground">
-                            {field.label}
-                            {field.required ? ' *' : ''}
-                          </span>
-                          {field.type === 'array' ? (
-                            <textarea
-                              value={installDialogValues[field.key] ?? ''}
-                              onChange={(event) =>
-                                setInstallDialogValues((current) => ({
-                                  ...current,
-                                  [field.key]: event.target.value,
-                                }))
-                              }
-                              rows={4}
-                              className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm outline-none transition-colors focus:border-electric-blue"
-                              placeholder={messages.oneValuePerLine}
-                              required={field.required}
-                            />
-                          ) : (
-                            <input
-                              type={field.secret ? 'password' : 'text'}
-                              value={installDialogValues[field.key] ?? ''}
-                              onChange={(event) =>
-                                setInstallDialogValues((current) => ({
-                                  ...current,
-                                  [field.key]: event.target.value,
-                                }))
-                              }
-                              className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                              required={field.required}
-                            />
-                          )}
-                        </label>
-                      ))}
-
-                      <button
-                        type="submit"
-                        disabled={!installDialogItem || !installDialogProjectId || addingCatalogItemId === installDialogItem.id}
-                        className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
-                      >
-                        {installDialogItem && addingCatalogItemId === installDialogItem.id ? (
-                          <LoaderCircle className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Plus className="h-4 w-4" />
-                        )}
-                        {labels.addToProject}
-                      </button>
-                    </form>
-                  ) : null}
-                </DialogContent>
-              </Dialog>
-              </div>
-            </section>
+            <MarketView
+              labels={labels}
+              messages={messages}
+              language={language}
+              languageOptions={languageOptions}
+              onLanguageChange={(value) => setLanguage(value as Language)}
+              projects={projectOptions}
+              selectedProject={selectedProject}
+              catalogItems={catalogItems}
+              catalogSettings={catalogSettings}
+              installedPackages={installedPackages}
+              catalogURL={catalogURL}
+              setCatalogURL={setCatalogURL}
+              catalogSourceMode={catalogSourceMode}
+              setCatalogSourceMode={setCatalogSourceMode}
+              localCatalogFileName={localCatalogFileName}
+              onPickLocalCatalogFile={pickLocalCatalogFile}
+              catalogLoading={catalogLoading}
+              catalogSyncing={catalogSyncing}
+              catalogURLVisible={catalogURLVisible}
+              installingCatalogItemId={installingCatalogItemId}
+              addingCatalogItemId={addingCatalogItemId}
+              uninstallingCatalogItemId={uninstallingCatalogItemId}
+              onSyncCatalog={syncCatalog}
+              onInstallCatalogPackage={installCatalogPackage}
+              onUninstallCatalogPackage={uninstallCatalogPackage}
+              onPerformCatalogInstall={performCatalogInstall}
+              onActionError={setActionError}
+            />
           ) : !selectedProject ? (
             <div className="flex min-h-[60vh] items-center justify-center rounded-2xl border border-dashed border-border bg-card/50">
               <div className="max-w-md text-center">
@@ -3055,41 +2996,47 @@ export default function App() {
                         </button>
                       </>
                     ) : null}
-                    <button
-                      onClick={() =>
-                        void setProjectPaused(selectedProject.project_id, !selectedProject.is_paused)
-                      }
-                      disabled={busyProjectId === selectedProject.project_id}
-                      className={`inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
-                        selectedProject.is_paused
-                          ? 'bg-status-running text-white hover:bg-status-running/90'
-                          : 'bg-amber-500 text-white hover:bg-amber-500/90'
-                      }`}
-                    >
-                      {busyProjectId === selectedProject.project_id ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : selectedProject.is_paused ? (
-                        <Play className="h-4 w-4" />
-                      ) : (
-                        <Pause className="h-4 w-4" />
-                      )}
-                      {selectedProject.is_paused ? labels.resumeProject : labels.pauseProject}
-                    </button>
-                    <button
-                      onClick={startEditProject}
-                      className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-border px-4 text-sm font-medium transition-colors hover:bg-accent"
-                    >
-                      <Pencil className="h-4 w-4" />
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => void deleteProject(selectedProject.project_id)}
-                      disabled={busyProjectId === selectedProject.project_id}
-                      className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-destructive/30 px-4 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                      Delete
-                    </button>
+                    <Menubar className="h-auto border-0 bg-transparent p-0 shadow-none">
+                      <MenubarMenu>
+                        <MenubarTrigger className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-border px-4 text-sm font-medium transition-colors hover:bg-accent">
+                          <MoreHorizontal className="h-4 w-4" />
+                          {labels.actions}
+                        </MenubarTrigger>
+                        <MenubarContent align="end" className="min-w-[15rem] rounded-xl">
+                          <MenubarItem
+                            disabled={busyProjectId === selectedProject.project_id}
+                            onSelect={() =>
+                              void setProjectPaused(selectedProject.project_id, !selectedProject.is_paused)
+                            }
+                          >
+                            {busyProjectId === selectedProject.project_id ? (
+                              <LoaderCircle className="h-4 w-4 animate-spin" />
+                            ) : selectedProject.is_paused ? (
+                              <Play className="h-4 w-4" />
+                            ) : (
+                              <Pause className="h-4 w-4" />
+                            )}
+                            {selectedProject.is_paused ? labels.resumeProject : labels.pauseProject}
+                          </MenubarItem>
+                          <MenubarItem onSelect={startDuplicateProject}>
+                            <Copy className="h-4 w-4" />
+                            {labels.duplicateProject}
+                          </MenubarItem>
+                          <MenubarItem onSelect={startEditProject}>
+                            <Pencil className="h-4 w-4" />
+                            {labels.edit}
+                          </MenubarItem>
+                          <MenubarItem
+                            variant="destructive"
+                            disabled={busyProjectId === selectedProject.project_id}
+                            onSelect={() => void deleteProject(selectedProject.project_id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            {labels.delete}
+                          </MenubarItem>
+                        </MenubarContent>
+                      </MenubarMenu>
+                    </Menubar>
                   </div>
                   {shouldShowOllamaControls && (ollamaStatus?.models.length ?? 0) === 0 ? (
                     <p className="text-sm text-muted-foreground">{messages.noOllamaModels}</p>
@@ -3411,6 +3358,7 @@ export default function App() {
                                       placeholder={labels.key}
                                     />
                                     <input
+                                      type={isSecretLikeName(pair.key) ? 'password' : 'text'}
                                       value={pair.value}
                                       onChange={(event) =>
                                         updateKeyValueField('env_vars', index, 'value', event.target.value)
@@ -3557,6 +3505,7 @@ export default function App() {
                                       placeholder={labels.key}
                                     />
                                     <input
+                                      type={isSecretLikeHeaderName(pair.key) ? 'password' : 'text'}
                                       value={pair.value}
                                       onChange={(event) =>
                                         updateKeyValueField('headers', index, 'value', event.target.value)
@@ -3718,7 +3667,7 @@ export default function App() {
                               <code className="mt-1 block overflow-x-auto rounded-md bg-card px-3 py-2 text-xs text-electric-blue">
                                 {server.transport === 'http_stream'
                                   ? server.url
-                                  : server.launch_command}
+                                  : server.launch_command_display || server.launch_command}
                               </code>
                             </div>
                             {server.transport === 'stdio' ? (

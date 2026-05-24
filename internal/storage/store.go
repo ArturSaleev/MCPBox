@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"MCPBox/internal/models"
@@ -41,6 +42,9 @@ func NewStore(dsn string) (*Store, error) {
 		return nil, err
 	}
 	if err := db.AutoMigrate(&models.AuditLog{}); err != nil {
+		return nil, err
+	}
+	if err := db.AutoMigrate(&models.PerformanceMetric{}); err != nil {
 		return nil, err
 	}
 	if err := db.AutoMigrate(
@@ -270,6 +274,106 @@ func (s *Store) UpdateProject(ctx context.Context, projectID uint, name, descrip
 		}).Error
 }
 
+func (s *Store) DuplicateProject(ctx context.Context, source *models.Project, name string) (*models.Project, error) {
+	if source == nil {
+		return nil, errors.New("source project is required")
+	}
+
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, errors.New("name is required")
+	}
+
+	token, err := newProjectToken()
+	if err != nil {
+		return nil, err
+	}
+
+	var duplicatedProjectID uint
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		duplicated := &models.Project{
+			Name:        name,
+			Description: source.Description,
+			RootPath:    source.RootPath,
+			Token:       token,
+			IsPaused:    source.IsPaused,
+		}
+		if err := tx.Create(duplicated).Error; err != nil {
+			return err
+		}
+		duplicatedProjectID = duplicated.ID
+
+		serverIDs := make(map[uint]uint, len(source.Servers))
+		for _, existing := range source.Servers {
+			cloned := existing
+			cloned.ID = 0
+			cloned.ProjectID = duplicated.ID
+			cloned.HealthStatus = models.ServerHealthUnknown
+			cloned.HealthError = ""
+			cloned.HealthCheckedAt = nil
+			cloned.CreatedAt = time.Time{}
+			cloned.UpdatedAt = time.Time{}
+			if err := tx.Create(&cloned).Error; err != nil {
+				return err
+			}
+			serverIDs[existing.ID] = cloned.ID
+		}
+
+		for _, integration := range source.InstalledIntegrations {
+			cloned := integration
+			cloned.ID = 0
+			cloned.ProjectID = duplicated.ID
+			cloned.CreatedAt = time.Time{}
+			cloned.UpdatedAt = time.Time{}
+			if integration.ServerID != nil {
+				if nextServerID, ok := serverIDs[*integration.ServerID]; ok {
+					cloned.ServerID = &nextServerID
+				} else {
+					cloned.ServerID = nil
+				}
+			}
+			if err := tx.Create(&cloned).Error; err != nil {
+				return err
+			}
+		}
+
+		for _, instance := range source.PackageInstances {
+			cloned := instance
+			cloned.ID = 0
+			cloned.ProjectID = duplicated.ID
+			cloned.CreatedAt = time.Time{}
+			cloned.UpdatedAt = time.Time{}
+			if instance.ServerID != nil {
+				if nextServerID, ok := serverIDs[*instance.ServerID]; ok {
+					cloned.ServerID = &nextServerID
+				} else {
+					cloned.ServerID = nil
+				}
+			}
+			if err := tx.Create(&cloned).Error; err != nil {
+				return err
+			}
+		}
+
+		for _, collection := range source.RAGCollections {
+			link := &models.ProjectRAGCollection{
+				ProjectID:       duplicated.ID,
+				RAGCollectionID: collection.ID,
+			}
+			if err := tx.Where(link).FirstOrCreate(link).Error; err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return s.GetProject(ctx, duplicatedProjectID)
+}
+
 func (s *Store) ListProjects(ctx context.Context) ([]models.Project, error) {
 	var projects []models.Project
 	err := s.db.WithContext(ctx).
@@ -380,6 +484,9 @@ func (s *Store) DeleteProject(ctx context.Context, projectID uint) error {
 		if err := tx.Where("project_id = ?", projectID).Delete(&models.AuditLog{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("project_id = ?", projectID).Delete(&models.PerformanceMetric{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("project_id = ?", projectID).Delete(&models.InstalledIntegration{}).Error; err != nil {
 			return err
 		}
@@ -410,6 +517,9 @@ func (s *Store) DeleteServer(ctx context.Context, serverID uint) error {
 			return err
 		}
 		if err := tx.Where("server_id = ?", serverID).Delete(&models.AuditLog{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("server_id = ?", serverID).Delete(&models.PerformanceMetric{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Delete(&models.MCPServer{}, serverID).Error; err != nil {
@@ -495,6 +605,10 @@ func (s *Store) CreateAuditLog(ctx context.Context, entry *models.AuditLog) erro
 	return s.db.WithContext(ctx).Create(entry).Error
 }
 
+func (s *Store) CreatePerformanceMetric(ctx context.Context, metric *models.PerformanceMetric) error {
+	return s.db.WithContext(ctx).Create(metric).Error
+}
+
 func (s *Store) CreateInstalledPackage(ctx context.Context, pkg *models.InstalledPackage) error {
 	return s.db.WithContext(ctx).Create(pkg).Error
 }
@@ -513,7 +627,9 @@ func (s *Store) GetInstalledPackageByCatalog(ctx context.Context, catalogItemID,
 
 func (s *Store) GetInstalledPackage(ctx context.Context, packageID uint) (*models.InstalledPackage, error) {
 	var pkg models.InstalledPackage
-	err := s.db.WithContext(ctx).First(&pkg, packageID).Error
+	err := s.db.WithContext(ctx).
+		Preload("ProjectInstances").
+		First(&pkg, packageID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -547,6 +663,10 @@ func (s *Store) UpdateInstalledPackage(ctx context.Context, pkg *models.Installe
 		}).Error
 }
 
+func (s *Store) DeleteInstalledPackage(ctx context.Context, packageID uint) error {
+	return s.db.WithContext(ctx).Delete(&models.InstalledPackage{}, packageID).Error
+}
+
 func (s *Store) CreateProjectPackageInstance(ctx context.Context, instance *models.ProjectPackageInstance) error {
 	return s.db.WithContext(ctx).Create(instance).Error
 }
@@ -578,4 +698,41 @@ func (s *Store) ListAuditLogs(ctx context.Context, projectID *uint, limit int) (
 		Order("id asc").
 		Find(&logs).Error
 	return logs, err
+}
+
+func (s *Store) ListPerformanceMetrics(ctx context.Context, projectID *uint, since time.Time) ([]models.PerformanceMetric, error) {
+	var metrics []models.PerformanceMetric
+	query := s.db.WithContext(ctx).
+		Model(&models.PerformanceMetric{}).
+		Where("created_at >= ?", since.UTC()).
+		Order("created_at asc")
+	if projectID != nil {
+		query = query.Where("project_id = ?", *projectID)
+	}
+	err := query.Find(&metrics).Error
+	return metrics, err
+}
+
+func (s *Store) ListRecentPerformanceFailures(
+	ctx context.Context,
+	projectID *uint,
+	since time.Time,
+	limit int,
+) ([]models.PerformanceMetric, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 10
+	}
+
+	var metrics []models.PerformanceMetric
+	query := s.db.WithContext(ctx).
+		Model(&models.PerformanceMetric{}).
+		Where("created_at >= ?", since.UTC()).
+		Where("success = ?", false).
+		Order("created_at desc").
+		Limit(limit)
+	if projectID != nil {
+		query = query.Where("project_id = ?", *projectID)
+	}
+	err := query.Find(&metrics).Error
+	return metrics, err
 }

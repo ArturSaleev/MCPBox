@@ -1,12 +1,13 @@
 export type Language = 'en' | 'ru';
 
-type Dictionary = {
+export type Dictionary = {
   labels: {
     appTitle: string;
     controlCenter: string;
     appDescription: string;
     projects: string;
     createProject: string;
+    duplicateProject: string;
     name: string;
     description: string;
     projectOverview: string;
@@ -46,6 +47,8 @@ type Dictionary = {
     value: string;
     logs: string;
     auditLogs: string;
+    performance: string;
+    timeWindow: string;
     refresh: string;
     launchOllama: string;
     ollamaModel: string;
@@ -59,14 +62,29 @@ type Dictionary = {
     unknownActor: string;
     requestControl: string;
     filterByProject: string;
+    last5Minutes: string;
+    lastHour: string;
+    last24Hours: string;
     allProjects: string;
     currentProjectOnly: string;
     activityOverview: string;
     hottestProject: string;
     hottestServer: string;
     requests: string;
+    errors: string;
+    avgLatency: string;
+    p95Latency: string;
+    trafficIn: string;
+    trafficOut: string;
+    errorRate: string;
     noActivity: string;
     consoleFeed: string;
+    requestVolume: string;
+    latencyTrend: string;
+    topSlowServers: string;
+    topErrorServers: string;
+    topTrafficServers: string;
+    recentFailures: string;
     info: string;
     serverInfo: string;
     capabilities: string;
@@ -99,23 +117,35 @@ type Dictionary = {
     installed: string;
     lastSync: string;
     externalManifestUrl: string;
+    manifestSource: string;
+    serverSource: string;
+    localFileSource: string;
+    chooseFile: string;
     syncCatalog: string;
     allCategories: string;
     command: string;
     endpoint: string;
+    runtime: string;
+    source: string;
+    installModel: string;
+    systemDependencies: string;
     docs: string;
     website: string;
     generalCategory: string;
     mcpDiscovery: string;
     installPackage: string;
+    uninstallPackage: string;
     packageInstalled: string;
     packageNotInstalled: string;
     addToProject: string;
+    installFirst: string;
     addedToProject: string;
     notInProject: string;
     knowledgeBase: string;
     collections: string;
     create: string;
+    actions: string;
+    edit: string;
     createCollection: string;
     connect: string;
     delete: string;
@@ -154,6 +184,7 @@ type Dictionary = {
     serverCount: (count: number) => string;
     runningCount: (count: number) => string;
     createProjectError: string;
+    duplicateProjectError: string;
     loadProjectsError: string;
     addServerError: string;
     startServerError: string;
@@ -161,8 +192,11 @@ type Dictionary = {
     setProjectPausedError: string;
     setServerEnabledError: string;
     logsDescription: string;
+    performanceDescription: string;
     loadingLogs: string;
+    loadingMetrics: string;
     noLogs: string;
+    noMetrics: string;
     projectTag: (id: number) => string;
     serverTag: (id: number) => string;
     consoleDescription: string;
@@ -172,8 +206,12 @@ type Dictionary = {
     checkServerError: string;
     requestFailed: (status: number) => string;
     marketDescription: string;
+    searchCatalogPlaceholder: string;
+    catalogResultsSummary: (visible: number, total: number) => string;
     notSynced: string;
     advancedModeEnabled: string;
+    localCatalogFileSelected: (name: string) => string;
+    localCatalogFileMissing: string;
     selectProjectBeforeInstall: string;
     noDescriptionProvided: string;
     upstreamAuthNotice: string;
@@ -190,20 +228,40 @@ type Dictionary = {
     loadPackagesError: string;
     installPackageError: string;
     addPackageToProjectError: string;
+    uninstallPackageError: string;
+    catalogInstallAdded: (name: string) => string;
+    catalogHealthCheckPassed: (name: string) => string;
+    catalogHealthCheckFailed: (name: string) => string;
+    catalogHealthCheckFailedWithReason: (name: string, reason: string) => string;
     addPackageDialogTitle: (name: string) => string;
     addPackageDialogFallbackTitle: string;
     addPackageDialogDescription: string;
-    launchOllamaError: string;
+    sharedInstallMode: string;
+    projectInstallMode: string;
+    multiProjectSupported: string;
+    singleProjectOnly: string;
+    packageUsageCount: (count: number) => string;
+    packageInUseCannotUninstall: string;
+    systemDependencyVersion: (name: string, version: string) => string;
+    systemDependencyRequired: (name: string) => string;
+    envSchemaDescription: string;
+      launchOllamaError: string;
     noOllamaModels: string;
     knowledgeBaseHeroTitle: string;
     knowledgeBaseHeroDescription: string;
     createKnowledgeBaseTitle: string;
     createKnowledgeBaseDescription: string;
+    editKnowledgeBaseDescription: string;
     collectionIdLabel: string;
     collectionIdPlaceholder: string;
     collectionNamePlaceholder: string;
     indexPathLabel: string;
     indexPathPlaceholder: string;
+    sourceFolderTitle: string;
+    sourceFolderPlaceholder: string;
+    autoReindexTitle: string;
+    autoReindexDescription: string;
+    autoReindexBadge: string;
     noKnowledgeBasesCreated: string;
     indexFolderTitle: string;
     indexFolderDescription: string;
@@ -227,6 +285,8 @@ type Dictionary = {
     mcpToolReadyOutro: string;
     otherConnectionOptions: string;
     otherConnectionOptionsDescription: string;
+    duplicateProjectDescription: string;
+    duplicateProjectNamePlaceholder: string;
   };
 };
 
@@ -241,6 +301,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       appDescription: 'Unified service for managing MCP servers.',
       projects: 'Projects',
       createProject: 'Create Project',
+      duplicateProject: 'Duplicate project',
       name: 'Name',
       description: 'Description',
       projectOverview: 'Project Overview',
@@ -280,6 +341,8 @@ export const dictionaries: Record<Language, Dictionary> = {
       value: 'Value',
       logs: 'Logs',
       auditLogs: 'Audit Logs',
+      performance: 'Performance',
+      timeWindow: 'Time window',
       refresh: 'Refresh',
       launchOllama: 'Launch Ollama',
       ollamaModel: 'Ollama model',
@@ -293,14 +356,29 @@ export const dictionaries: Record<Language, Dictionary> = {
       unknownActor: 'unknown actor',
       requestControl: 'Request control',
       filterByProject: 'Filter by project',
+      last5Minutes: 'Last 5 minutes',
+      lastHour: 'Last hour',
+      last24Hours: 'Last 24 hours',
       allProjects: 'All projects',
       currentProjectOnly: 'Current project only',
       activityOverview: 'Activity overview',
       hottestProject: 'Hottest project',
       hottestServer: 'Hottest server',
       requests: 'requests',
+      errors: 'Errors',
+      avgLatency: 'Avg latency',
+      p95Latency: 'P95 latency',
+      trafficIn: 'Traffic in',
+      trafficOut: 'Traffic out',
+      errorRate: 'Error rate',
       noActivity: 'No activity yet',
       consoleFeed: 'Console feed',
+      requestVolume: 'Request volume',
+      latencyTrend: 'Latency trend',
+      topSlowServers: 'Top slow servers',
+      topErrorServers: 'Top error servers',
+      topTrafficServers: 'Top traffic servers',
+      recentFailures: 'Recent failures',
       info: 'Info',
       serverInfo: 'Server Info',
       capabilities: 'Capabilities',
@@ -329,27 +407,39 @@ export const dictionaries: Record<Language, Dictionary> = {
       market: 'Market',
       integrations: 'Integrations',
       catalog: 'Catalog',
-      catalogItems: 'Catalog items',
+      catalogItems: 'Items',
       installed: 'Installed',
       lastSync: 'Last sync',
       externalManifestUrl: 'External manifest URL',
+      manifestSource: 'Catalog source',
+      serverSource: 'Server',
+      localFileSource: 'Local file',
+      chooseFile: 'Choose file',
       syncCatalog: 'Sync catalog',
       allCategories: 'All categories',
       command: 'Command',
       endpoint: 'Endpoint',
+      runtime: 'Runtime',
+      source: 'Source',
+      installModel: 'Install model',
+      systemDependencies: 'System dependencies',
       docs: 'Docs',
       website: 'Website',
       generalCategory: 'general',
       mcpDiscovery: 'mcp discovery',
       installPackage: 'Install package',
+      uninstallPackage: 'Uninstall package',
       packageInstalled: 'Package installed',
       packageNotInstalled: 'Package not installed',
       addToProject: 'Add to project',
+      installFirst: 'Install package first',
       addedToProject: 'Added to project',
       notInProject: 'Not in project',
       knowledgeBase: 'Knowledge Base',
       collections: 'Collections',
       create: 'Create',
+      actions: 'Actions',
+      edit: 'Edit',
       createCollection: 'Create Collection',
       connect: 'Connect',
       delete: 'Delete',
@@ -375,7 +465,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       overviewFallbackDescription: 'Workspace group for MCP clients and tools.',
       connectionDescription:
         'All clients in this workspace connect through the project token and can access all enabled MCP servers in the project.',
-      connectionWarning: (token: string) => `To use /mcp/${token}, add and enable at least one MCP server.`,
+      connectionWarning: (token: string) => `To use /mcp/${token}, add and enable at least one MCP server or connect a knowledge base.`,
       addServerDescription:
         'Add one or more MCP servers to expose them through the shared project endpoint.',
       serverNamePlaceholder: 'Filesystem Server',
@@ -393,6 +483,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       serverCount: (count: number) => `${count} servers`,
       runningCount: (count: number) => `${count} running`,
       createProjectError: 'Failed to create project',
+      duplicateProjectError: 'Failed to duplicate project',
       loadProjectsError: 'Failed to load projects',
       addServerError: 'Failed to add server',
       startServerError: 'Failed to start server',
@@ -400,8 +491,13 @@ export const dictionaries: Record<Language, Dictionary> = {
       setProjectPausedError: 'Failed to update project state',
       setServerEnabledError: 'Failed to update server state',
       logsDescription: 'Request monitoring and control actions across projects and MCP servers.',
+      performanceDescription:
+        'Latency, failures, and traffic across MCP servers without leaving the logs screen.',
       loadingLogs: 'Loading logs...',
+      loadingMetrics: 'Loading metrics...',
       noLogs: 'No audit logs yet.',
+      noMetrics:
+        'No performance data yet. Metrics will appear after requests start flowing through MCPBox.',
       projectTag: (id: number) => `project #${id}`,
       serverTag: (id: number) => `server #${id}`,
       consoleDescription: 'Compact event stream for requests, connects, and control actions.',
@@ -414,8 +510,12 @@ export const dictionaries: Record<Language, Dictionary> = {
       requestFailed: (status: number) => `Request failed with status ${status}`,
       marketDescription:
         'Sync the external integration manifest into SQLite and install selected items into the current project as linked MCP servers.',
+      searchCatalogPlaceholder: 'Search integrations, tags, runtime, package',
+      catalogResultsSummary: (visible: number, total: number) => `${visible} of ${total} integrations shown`,
       notSynced: 'Not synced',
       advancedModeEnabled: 'Advanced mode enabled. Press Cmd/Ctrl + Shift + U to hide.',
+      localCatalogFileSelected: (name: string) => `Selected file: ${name}`,
+      localCatalogFileMissing: 'Choose a local catalog JSON file before syncing.',
       selectProjectBeforeInstall:
         'Create or select a project before installing integrations.',
       noDescriptionProvided: 'No description provided.',
@@ -435,10 +535,24 @@ export const dictionaries: Record<Language, Dictionary> = {
       loadPackagesError: 'Failed to load packages',
       installPackageError: 'Failed to install package',
       addPackageToProjectError: 'Failed to add package to project',
+      uninstallPackageError: 'Failed to uninstall package',
+      catalogInstallAdded: (name: string) => `${name} was added to the project.`,
+      catalogHealthCheckPassed: (name: string) => `${name} was added and passed the health check.`,
+      catalogHealthCheckFailed: (name: string) => `${name} was added, but the health check failed.`,
+      catalogHealthCheckFailedWithReason: (name: string, reason: string) => `${name} was added, but the health check failed: ${reason}`,
       addPackageDialogTitle: (name: string) => `Add ${name} to project`,
       addPackageDialogFallbackTitle: 'Add package to project',
       addPackageDialogDescription:
         'Choose a project and configure the selected package instance before adding it.',
+      sharedInstallMode: 'Shared package install',
+      projectInstallMode: 'Project-scoped install',
+      multiProjectSupported: 'Reusable across multiple projects',
+      singleProjectOnly: 'Best for a single project',
+      packageUsageCount: (count: number) => `Used in ${count} projects`,
+      packageInUseCannotUninstall: 'This package is still connected to one or more projects.',
+      systemDependencyVersion: (name: string, version: string) => `${name} ${version}+`,
+      systemDependencyRequired: (name: string) => `${name} required`,
+      envSchemaDescription: 'These values will be passed to the server process as environment variables.',
       launchOllamaError: 'Failed to launch Ollama terminal.',
       noOllamaModels: 'No local Ollama models found.',
       knowledgeBaseHeroTitle: 'Global Knowledge Collections',
@@ -446,16 +560,24 @@ export const dictionaries: Record<Language, Dictionary> = {
         'Create reusable collections once, index local folders, and then attach them to one or many projects. Supported formats include code, text, CSV, XLSX, DOCX, PPTX, and text-based PDF.',
       createKnowledgeBaseTitle: 'Create Knowledge Base',
       createKnowledgeBaseDescription:
-        'Add a global collection that can later be connected to one or many projects. You can index code, text, spreadsheets, Office documents, and text-based PDFs.',
+        'Add a global collection, choose its source folder right away, and MCPBox will index it immediately. You can index code, text, spreadsheets, Office documents, and text-based PDFs.',
+      editKnowledgeBaseDescription:
+        'Update the collection name, source folder, or auto reindex setting. Saving will rebuild the index from the selected folder.',
       collectionIdLabel: 'Collection ID',
       collectionIdPlaceholder: 'crm_gym',
       collectionNamePlaceholder: 'CRM Gym Codebase',
       indexPathLabel: 'Index path',
       indexPathPlaceholder: '.mcpbox/rag/crm_gym.bleve',
+      sourceFolderTitle: 'Source Folder',
+      sourceFolderPlaceholder: '/Users/artur/projects/crm-gym',
+      autoReindexTitle: 'Reindex every 10 minutes',
+      autoReindexDescription:
+        'When enabled, MCPBox will rebuild this collection automatically every 10 minutes while the app is running.',
+      autoReindexBadge: 'Auto reindex: every 10 min',
       noKnowledgeBasesCreated: 'No knowledge bases created yet.',
       indexFolderTitle: 'Source Folder',
       indexFolderDescription:
-        'Choose the local folder whose files should be added to this knowledge base. Supported formats: code, text, CSV, XLSX, DOCX, PPTX, and text-based PDF.',
+        'Choose the local folder whose files should be added to this knowledge base. System folders like node_modules, vendor, build artifacts, and Python virtual environments are skipped automatically.',
       indexFolderPlaceholder: '/path/to/project',
       supportedFormatsLabel: 'Supported',
       supportedFormatsValue: 'Code, Text, CSV, XLSX, DOCX, PPTX, PDF (text-based)',
@@ -483,6 +605,9 @@ export const dictionaries: Record<Language, Dictionary> = {
       otherConnectionOptions: 'Other connection options',
       otherConnectionOptionsDescription:
         'Use these addresses for LAN access or when the default local URL is not the one you need.',
+      duplicateProjectDescription:
+        'Create a full copy of this project with a new name, token, servers, integrations, package links, and connected knowledge bases.',
+      duplicateProjectNamePlaceholder: 'Client Workspace Copy',
     },
   },
   ru: {
@@ -492,6 +617,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       appDescription: 'Единый сервис для управления MCP-серверами.',
       projects: 'Проекты',
       createProject: 'Создать проект',
+      duplicateProject: 'Дублировать проект',
       name: 'Название',
       description: 'Описание',
       projectOverview: 'Обзор проекта',
@@ -531,6 +657,8 @@ export const dictionaries: Record<Language, Dictionary> = {
       value: 'Значение',
       logs: 'Логи',
       auditLogs: 'Журнал аудита',
+      performance: 'Производительность',
+      timeWindow: 'Период',
       refresh: 'Обновить',
       launchOllama: 'Запустить Ollama',
       ollamaModel: 'Модель Ollama',
@@ -544,14 +672,29 @@ export const dictionaries: Record<Language, Dictionary> = {
       unknownActor: 'неизвестный источник',
       requestControl: 'Контроль запросов',
       filterByProject: 'Фильтр по проекту',
+      last5Minutes: 'Последние 5 минут',
+      lastHour: 'Последний час',
+      last24Hours: 'Последние 24 часа',
       allProjects: 'Все проекты',
       currentProjectOnly: 'Только текущий проект',
       activityOverview: 'Сводка активности',
       hottestProject: 'Самый активный проект',
       hottestServer: 'Самый активный сервер',
       requests: 'запросов',
+      errors: 'Ошибки',
+      avgLatency: 'Средняя задержка',
+      p95Latency: 'P95 задержки',
+      trafficIn: 'Входящий трафик',
+      trafficOut: 'Исходящий трафик',
+      errorRate: 'Доля ошибок',
       noActivity: 'Активности пока нет',
       consoleFeed: 'Поток событий',
+      requestVolume: 'Объем запросов',
+      latencyTrend: 'Динамика задержки',
+      topSlowServers: 'Самые медленные серверы',
+      topErrorServers: 'Серверы с ошибками',
+      topTrafficServers: 'Самые загруженные серверы',
+      recentFailures: 'Последние сбои',
       info: 'Инфо',
       serverInfo: 'Информация о сервере',
       capabilities: 'Возможности',
@@ -580,27 +723,39 @@ export const dictionaries: Record<Language, Dictionary> = {
       market: 'Маркет',
       integrations: 'Интеграции',
       catalog: 'Каталог',
-      catalogItems: 'Элементы каталога',
+      catalogItems: 'Элементы',
       installed: 'Установлено',
       lastSync: 'Последняя синхронизация',
       externalManifestUrl: 'URL внешнего манифеста',
+      manifestSource: 'Источник каталога',
+      serverSource: 'Сервер',
+      localFileSource: 'Локальный файл',
+      chooseFile: 'Выбрать файл',
       syncCatalog: 'Синхронизировать каталог',
       allCategories: 'Все категории',
       command: 'Команда',
       endpoint: 'Endpoint',
+      runtime: 'Runtime',
+      source: 'Source',
+      installModel: 'Модель установки',
+      systemDependencies: 'Системные зависимости',
       docs: 'Документация',
       website: 'Сайт',
       generalCategory: 'общее',
       mcpDiscovery: 'mcp discovery',
       installPackage: 'Установить пакет',
+      uninstallPackage: 'Удалить пакет',
       packageInstalled: 'Пакет установлен',
       packageNotInstalled: 'Пакет не установлен',
       addToProject: 'Добавить в проект',
+      installFirst: 'Сначала установить пакет',
       addedToProject: 'Добавлено в проект',
       notInProject: 'Не в проекте',
       knowledgeBase: 'База знаний',
       collections: 'Коллекции',
       create: 'Создать',
+      actions: 'Действия',
+      edit: 'Редактировать',
       createCollection: 'Создать коллекцию',
       connect: 'Подключить',
       delete: 'Удалить',
@@ -626,7 +781,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       overviewFallbackDescription: 'Логическая группа для MCP-клиентов и инструментов.',
       connectionDescription:
         'Все клиенты этого workspace подключаются через project token и получают доступ ко всем включённым MCP-серверам проекта.',
-      connectionWarning: (token: string) => `Чтобы использовать /mcp/${token}, добавьте и включите хотя бы один MCP-сервер.`,
+      connectionWarning: (token: string) => `Чтобы использовать /mcp/${token}, добавьте и включите хотя бы один MCP-сервер или подключите базу знаний.`,
       addServerDescription:
         'Добавьте один или несколько MCP-серверов, чтобы опубликовать их через общий endpoint проекта.',
       serverNamePlaceholder: 'Filesystem Server',
@@ -644,6 +799,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       serverCount: (count: number) => `${count} серверов`,
       runningCount: (count: number) => `${count} запущено`,
       createProjectError: 'Не удалось создать проект',
+      duplicateProjectError: 'Не удалось продублировать проект',
       loadProjectsError: 'Не удалось загрузить проекты',
       addServerError: 'Не удалось добавить сервер',
       startServerError: 'Не удалось запустить сервер',
@@ -651,8 +807,13 @@ export const dictionaries: Record<Language, Dictionary> = {
       setProjectPausedError: 'Не удалось обновить состояние проекта',
       setServerEnabledError: 'Не удалось обновить состояние сервера',
       logsDescription: 'Мониторинг запросов и действий управления по проектам и MCP-серверам.',
+      performanceDescription:
+        'Задержки, ошибки и трафик по MCP-серверам прямо на текущем экране логов.',
       loadingLogs: 'Загружаю логи...',
+      loadingMetrics: 'Загружаю метрики...',
       noLogs: 'Записей аудита пока нет.',
+      noMetrics:
+        'Данных по производительности пока нет. Метрики появятся, когда через MCPBox пойдут запросы.',
       projectTag: (id: number) => `проект #${id}`,
       serverTag: (id: number) => `сервер #${id}`,
       consoleDescription:
@@ -666,9 +827,13 @@ export const dictionaries: Record<Language, Dictionary> = {
       requestFailed: (status: number) => `Запрос завершился со статусом ${status}`,
       marketDescription:
         'Синхронизируйте внешний манифест интеграций в SQLite и устанавливайте выбранные элементы в текущий проект как связанные MCP-серверы.',
+      searchCatalogPlaceholder: 'Поиск по интеграциям, тегам, runtime и package',
+      catalogResultsSummary: (visible: number, total: number) => `Показано ${visible} из ${total} интеграций`,
       notSynced: 'Не синхронизировано',
       advancedModeEnabled:
         'Расширенный режим включён. Нажмите Cmd/Ctrl + Shift + U, чтобы скрыть поле.',
+      localCatalogFileSelected: (name: string) => `Выбран файл: ${name}`,
+      localCatalogFileMissing: 'Сначала выберите локальный JSON-файл каталога.',
       selectProjectBeforeInstall:
         'Выберите проект в боковой панели перед установкой интеграций.',
       noDescriptionProvided: 'Описание отсутствует.',
@@ -689,10 +854,24 @@ export const dictionaries: Record<Language, Dictionary> = {
       loadPackagesError: 'Не удалось загрузить пакеты',
       installPackageError: 'Не удалось установить пакет',
       addPackageToProjectError: 'Не удалось добавить пакет в проект',
+      uninstallPackageError: 'Не удалось удалить пакет',
+      catalogInstallAdded: (name: string) => `${name} добавлен в проект.`,
+      catalogHealthCheckPassed: (name: string) => `${name} добавлен и успешно прошел health-check.`,
+      catalogHealthCheckFailed: (name: string) => `${name} добавлен, но health-check завершился ошибкой.`,
+      catalogHealthCheckFailedWithReason: (name: string, reason: string) => `${name} добавлен, но health-check завершился ошибкой: ${reason}`,
       addPackageDialogTitle: (name: string) => `Добавить ${name} в проект`,
       addPackageDialogFallbackTitle: 'Добавить пакет в проект',
       addPackageDialogDescription:
         'Настройте выбранный экземпляр пакета перед добавлением в текущий проект.',
+      sharedInstallMode: 'Общая установка пакета',
+      projectInstallMode: 'Установка в рамках проекта',
+      multiProjectSupported: 'Можно переиспользовать в нескольких проектах',
+      singleProjectOnly: 'Лучше подходит для одного проекта',
+      packageUsageCount: (count: number) => `Используется в ${count} проектах`,
+      packageInUseCannotUninstall: 'Этот пакет всё ещё подключён хотя бы к одному проекту.',
+      systemDependencyVersion: (name: string, version: string) => `${name} ${version}+`,
+      systemDependencyRequired: (name: string) => `Нужен ${name}`,
+      envSchemaDescription: 'Эти значения будут переданы процессу сервера как переменные окружения.',
       launchOllamaError: 'Не удалось запустить терминал Ollama.',
       noOllamaModels: 'Локальные модели Ollama не найдены.',
       knowledgeBaseHeroTitle: 'Глобальные коллекции знаний',
@@ -700,16 +879,24 @@ export const dictionaries: Record<Language, Dictionary> = {
         'Создавайте переиспользуемые коллекции один раз, индексируйте локальные папки и подключайте их к одному или нескольким проектам. Поддерживаются код, текст, CSV, XLSX, DOCX, PPTX и PDF с текстовым слоем.',
       createKnowledgeBaseTitle: 'Создать базу знаний',
       createKnowledgeBaseDescription:
-        'Добавьте глобальную коллекцию, которую потом можно будет подключать к одному или нескольким проектам. Можно индексировать код, текст, таблицы, офисные документы и PDF с текстовым слоем.',
+        'Добавьте глобальную коллекцию, сразу выберите папку с файлами, и MCPBox сразу её проиндексирует. Можно индексировать код, текст, таблицы, офисные документы и PDF с текстовым слоем.',
+      editKnowledgeBaseDescription:
+        'Обновите название, папку с файлами или настройку автопереиндексации. При сохранении индекс будет пересобран из выбранной папки.',
       collectionIdLabel: 'ID коллекции',
       collectionIdPlaceholder: 'crm_gym',
       collectionNamePlaceholder: 'CRM Gym Codebase',
       indexPathLabel: 'Путь индекса',
       indexPathPlaceholder: '.mcpbox/rag/crm_gym.bleve',
+      sourceFolderTitle: 'Папка с файлами',
+      sourceFolderPlaceholder: '/Users/artur/projects/crm-gym',
+      autoReindexTitle: 'Переиндексировать каждые 10 минут',
+      autoReindexDescription:
+        'Если включено, MCPBox будет автоматически пересобирать эту коллекцию каждые 10 минут, пока приложение запущено.',
+      autoReindexBadge: 'Автопереиндексация: каждые 10 мин',
       noKnowledgeBasesCreated: 'Базы знаний еще не созданы.',
       indexFolderTitle: 'Папка с файлами',
       indexFolderDescription:
-        'Укажите локальную папку, файлы из которой нужно добавить в эту базу знаний. Поддерживаются код, текст, CSV, XLSX, DOCX, PPTX и PDF с текстовым слоем.',
+        'Укажите локальную папку, файлы из которой нужно добавить в эту базу знаний. Системные папки вроде node_modules, vendor, build-артефактов и Python virtual environment будут пропущены автоматически.',
       indexFolderPlaceholder: '/path/to/project',
       supportedFormatsLabel: 'Поддерживается',
       supportedFormatsValue: 'Код, Текст, CSV, XLSX, DOCX, PPTX, PDF (с текстовым слоем)',
@@ -737,6 +924,9 @@ export const dictionaries: Record<Language, Dictionary> = {
       otherConnectionOptions: 'Другие варианты подключения',
       otherConnectionOptionsDescription:
         'Используйте эти адреса для подключения по локальной сети или если нужен не основной локальный URL.',
+      duplicateProjectDescription:
+        'Создать полную копию этого проекта с новым именем, token, серверами, интеграциями, package links и подключёнными базами знаний.',
+      duplicateProjectNamePlaceholder: 'Копия Client Workspace',
     },
   },
 };

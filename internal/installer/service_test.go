@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,6 +52,11 @@ type fakeRunner struct {
 	err   error
 }
 
+type fakeOutput struct {
+	byCommand map[string][]byte
+	err       error
+}
+
 type runnerCall struct {
 	workdir string
 	name    string
@@ -60,6 +66,20 @@ type runnerCall struct {
 func (f *fakeRunner) Run(_ context.Context, workdir, name string, args ...string) error {
 	f.calls = append(f.calls, runnerCall{workdir: workdir, name: name, args: append([]string{}, args...)})
 	return f.err
+}
+
+func (f fakeOutput) Run(_ context.Context, name string, args ...string) ([]byte, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	key := name
+	if len(args) > 0 {
+		key += " " + args[0]
+	}
+	if output, ok := f.byCommand[key]; ok {
+		return output, nil
+	}
+	return []byte("version 0.0.0"), nil
 }
 
 func TestInstallCatalogPackageNPM(t *testing.T) {
@@ -73,6 +93,7 @@ func TestInstallCatalogPackageNPM(t *testing.T) {
 		runner:   runner,
 		lookPath: func(file string) (string, error) { return file, nil },
 		mkdirAll: func(path string, perm os.FileMode) error { return nil },
+		output:   fakeOutput{}.Run,
 		now:      func() time.Time { return time.Date(2026, 5, 19, 12, 0, 0, 0, time.UTC) },
 	}
 
@@ -118,6 +139,7 @@ func TestInstallCatalogPackageFailsWhenRuntimeMissing(t *testing.T) {
 		runner:   &fakeRunner{},
 		lookPath: func(file string) (string, error) { return "", errors.New("missing") },
 		mkdirAll: func(path string, perm os.FileMode) error { return nil },
+		output:   fakeOutput{}.Run,
 		now:      func() time.Time { return time.Now().UTC() },
 	}
 
@@ -171,6 +193,7 @@ func TestInstallCatalogPackageReusesInstalledRecord(t *testing.T) {
 		runner:   &fakeRunner{},
 		lookPath: func(file string) (string, error) { return file, nil },
 		mkdirAll: func(path string, perm os.FileMode) error { return nil },
+		output:   fakeOutput{}.Run,
 		now:      func() time.Time { return time.Now().UTC() },
 	}
 
@@ -187,5 +210,172 @@ func TestInstallCatalogPackageReusesInstalledRecord(t *testing.T) {
 	}
 	if pkg.ID != 1 {
 		t.Fatalf("pkg.ID = %d, want 1", pkg.ID)
+	}
+}
+
+func TestInstallCatalogPackageFailsWhenSystemDependencyMissing(t *testing.T) {
+	t.Parallel()
+
+	store := &memoryStore{}
+	service := &Service{
+		store:   store,
+		rootDir: filepath.Join(t.TempDir(), "packages"),
+		runner:  &fakeRunner{},
+		lookPath: func(file string) (string, error) {
+			if file == "git" {
+				return "", errors.New("missing")
+			}
+			return file, nil
+		},
+		mkdirAll: func(path string, perm os.FileMode) error { return nil },
+		output:   fakeOutput{}.Run,
+		now:      func() time.Time { return time.Now().UTC() },
+	}
+
+	item := models.IntegrationCatalogItem{
+		ID:                     "git-server",
+		Name:                   "Git Server",
+		Version:                "1.0.0",
+		Transport:              models.ServerTransportSTDIO,
+		RuntimeType:            "node",
+		SourceType:             "npm",
+		SourcePackage:          "@example/git-mcp",
+		InstallStrategy:        "npm",
+		SystemDependenciesJSON: `[{"executable":"git","min_version":"2.40.0","critical":true,"install_hint":"Install Git first."}]`,
+	}
+
+	_, err := service.InstallCatalogPackage(context.Background(), item)
+	if err == nil {
+		t.Fatal("InstallCatalogPackage() error = nil, want system dependency failure")
+	}
+	if !strings.Contains(err.Error(), `"git" is not installed`) {
+		t.Fatalf("err = %q, want missing git message", err)
+	}
+}
+
+func TestInstallCatalogPackageFailsWhenSystemDependencyVersionTooLow(t *testing.T) {
+	t.Parallel()
+
+	store := &memoryStore{}
+	service := &Service{
+		store:    store,
+		rootDir:  filepath.Join(t.TempDir(), "packages"),
+		runner:   &fakeRunner{},
+		lookPath: func(file string) (string, error) { return file, nil },
+		mkdirAll: func(path string, perm os.FileMode) error { return nil },
+		output: fakeOutput{
+			byCommand: map[string][]byte{
+				"git --version": []byte("git version 2.39.1"),
+			},
+		}.Run,
+		now: func() time.Time { return time.Now().UTC() },
+	}
+
+	item := models.IntegrationCatalogItem{
+		ID:                     "git-server",
+		Name:                   "Git Server",
+		Version:                "1.0.0",
+		Transport:              models.ServerTransportSTDIO,
+		RuntimeType:            "node",
+		SourceType:             "npm",
+		SourcePackage:          "@example/git-mcp",
+		InstallStrategy:        "npm",
+		SystemDependenciesJSON: `[{"executable":"git","min_version":"2.40.0","critical":true,"install_hint":"Upgrade Git."}]`,
+	}
+
+	_, err := service.InstallCatalogPackage(context.Background(), item)
+	if err == nil {
+		t.Fatal("InstallCatalogPackage() error = nil, want version failure")
+	}
+	if !strings.Contains(err.Error(), `version 2.39.1 is lower than required 2.40.0`) {
+		t.Fatalf("err = %q, want version mismatch message", err)
+	}
+}
+
+func TestInstallCatalogPackageUsesPython3WhenPythonMissing(t *testing.T) {
+	t.Parallel()
+
+	store := &memoryStore{}
+	runner := &fakeRunner{}
+	service := &Service{
+		store:   store,
+		rootDir: filepath.Join(t.TempDir(), "packages"),
+		runner:  runner,
+		lookPath: func(file string) (string, error) {
+			if file == "python" {
+				return "", errors.New("missing")
+			}
+			if file == "python3" {
+				return "python3", nil
+			}
+			return file, nil
+		},
+		mkdirAll: func(path string, perm os.FileMode) error { return nil },
+		output:   fakeOutput{}.Run,
+		now:      func() time.Time { return time.Now().UTC() },
+	}
+
+	item := models.IntegrationCatalogItem{
+		ID:              "sqlite",
+		Name:            "SQLite MCP",
+		Version:         "latest",
+		Transport:       models.ServerTransportSTDIO,
+		RuntimeType:     "python",
+		SourceType:      "python",
+		SourcePackage:   "mcp-server-sqlite",
+		InstallStrategy: "python_venv",
+	}
+
+	_, err := service.InstallCatalogPackage(context.Background(), item)
+	if err != nil {
+		t.Fatalf("InstallCatalogPackage() error = %v", err)
+	}
+	if len(runner.calls) == 0 {
+		t.Fatal("runner.calls = 0, want venv creation call")
+	}
+	if runner.calls[0].name != "python3" {
+		t.Fatalf("runner.calls[0].name = %q, want python3", runner.calls[0].name)
+	}
+}
+
+func TestInstallCatalogPackageDockerPull(t *testing.T) {
+	t.Parallel()
+
+	store := &memoryStore{}
+	runner := &fakeRunner{}
+	service := &Service{
+		store:    store,
+		rootDir:  filepath.Join(t.TempDir(), "packages"),
+		runner:   runner,
+		lookPath: func(file string) (string, error) { return file, nil },
+		mkdirAll: func(path string, perm os.FileMode) error { return nil },
+		output:   fakeOutput{}.Run,
+		now:      func() time.Time { return time.Now().UTC() },
+	}
+
+	item := models.IntegrationCatalogItem{
+		ID:              "redis",
+		Name:            "Redis MCP",
+		Version:         "latest",
+		Transport:       models.ServerTransportSTDIO,
+		RuntimeType:     "docker",
+		SourceType:      "docker",
+		SourcePackage:   "ghcr.io/example/redis-mcp:latest",
+		InstallStrategy: "docker_pull",
+	}
+
+	_, err := service.InstallCatalogPackage(context.Background(), item)
+	if err != nil {
+		t.Fatalf("InstallCatalogPackage() error = %v", err)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("len(runner.calls) = %d, want 1", len(runner.calls))
+	}
+	call := runner.calls[0]
+	if call.name != "docker" {
+		t.Fatalf("call.name = %q, want docker", call.name)
+	}
+	if len(call.args) != 2 || call.args[0] != "pull" || call.args[1] != "ghcr.io/example/redis-mcp:latest" {
+		t.Fatalf("call.args = %#v", call.args)
 	}
 }

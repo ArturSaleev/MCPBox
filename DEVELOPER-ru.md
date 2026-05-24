@@ -16,7 +16,7 @@ MCPBox — это control plane на Go для MCP-серверов.
 
 Сейчас MCPBox ещё не:
 - multi-user платформой с auth и ролями
-- полноценной observability-платформой
+- полноценной observability-платформой, хотя теперь в нём уже есть базовые встроенные метрики по задержкам, ошибкам и трафику
 - распределённой системой оркестрации MCP между несколькими хостами
 
 ## Основная модель
@@ -25,6 +25,9 @@ MCPBox — это control plane на Go для MCP-серверов.
 - `MCP Server`: либо локальный `stdio` сервер, который запускает MCPBox, либо удалённый `HTTP streaming` сервер
 - `Catalog Item`: описание интеграции, синхронизированное из внешнего JSON manifest
 - `Installed Integration`: запись уровня проекта, которая связывает catalog item с конкретным `MCPServer`
+- `Installed Package`: переиспользуемый установленный runtime-пакет, который можно привязать к одному или нескольким проектам
+- `Project Package Instance`: связь уровня проекта между installed package и конкретным managed `MCPServer`
+- `Performance Metric`: лёгкая запись на один запрос, из которой строятся сводки по задержкам, ошибкам и трафику в экране логов
 
 Важное поведение:
 - у каждого проекта ровно один MCP URL
@@ -53,8 +56,14 @@ MCPBox — это control plane на Go для MCP-серверов.
 - enable/disable сервера
 - inspection локального сервера
 - проверка health при create, update, start и manual check
-- sync каталога из внешнего JSON manifest
+- sync каталога из внешнего JSON manifest или локально загруженного manifest-файла
 - хранение installed integrations рядом с обычными MCP servers
+- install/uninstall lifecycle пакетов с переиспользованием пакета между проектами
+- проверка системных зависимостей перед установкой пакета
+- manifest-driven обработка секретов, чтобы чувствительные значения уходили в env, а не оставались в видимых CLI args
+- manifest-driven post-install health checks
+- Docker runtime MVP для stdio-ориентированных container-backed catalog items
+- лёгкие performance metrics по числу запросов, ошибкам, задержкам и трафику
 - встроенный запуск Ollama через `github.com/mark3labs/mcphost/sdk`
 
 Примечание по Базе знаний:
@@ -69,12 +78,14 @@ MCPBox — это control plane на Go для MCP-серверов.
 - встроенный React admin UI
 - список проектов и project overview
 - модальный create-project flow
+- flow дублирования проекта с переименованием до создания
 - модальный add-server flow для `stdio` и `HTTP streaming`
-- вкладка Market для sync каталога и установки интеграций
+- вкладка Market для sync каталога, установки пакетов, удаления пакетов и add-to-project flow
 - отображение project MCP URL
 - start/stop локальных серверов
 - health status и ручное действие `Check`
 - audit log console с фильтрацией по проекту
+- встроенный performance dashboard внутри экрана логов
 - автообновляемый просмотр логов
 - `Info` modal для `stdio` серверов
 - определение статуса Ollama и выбор локальной модели
@@ -161,10 +172,34 @@ MCPBox умеет синхронизировать внешний catalog manife
 GET /api/catalog/items
 GET /api/catalog/items?enabled_only=1
 POST /api/catalog/sync
+GET /api/packages
+DELETE /api/packages/{id}
 POST /api/projects/{id}/integrations
 ```
 
 Установленный catalog item создаёт обычный project-linked `MCPServer`, поэтому основной project endpoint остаётся `/mcp/{project_token}` без отдельной transport-модели.
+
+Нюансы sync каталога:
+- `POST /api/catalog/sync` принимает либо удалённый `url`, либо `manifest_content` вместе с `file_name`
+- legacy URL каталога вроде `https://webeasy.kz/mcpbox/catalog.json` нормализуются в `https://mcpbox.sh/catalog.json`
+- ошибки sync пишутся и в UI, и в audit log
+
+Нюансы manifest-контракта:
+- `icon_url` поддерживается в catalog cards и dialog'ах
+- `system_dependencies` могут блокировать install, если не хватает бинарников вроде `git`, `psql` или `docker`
+- `default_env` можно передавать как объект или как массив пар `{ key, value }`
+- `env_schema` описывает env-переменные для install/add-to-project dialog, включая `secret: true`
+- config fields тоже могут объявлять `secret: true` и `env_var`, чтобы MCPBox сохранял секрет в `server.EnvJSON`, а не оставлял его в видимых CLI args
+- `health_check` может требовать post-install verification и при необходимости блокировать add-to-project
+- Docker catalog items сейчас ориентированы на stdio-style `docker run --rm -i ...` и установку через `docker_pull`
+
+Нюансы жизненного цикла пакета:
+- install пакета выполняется один раз на конкретную версию catalog item
+- uninstall пакета блокируется, пока хотя бы один проект всё ещё использует этот пакет
+- `Add to project` создаёт новый project package instance и обычный managed `MCPServer`
+
+Нюанс жизненного цикла проекта:
+- `POST /api/projects/{id}/duplicate` клонирует метаданные проекта, серверы, package instances, installed integrations и подключённые knowledge-base links, создавая при этом новый token
 
 ## Интеграция с Ollama
 
@@ -209,6 +244,23 @@ POST /api/projects/{id}/integrations
 Операционные детали:
 - типовые informational stderr-строки от Filesystem-подобных MCP-серверов фильтруются и не выглядят как ложные access errors
 - SQL-логирование GORM по умолчанию выключено, чтобы обычный MCP-трафик не засорял консоль
+
+Помимо audit logs MCPBox теперь хранит и лёгкие performance metrics.
+
+Основной API route:
+
+```http
+GET /api/logs/metrics
+GET /api/logs/metrics?project_id={id}&window=5m
+GET /api/logs/metrics?project_id={id}&window=1h
+GET /api/logs/metrics?project_id={id}&window=24h
+```
+
+Текущее поведение metrics-слоя:
+- метрики записываются вокруг proxied JSON-RPC calls и managed server method calls
+- каждая запись хранит project, server, transport, operation, latency, request bytes, response bytes и success/failure
+- экран логов использует эти данные для summary cards, trend charts, top slow servers, top error servers, top traffic servers и recent failures
+- это намеренно лёгкий встроенный operational view, а не внешний Prometheus/OpenTelemetry-level observability stack
 
 ## Требования
 
