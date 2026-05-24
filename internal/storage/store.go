@@ -229,6 +229,7 @@ func migrateLegacyMCPServerSchema(db *gorm.DB) error {
 		{name: "oauth_token_expiry", definition: "DATETIME"},
 		{name: "oauth_connected_at", definition: "DATETIME"},
 		{name: "oauth_last_error", definition: "TEXT"},
+		{name: "disabled_tools_json", definition: "TEXT"},
 		{name: "is_enabled", definition: "NUMERIC NOT NULL DEFAULT 1"},
 		{name: "health_status", definition: "TEXT NOT NULL DEFAULT 'unknown'"},
 		{name: "health_error", definition: "TEXT"},
@@ -453,6 +454,7 @@ func (s *Store) UpdateServer(ctx context.Context, server *models.MCPServer) erro
 			"oauth_client_id":             server.OAuthClientID,
 			"oauth_client_secret":         server.OAuthClientSecret,
 			"oauth_scopes_json":           server.OAuthScopesJSON,
+			"disabled_tools_json":         server.DisabledToolsJSON,
 			"auto_start":                  server.AutoStart,
 		}).Error
 }
@@ -549,6 +551,12 @@ func (s *Store) SetServerEnabled(ctx context.Context, serverID uint, enabled boo
 	return s.db.WithContext(ctx).Model(&models.MCPServer{}).
 		Where("id = ?", serverID).
 		Update("is_enabled", enabled).Error
+}
+
+func (s *Store) SetServerDisabledTools(ctx context.Context, serverID uint, disabledToolsJSON string) error {
+	return s.db.WithContext(ctx).Model(&models.MCPServer{}).
+		Where("id = ?", serverID).
+		Update("disabled_tools_json", disabledToolsJSON).Error
 }
 
 func (s *Store) UpdateServerHealth(ctx context.Context, serverID uint, status, detail string, checkedAt time.Time) error {

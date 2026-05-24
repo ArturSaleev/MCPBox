@@ -61,6 +61,7 @@ type MCPServer struct {
 	OAuthTokenExpiry         *time.Time `json:"-"`
 	OAuthConnectedAt         *time.Time `json:"oauth_connected_at,omitempty"`
 	OAuthLastError           string     `gorm:"type:text" json:"oauth_last_error"`
+	DisabledToolsJSON        string     `gorm:"type:text" json:"disabled_tools"`
 	AutoStart                bool       `gorm:"not null;default:false" json:"auto_start"`
 	IsEnabled                bool       `gorm:"not null;default:true" json:"is_enabled"`
 	HealthStatus             string     `gorm:"size:32;not null;default:'unknown'" json:"health_status"`

@@ -515,6 +515,144 @@ func TestProjectConnectToolsListUsesStandardInputSchemaField(t *testing.T) {
 	}
 }
 
+func TestServerToolDisableFiltersAggregatedToolsAndExposeManagerAPI(t *testing.T) {
+	t.Parallel()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode upstream payload: %v", err)
+		}
+
+		method, _ := payload["method"].(string)
+		id := payload["id"]
+
+		switch method {
+		case "initialize":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"protocolVersion": "2025-03-26",
+					"serverInfo":      map[string]any{"name": "test", "version": "1.0.0"},
+					"capabilities":    map[string]any{"tools": map[string]any{}},
+				},
+			})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"tools": []map[string]any{
+						{
+							"name":        "echo",
+							"description": "echo tool",
+							"inputSchema": map[string]any{"type": "object"},
+						},
+					},
+				},
+			})
+		case "tools/call":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result":  map[string]any{"ok": true},
+			})
+		default:
+			t.Fatalf("unexpected method %q", method)
+		}
+	}))
+	defer upstream.Close()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	project := &models.Project{Name: "Workspace"}
+	if err := store.CreateProject(context.Background(), project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	server := &models.MCPServer{
+		ProjectID:         project.ID,
+		Name:              "Echo",
+		Transport:         models.ServerTransportHTTPStream,
+		URL:               upstream.URL,
+		IsEnabled:         true,
+		DisabledToolsJSON: `["echo"]`,
+	}
+	if err := store.AddServer(context.Background(), server); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	toolsRequest := httptest.NewRequest(http.MethodPost, "/mcp/"+project.Token, bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`))
+	toolsResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(toolsResponse, toolsRequest)
+
+	if toolsResponse.Code != http.StatusOK {
+		t.Fatalf("tools/list status = %d, body = %s", toolsResponse.Code, toolsResponse.Body.String())
+	}
+	if bytes.Contains(toolsResponse.Body.Bytes(), []byte(`"name":"echo"`)) {
+		t.Fatalf("disabled tool leaked into tools/list: %s", toolsResponse.Body.String())
+	}
+
+	callRequest := httptest.NewRequest(http.MethodPost, "/mcp/"+project.Token, bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{}}}`))
+	callResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(callResponse, callRequest)
+
+	if callResponse.Code != http.StatusBadGateway {
+		t.Fatalf("tools/call status = %d, body = %s", callResponse.Code, callResponse.Body.String())
+	}
+	if !strings.Contains(callResponse.Body.String(), `was not found`) {
+		t.Fatalf("tools/call body = %s", callResponse.Body.String())
+	}
+
+	managerRequest := httptest.NewRequest(http.MethodGet, "/api/servers/"+jsonNumber(server.ID)+"/tools", nil)
+	managerResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(managerResponse, managerRequest)
+
+	if managerResponse.Code != http.StatusOK {
+		t.Fatalf("manager GET status = %d, body = %s", managerResponse.Code, managerResponse.Body.String())
+	}
+
+	var managerPayload []serverToolStatusResponse
+	if err := json.Unmarshal(managerResponse.Body.Bytes(), &managerPayload); err != nil {
+		t.Fatalf("json.Unmarshal(manager) error = %v", err)
+	}
+	if len(managerPayload) != 1 {
+		t.Fatalf("len(managerPayload) = %d, want 1", len(managerPayload))
+	}
+	if managerPayload[0].Enabled {
+		t.Fatal("managerPayload[0].Enabled = true, want false")
+	}
+
+	enableRequest := httptest.NewRequest(http.MethodPut, "/api/servers/"+jsonNumber(server.ID)+"/tools", bytes.NewBufferString(`{"disabled_tools":[]}`))
+	enableResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(enableResponse, enableRequest)
+
+	if enableResponse.Code != http.StatusOK {
+		t.Fatalf("manager PUT status = %d, body = %s", enableResponse.Code, enableResponse.Body.String())
+	}
+
+	toolsRequestAfter := httptest.NewRequest(http.MethodPost, "/mcp/"+project.Token, bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`))
+	toolsResponseAfter := httptest.NewRecorder()
+	api.Handler().ServeHTTP(toolsResponseAfter, toolsRequestAfter)
+
+	if toolsResponseAfter.Code != http.StatusOK {
+		t.Fatalf("tools/list after enable status = %d, body = %s", toolsResponseAfter.Code, toolsResponseAfter.Body.String())
+	}
+	if !bytes.Contains(toolsResponseAfter.Body.Bytes(), []byte(`"name":"echo"`)) {
+		t.Fatalf("enabled tool missing from tools/list: %s", toolsResponseAfter.Body.String())
+	}
+}
+
 func TestOllamaStatusEndpoint(t *testing.T) {
 	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
 	if err != nil {

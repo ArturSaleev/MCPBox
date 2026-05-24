@@ -621,7 +621,7 @@ func (s *Server) aggregateTools(ctx context.Context, servers []models.MCPServer)
 		if err := s.fetchServerList(ctx, server, "tools/list", &result); err != nil {
 			return nil, err
 		}
-		for _, item := range result.Tools {
+		for _, item := range filterEnabledTools(server, result.Tools) {
 			tools = append(tools, aggregateTool{Server: server, Origin: item})
 		}
 	}

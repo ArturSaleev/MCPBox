@@ -43,6 +43,8 @@ Key capabilities:
 - Installed package lifecycle controls including safe uninstall when a package is not used by any project
 - `Add to project` is shown only for packages that are already installed
 - Project duplication flow with a new name and full cloning of servers, integrations, package links, and connected knowledge bases
+- Per-tool enable/disable inside each MCP server so individual tools can be turned off without disabling the whole server
+- Disabled tools are filtered out from the aggregated project `tools/list` response and blocked from `tools/call`
 - Project creation/edit UI is simplified by removing the root path field from the modal
 - Manifest support for `icon_url`
 - Manifest support for `system_dependencies` with pre-install runtime checks

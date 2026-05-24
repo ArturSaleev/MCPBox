@@ -100,6 +100,7 @@ type addServerRequest struct {
 	OAuthClientID         string         `json:"oauth_client_id"`
 	OAuthClientSecret     string         `json:"oauth_client_secret"`
 	OAuthScopes           []string       `json:"oauth_scopes"`
+	DisabledTools         []string       `json:"disabled_tools"`
 	AutoStart             bool           `json:"auto_start"`
 }
 
@@ -213,6 +214,7 @@ type serverStatusRecord struct {
 	OAuthClientID         string         `json:"oauth_client_id"`
 	OAuthClientSecret     string         `json:"oauth_client_secret"`
 	OAuthScopes           []string       `json:"oauth_scopes"`
+	DisabledToolNames     []string       `json:"disabled_tool_names"`
 	OAuthConnected        bool           `json:"oauth_connected"`
 	OAuthConnectedAt      string         `json:"oauth_connected_at,omitempty"`
 	OAuthLastError        string         `json:"oauth_last_error"`
@@ -237,6 +239,19 @@ type serverInspectionResponse struct {
 	Prompts         []orchestrator.InspectionPrompt `json:"prompts"`
 	ReadmePath      string                          `json:"readme_path,omitempty"`
 	Readme          string                          `json:"readme,omitempty"`
+}
+
+type serverToolStatusResponse struct {
+	Name         string          `json:"name"`
+	Title        string          `json:"title,omitempty"`
+	Description  string          `json:"description,omitempty"`
+	InputSchema  json.RawMessage `json:"input_schema,omitempty"`
+	OutputSchema json.RawMessage `json:"output_schema,omitempty"`
+	Enabled      bool            `json:"enabled"`
+}
+
+type serverToolSettingsRequest struct {
+	DisabledTools []string `json:"disabled_tools"`
 }
 
 func NewServer(store *storage.Store, registry *orchestrator.Registry) *Server {
@@ -284,7 +299,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /api/projects/", s.handleProjectAction)
 	s.mux.HandleFunc("PUT /api/projects/", s.handleProjectUpdate)
 	s.mux.HandleFunc("DELETE /api/projects/", s.handleProjectDelete)
-	s.mux.HandleFunc("GET /api/servers/", s.handleServerInspect)
+	s.mux.HandleFunc("GET /api/servers/", s.handleServerGet)
 	s.mux.HandleFunc("POST /api/servers/", s.handleServerAction)
 	s.mux.HandleFunc("PUT /api/servers/", s.handleServerUpdate)
 	s.mux.HandleFunc("DELETE /api/servers/", s.handleServerDelete)
@@ -733,6 +748,20 @@ func (s *Server) handleServerAction(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleServerUpdate(w http.ResponseWriter, r *http.Request) {
+	if serverID, tail, ok := parseIDTail(r.URL.Path, "/api/servers/"); ok && tail == "tools" {
+		server, err := s.store.GetServer(r.Context(), serverID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if server == nil {
+			http.NotFound(w, r)
+			return
+		}
+		s.handleServerToolsUpdate(w, r, *server)
+		return
+	}
+
 	serverID, ok := parseSingleID(r.URL.Path, "/api/servers/")
 	if !ok {
 		http.NotFound(w, r)
@@ -761,6 +790,7 @@ func (s *Server) handleServerUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	server.ID = existing.ID
+	server.DisabledToolsJSON = existing.DisabledToolsJSON
 	server.IsEnabled = existing.IsEnabled
 	server.OAuthAccessToken = existing.OAuthAccessToken
 	server.OAuthRefreshToken = existing.OAuthRefreshToken
@@ -851,9 +881,9 @@ func (s *Server) handleServerDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.projectStatus(r, *updatedProject))
 }
 
-func (s *Server) handleServerInspect(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleServerGet(w http.ResponseWriter, r *http.Request) {
 	serverID, tail, ok := parseIDTail(r.URL.Path, "/api/servers/")
-	if !ok || r.Method != http.MethodGet || tail != "inspect" {
+	if !ok || r.Method != http.MethodGet {
 		http.NotFound(w, r)
 		return
 	}
@@ -867,6 +897,18 @@ func (s *Server) handleServerInspect(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+
+	switch tail {
+	case "inspect":
+		s.handleServerInspect(w, r, *server)
+	case "tools":
+		s.handleServerToolsGet(w, r, *server)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (s *Server) handleServerInspect(w http.ResponseWriter, r *http.Request, server models.MCPServer) {
 	if server.Transport != models.ServerTransportSTDIO {
 		writeError(w, http.StatusBadRequest, errors.New("inspection is only available for stdio servers"))
 		return
@@ -875,7 +917,7 @@ func (s *Server) handleServerInspect(w http.ResponseWriter, r *http.Request) {
 	inspectCtx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
-	inspection, err := orchestrator.InspectServer(inspectCtx, *server)
+	inspection, err := orchestrator.InspectServer(inspectCtx, server)
 	if err != nil {
 		s.logAudit(r.Context(), &server.ProjectID, &server.ID, "server_inspect_failed", clientActor(r), truncateDetail(err.Error()))
 		writeError(w, http.StatusBadGateway, err)
@@ -894,6 +936,59 @@ func (s *Server) handleServerInspect(w http.ResponseWriter, r *http.Request) {
 		ReadmePath:      inspection.ReadmePath,
 		Readme:          inspection.Readme,
 	})
+}
+
+func (s *Server) handleServerToolsGet(w http.ResponseWriter, r *http.Request, server models.MCPServer) {
+	tools, err := s.loadServerTools(r.Context(), server)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+
+	s.logAudit(r.Context(), &server.ProjectID, &server.ID, "server_tools_listed", clientActor(r), server.Name)
+	writeJSON(w, http.StatusOK, mapServerToolStatuses(server, tools))
+}
+
+func (s *Server) handleServerToolsUpdate(w http.ResponseWriter, r *http.Request, server models.MCPServer) {
+	var req serverToolSettingsRequest
+	if err := decodeJSON(r.Body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	tools, err := s.loadServerTools(r.Context(), server)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, err)
+		return
+	}
+
+	available := make(map[string]struct{}, len(tools))
+	for _, tool := range tools {
+		available[tool.Name] = struct{}{}
+	}
+
+	disabled := make([]string, 0, len(req.DisabledTools))
+	seen := make(map[string]struct{}, len(req.DisabledTools))
+	for _, name := range sanitizeStrings(req.DisabledTools) {
+		if _, ok := available[name]; !ok {
+			writeError(w, http.StatusBadRequest, fmt.Errorf("tool %q was not found on the server", name))
+			return
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		disabled = append(disabled, name)
+	}
+
+	server.DisabledToolsJSON = mustJSON(disabled)
+	if err := s.store.SetServerDisabledTools(r.Context(), server.ID, server.DisabledToolsJSON); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	s.logAudit(r.Context(), &server.ProjectID, &server.ID, "server_tools_updated", clientActor(r), server.Name)
+	writeJSON(w, http.StatusOK, mapServerToolStatuses(server, tools))
 }
 
 func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
@@ -1174,6 +1269,7 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 		headers, _ := decodeKeyValuePairs(server.HeadersJSON)
 		headerEnvVars, _ := decodeKeyValuePairs(server.HeaderEnvJSON)
 		oauthScopes, _ := decodeStringSlice(server.OAuthScopesJSON)
+		disabledToolNames, _ := decodeStringSlice(server.DisabledToolsJSON)
 		managedIntegration := installedIntegrationForServer(integrationsByServerID, server.ID)
 
 		response.Servers = append(response.Servers, serverStatusRecord{
@@ -1206,6 +1302,7 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 			OAuthClientID:         strings.TrimSpace(server.OAuthClientID),
 			OAuthClientSecret:     strings.TrimSpace(server.OAuthClientSecret),
 			OAuthScopes:           coalesceStringSlice(oauthScopes),
+			DisabledToolNames:     coalesceStringSlice(disabledToolNames),
 			OAuthConnected:        strings.TrimSpace(server.OAuthAccessToken) != "",
 			OAuthConnectedAt:      formatServerHealthCheckedAt(server.OAuthConnectedAt),
 			OAuthLastError:        strings.TrimSpace(server.OAuthLastError),
@@ -1225,6 +1322,66 @@ func installedIntegrationForServer(items map[uint]models.InstalledIntegration, s
 		return nil
 	}
 	return &integration
+}
+
+func disabledToolSet(server models.MCPServer) map[string]struct{} {
+	names, err := decodeStringSlice(server.DisabledToolsJSON)
+	if err != nil {
+		return map[string]struct{}{}
+	}
+
+	result := make(map[string]struct{}, len(names))
+	for _, name := range sanitizeStrings(names) {
+		result[name] = struct{}{}
+	}
+	return result
+}
+
+func filterEnabledTools(server models.MCPServer, tools []orchestrator.InspectionTool) []orchestrator.InspectionTool {
+	disabled := disabledToolSet(server)
+	if len(disabled) == 0 {
+		return append([]orchestrator.InspectionTool(nil), tools...)
+	}
+
+	filtered := make([]orchestrator.InspectionTool, 0, len(tools))
+	for _, tool := range tools {
+		if _, blocked := disabled[tool.Name]; blocked {
+			continue
+		}
+		filtered = append(filtered, tool)
+	}
+	return filtered
+}
+
+func (s *Server) loadServerTools(ctx context.Context, server models.MCPServer) ([]orchestrator.InspectionTool, error) {
+	server, err := s.ensureServerInitialized(ctx, server)
+	if err != nil {
+		return nil, err
+	}
+
+	var result listToolsResult
+	if err := s.fetchServerList(ctx, server, "tools/list", &result); err != nil {
+		return nil, err
+	}
+	return result.Tools, nil
+}
+
+func mapServerToolStatuses(server models.MCPServer, tools []orchestrator.InspectionTool) []serverToolStatusResponse {
+	disabled := disabledToolSet(server)
+	response := make([]serverToolStatusResponse, 0, len(tools))
+	for _, tool := range tools {
+		_, isDisabled := disabled[tool.Name]
+		response = append(response, serverToolStatusResponse{
+			Name:         tool.Name,
+			Title:        tool.Title,
+			Description:  tool.Description,
+			InputSchema:  normalizeOptionalJSON(tool.InputSchema),
+			OutputSchema: normalizeOptionalJSON(tool.OutputSchema),
+			Enabled:      !isDisabled,
+		})
+	}
+	sort.Slice(response, func(i, j int) bool { return response[i].Name < response[j].Name })
+	return response
 }
 
 func displayLaunchCommand(
@@ -1664,6 +1821,7 @@ func buildServerModel(projectID uint, req addServerRequest) (*models.MCPServer, 
 		OAuthTokenParamsJSON:     mustJSON(req.OAuthTokenParams),
 		OAuthClientID:            strings.TrimSpace(req.OAuthClientID),
 		OAuthClientSecret:        strings.TrimSpace(req.OAuthClientSecret),
+		DisabledToolsJSON:        mustJSON(sanitizeStrings(req.DisabledTools)),
 		AutoStart:                req.AutoStart,
 	}
 	if req.OAuthUsePKCE != nil {

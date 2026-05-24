@@ -19,6 +19,7 @@ import {
   Radio,
   RefreshCw,
   Server,
+  Settings2,
   ShoppingBag,
   Square,
   TextSearch,
@@ -87,6 +88,7 @@ type ServerStatus = {
   oauth_client_id: string;
   oauth_client_secret: string;
   oauth_scopes: string[];
+  disabled_tool_names: string[];
   oauth_connected: boolean;
   oauth_connected_at: string;
   oauth_last_error: string;
@@ -297,6 +299,15 @@ type ServerInspection = {
   }>;
   readme_path: string;
   readme: string;
+};
+
+type ServerToolStatus = {
+  name: string;
+  title: string;
+  description: string;
+  input_schema?: unknown;
+  output_schema?: unknown;
+  enabled: boolean;
 };
 
 const legacyCatalogSourceURL = 'https://webeasy.kz/mcpbox/catalog.json';
@@ -704,6 +715,13 @@ export default function App() {
   const [inspection, setInspection] = useState<ServerInspection | null>(null);
   const [inspectionServerName, setInspectionServerName] = useState('');
   const [inspectionError, setInspectionError] = useState<string | null>(null);
+  const [serverToolsOpen, setServerToolsOpen] = useState(false);
+  const [serverToolsLoadingId, setServerToolsLoadingId] = useState<number | null>(null);
+  const [serverToolsSavingName, setServerToolsSavingName] = useState<string | null>(null);
+  const [serverToolsServerId, setServerToolsServerId] = useState<number | null>(null);
+  const [serverToolsServerName, setServerToolsServerName] = useState('');
+  const [serverTools, setServerTools] = useState<ServerToolStatus[]>([]);
+  const [serverToolsError, setServerToolsError] = useState<string | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [authServerId, setAuthServerId] = useState<number | null>(null);
   const [copied, setCopied] = useState(false);
@@ -1495,6 +1513,64 @@ export default function App() {
       );
     } finally {
       setInspectingServerId(null);
+    }
+  }
+
+  async function openServerTools(server: ServerStatus) {
+    setServerToolsOpen(true);
+    setServerToolsLoadingId(server.id);
+    setServerToolsSavingName(null);
+    setServerToolsServerId(server.id);
+    setServerToolsServerName(server.name);
+    setServerTools([]);
+    setServerToolsError(null);
+
+    try {
+      const payload = await apiRequest<ServerToolStatus[]>(
+        `/api/servers/${server.id}/tools`,
+        messages.requestFailed,
+      );
+      setServerTools(payload);
+    } catch (loadError) {
+      setServerToolsError(
+        loadError instanceof Error ? loadError.message : messages.loadServerToolsError,
+      );
+    } finally {
+      setServerToolsLoadingId(null);
+    }
+  }
+
+  async function setServerToolEnabled(toolName: string, enabled: boolean) {
+    if (!serverToolsServerId) {
+      return;
+    }
+
+    const nextTools = serverTools.map((tool) =>
+      tool.name === toolName ? { ...tool, enabled } : tool,
+    );
+    const disabledTools = nextTools.filter((tool) => !tool.enabled).map((tool) => tool.name);
+
+    setServerToolsSavingName(toolName);
+    setServerToolsError(null);
+
+    try {
+      const payload = await apiRequest<ServerToolStatus[]>(
+        `/api/servers/${serverToolsServerId}/tools`,
+        messages.requestFailed,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ disabled_tools: disabledTools }),
+        },
+      );
+      setServerTools(payload);
+      await loadProjects();
+      await loadLogs({ silent: true });
+    } catch (submitError) {
+      setServerToolsError(
+        submitError instanceof Error ? submitError.message : messages.updateServerToolsError,
+      );
+    } finally {
+      setServerToolsSavingName(null);
     }
   }
 
@@ -3644,6 +3720,11 @@ export default function App() {
                                     {labels.disabled}
                                   </span>
                                 ) : null}
+                                {(server.disabled_tool_names?.length ?? 0) > 0 ? (
+                                  <span className="rounded-full border border-electric-blue/30 bg-electric-blue/12 px-2 py-1 text-xs font-medium text-electric-blue">
+                                    {messages.disabledToolsBadge(server.disabled_tool_names.length)}
+                                  </span>
+                                ) : null}
                                 {server.transport === 'http_stream' && server.auth_type === 'oauth2' ? (
                                   <span
                                     className={`rounded-full border px-2 py-1 text-xs font-medium ${
@@ -3770,6 +3851,19 @@ export default function App() {
                                 {labels.oauth}
                               </button>
                             ) : null}
+
+                            <button
+                              onClick={() => void openServerTools(server)}
+                              disabled={serverToolsLoadingId === server.id}
+                              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
+                            >
+                              {serverToolsLoadingId === server.id ? (
+                                <LoaderCircle className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Settings2 className="h-4 w-4" />
+                              )}
+                              {labels.manageTools}
+                            </button>
 
                             {server.transport === 'stdio' ? (
                               <button
@@ -4009,6 +4103,79 @@ export default function App() {
                       </section>
                     </div>
                   ) : null}
+                </DialogContent>
+              </Dialog>
+
+              <Dialog
+                open={serverToolsOpen}
+                onOpenChange={(open) => {
+                  setServerToolsOpen(open);
+                  if (!open) {
+                    setServerToolsLoadingId(null);
+                    setServerToolsSavingName(null);
+                    setServerToolsServerId(null);
+                    setServerToolsServerName('');
+                    setServerTools([]);
+                    setServerToolsError(null);
+                  }
+                }}
+              >
+                <DialogContent className="sm:max-w-4xl">
+                  <DialogHeader>
+                    <DialogTitle>
+                      {labels.manageTools}
+                      {serverToolsServerName ? ` · ${serverToolsServerName}` : ''}
+                    </DialogTitle>
+                    <DialogDescription>{messages.manageToolsDescription}</DialogDescription>
+                  </DialogHeader>
+
+                  {serverToolsLoadingId ? (
+                    <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-4 py-5 text-sm text-muted-foreground">
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                      {labels.tools}
+                    </div>
+                  ) : serverToolsError ? (
+                    <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+                      {serverToolsError}
+                    </div>
+                  ) : serverTools.length === 0 ? (
+                    <div className="rounded-xl border border-border bg-background p-4 text-sm text-muted-foreground">
+                      {messages.noServerTools}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {serverTools.map((tool) => (
+                        <div key={tool.name} className="rounded-xl border border-border bg-background p-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0 flex-1">
+                              <div className="font-medium">{tool.title || tool.name}</div>
+                              <code className="mt-1 block overflow-x-auto text-xs text-electric-blue">
+                                {tool.name}
+                              </code>
+                              {tool.description ? (
+                                <div className="mt-2 text-sm text-muted-foreground">{tool.description}</div>
+                              ) : null}
+                            </div>
+                            <label className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2 text-sm">
+                              <input
+                                type="checkbox"
+                                checked={tool.enabled}
+                                disabled={serverToolsSavingName === tool.name}
+                                onChange={(event) =>
+                                  void setServerToolEnabled(tool.name, event.target.checked)
+                                }
+                                className="h-4 w-4 rounded border-border"
+                              />
+                              {serverToolsSavingName === tool.name ? (
+                                <LoaderCircle className="h-4 w-4 animate-spin" />
+                              ) : null}
+                              {tool.enabled ? labels.enabled : labels.disabled}
+                            </label>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </DialogContent>
               </Dialog>
 

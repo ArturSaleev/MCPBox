@@ -157,6 +157,8 @@ export type Dictionary = {
     mcpToolReady: string;
     showMore: string;
     hide: string;
+    manageTools: string;
+    enabled: string;
   };
   messages: {
     loadingProjects: string;
@@ -287,6 +289,11 @@ export type Dictionary = {
     otherConnectionOptionsDescription: string;
     duplicateProjectDescription: string;
     duplicateProjectNamePlaceholder: string;
+    manageToolsDescription: string;
+    noServerTools: string;
+    loadServerToolsError: string;
+    updateServerToolsError: string;
+    disabledToolsBadge: (count: number) => string;
   };
 };
 
@@ -451,6 +458,8 @@ export const dictionaries: Record<Language, Dictionary> = {
       mcpToolReady: 'MCP Tool Ready',
       showMore: 'Show more',
       hide: 'Hide',
+      manageTools: 'Tools',
+      enabled: 'Enabled',
     },
     messages: {
       loadingProjects: 'Loading projects...',
@@ -608,6 +617,12 @@ export const dictionaries: Record<Language, Dictionary> = {
       duplicateProjectDescription:
         'Create a full copy of this project with a new name, token, servers, integrations, package links, and connected knowledge bases.',
       duplicateProjectNamePlaceholder: 'Client Workspace Copy',
+      manageToolsDescription:
+        'Enable or disable individual MCP tools for this server. Disabled tools are hidden from the project endpoint and blocked from calls through MCPBox.',
+      noServerTools: 'This server does not expose any tools.',
+      loadServerToolsError: 'Failed to load server tools',
+      updateServerToolsError: 'Failed to update server tools',
+      disabledToolsBadge: (count: number) => `${count} tools off`,
     },
   },
   ru: {
@@ -767,6 +782,8 @@ export const dictionaries: Record<Language, Dictionary> = {
       mcpToolReady: 'MCP-инструмент готов',
       showMore: 'Показать еще',
       hide: 'Скрыть',
+      manageTools: 'Инструменты',
+      enabled: 'Включен',
     },
     messages: {
       loadingProjects: 'Загружаю проекты...',
@@ -927,6 +944,12 @@ export const dictionaries: Record<Language, Dictionary> = {
       duplicateProjectDescription:
         'Создать полную копию этого проекта с новым именем, token, серверами, интеграциями, package links и подключёнными базами знаний.',
       duplicateProjectNamePlaceholder: 'Копия Client Workspace',
+      manageToolsDescription:
+        'Включайте и выключайте отдельные MCP tools у этого сервера. Выключенные tools скрываются из project endpoint и блокируются для вызова через MCPBox.',
+      noServerTools: 'Этот сервер не публикует tools.',
+      loadServerToolsError: 'Не удалось загрузить tools сервера',
+      updateServerToolsError: 'Не удалось обновить tools сервера',
+      disabledToolsBadge: (count: number) => `${count} tools выкл`,
     },
   },
 };
