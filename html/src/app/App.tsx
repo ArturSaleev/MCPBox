@@ -711,6 +711,7 @@ export default function App() {
   const [catalogSettings, setCatalogSettings] = useState<CatalogSettings | null>(null);
   const [installedPackages, setInstalledPackages] = useState<InstalledPackage[]>([]);
   const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null);
+  const [ollamaRefreshing, setOllamaRefreshing] = useState(false);
   const [selectedOllamaModel, setSelectedOllamaModel] = useState('');
   const [catalogURL, setCatalogURL] = useState(defaultCatalogSourceURL);
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -1082,7 +1083,11 @@ export default function App() {
     }
   }
 
-  async function loadOllamaStatus() {
+  async function loadOllamaStatus(options?: { silent?: boolean }) {
+    if (!options?.silent) {
+      setOllamaRefreshing(true);
+    }
+
     try {
       const nextStatus = await apiRequest<OllamaStatus>(
         '/api/ollama/status',
@@ -1091,6 +1096,8 @@ export default function App() {
       setOllamaStatus(nextStatus);
     } catch {
       setOllamaStatus(null);
+    } finally {
+      setOllamaRefreshing(false);
     }
   }
 
@@ -3122,40 +3129,70 @@ export default function App() {
                       </DialogTrigger>
                       <DialogContent className="sm:max-w-2xl">
                         <DialogHeader>
-                          <DialogTitle>{labels.launchProject}</DialogTitle>
-                          <DialogDescription>{messages.launchProjectDescription}</DialogDescription>
+                          <DialogTitle className="text-2xl font-bold">{labels.launchProject}</DialogTitle>
+                          <DialogDescription className="text-muted-foreground">
+                            {messages.launchProjectDescription}
+                          </DialogDescription>
                         </DialogHeader>
-                        <div className="space-y-4">
-                          <div className="rounded-xl border border-border bg-background p-4">
-                            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                              <div className="min-w-0">
-                                <div className="mt-1 text-sm text-muted-foreground">
-                                  {shouldShowOllamaControls
-                                    ? (ollamaStatus?.models.length ?? 0) > 0
-                                      ? labels.ollamaModel
-                                      : messages.noOllamaModels
-                                    : messages.ollamaNotInstalled}
+
+                        <div className="space-y-6 py-4">
+                          {/* Ollama Section */}
+                          <div className="rounded-2xl border border-border bg-card p-6 shadow-sm transition-all hover:shadow-md">
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10">
+                                  <OllamaIcon className="h-6 w-6 text-blue-500" />
+                                </div>
+                                <div>
+                                  <h3 className="font-semibold">{labels.ollamaModel}</h3>
+                                  <p className="text-sm text-muted-foreground">
+                                    {shouldShowOllamaControls
+                                      ? (ollamaStatus?.models.length ?? 0) > 0
+                                        ? `${ollamaStatus?.models.length} ${labels.modelsAvailable}`
+                                        : messages.noOllamaModels
+                                      : messages.ollamaNotInstalled}
+                                  </p>
                                 </div>
                               </div>
-                              <div className="flex w-full flex-col gap-3 lg:w-auto lg:min-w-[420px] lg:flex-row">
-                                <div className="lg:min-w-[240px]">
-                                  <Select
-                                    value={selectedOllamaModel || undefined}
-                                    onValueChange={setSelectedOllamaModel}
-                                    disabled={!shouldShowOllamaControls || (ollamaStatus?.models.length ?? 0) === 0}
-                                  >
-                                    <SelectTrigger className="h-11 rounded-xl border-border bg-background">
-                                      <SelectValue placeholder={labels.ollamaModel} />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      {ollamaStatus?.models.map((model) => (
-                                        <SelectItem key={`ollama-model-${model}`} value={model}>
-                                          {model}
-                                        </SelectItem>
-                                      ))}
-                                    </SelectContent>
-                                  </Select>
+
+                              <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
+                                <div className="sm:min-w-[200px]">
+                                  <div className="flex items-center gap-2">
+                                    <Select
+                                      value={selectedOllamaModel || undefined}
+                                      onValueChange={setSelectedOllamaModel}
+                                      disabled={!shouldShowOllamaControls || (ollamaStatus?.models.length ?? 0) === 0}
+                                    >
+                                      <SelectTrigger className="h-11 rounded-lg border-border bg-background">
+                                        <SelectValue placeholder={labels.selectModel} />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {ollamaStatus?.models.map((model) => (
+                                          <SelectItem key={`ollama-model-${model}`} value={model}>
+                                            {model}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <button
+                                          type="button"
+                                          onClick={() => void loadOllamaStatus()}
+                                          disabled={ollamaRefreshing}
+                                          className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-background transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                                          aria-label={labels.refresh}
+                                        >
+                                          <RefreshCw
+                                            className={`h-4 w-4 ${ollamaRefreshing ? 'animate-spin' : ''}`}
+                                          />
+                                        </button>
+                                      </TooltipTrigger>
+                                      <TooltipContent>{labels.refresh}</TooltipContent>
+                                    </Tooltip>
+                                  </div>
                                 </div>
+
                                 <button
                                   onClick={() => void launchProjectOllama(selectedProject.project_id)}
                                   disabled={
@@ -3164,26 +3201,34 @@ export default function App() {
                                     selectedProject.is_paused ||
                                     !canLaunchOllama
                                   }
-                                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-70"
+                                  className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 text-sm font-medium text-white transition-all hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                   {launchingOllamaProjectId === selectedProject.project_id ? (
                                     <LoaderCircle className="h-4 w-4 animate-spin" />
                                   ) : (
-                                    <OllamaIcon className="h-5 w-5" />
+                                    <Play className="h-4 w-4" />
                                   )}
-                                  {labels.launchOllama}
+                                  {labels.launch}
                                 </button>
                               </div>
                             </div>
                           </div>
-                          <div className="rounded-xl border border-border bg-background p-4">
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                              <div className="min-w-0">
-                                <div className="flex items-center gap-2 font-medium">
-                                  <Bot className="h-4 w-4" />
-                                  {labels.launchLMStudio}
+
+                          {/* LM Studio Section */}
+                          <div className="rounded-2xl border border-border bg-card p-6 shadow-sm transition-all hover:shadow-md">
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-purple-500/10">
+                                  <Bot className="h-6 w-6 text-purple-500" />
+                                </div>
+                                <div>
+                                  <h3 className="font-semibold">{labels.launchLMStudio}</h3>
+                                  <p className="text-sm text-muted-foreground">
+                                    {messages.launchLMStudioDescription}
+                                  </p>
                                 </div>
                               </div>
+
                               <button
                                 onClick={() => void launchProjectLMStudio(selectedProject.project_id)}
                                 disabled={
@@ -3191,15 +3236,27 @@ export default function App() {
                                   !selectedProject.connection_ready ||
                                   selectedProject.is_paused
                                 }
-                                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
+                                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 text-sm font-medium transition-all hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
                               >
                                 {launchingLMStudioProjectId === selectedProject.project_id ? (
                                   <LoaderCircle className="h-4 w-4 animate-spin" />
                                 ) : (
-                                  <Bot className="h-4 w-4" />
+                                  <Play className="h-4 w-4" />
                                 )}
-                                {labels.launchLMStudio}
+                                {labels.launch}
                               </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg bg-blue-500/5 p-4">
+                          <div className="flex items-start gap-3">
+                            <Info className="mt-0.5 h-5 w-5 text-blue-500" />
+                            <div>
+                              <p className="text-sm font-medium text-blue-500">{labels.tip}</p>
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                {messages.launchProjectTip}
+                              </p>
                             </div>
                           </div>
                         </div>
