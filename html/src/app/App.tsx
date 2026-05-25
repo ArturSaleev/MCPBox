@@ -683,6 +683,7 @@ export default function App() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [creatingProject, setCreatingProject] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [launchProjectOpen, setLaunchProjectOpen] = useState(false);
   const [duplicateProjectOpen, setDuplicateProjectOpen] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<number | null>(null);
   const [duplicatingProjectId, setDuplicatingProjectId] = useState<number | null>(null);
@@ -1491,6 +1492,7 @@ export default function App() {
           body: JSON.stringify({ model: selectedOllamaModel }),
         },
       );
+      setLaunchProjectOpen(false);
     } catch (submitError) {
       setActionError(submitError instanceof Error ? submitError.message : messages.launchOllamaError);
     } finally {
@@ -1510,6 +1512,7 @@ export default function App() {
           method: 'POST',
         },
       );
+      setLaunchProjectOpen(false);
     } catch (submitError) {
       setActionError(
         submitError instanceof Error ? submitError.message : messages.launchLMStudioError,
@@ -3107,60 +3110,101 @@ export default function App() {
                   </div>
 
                   <div className="flex flex-wrap justify-end gap-3">
-                    {shouldShowOllamaControls ? (
-                      <>
-                        <div className="min-w-[220px]">
-                          <Select
-                            value={selectedOllamaModel || undefined}
-                            onValueChange={setSelectedOllamaModel}
-                          >
-                            <SelectTrigger className="h-11 rounded-xl border-border bg-background">
-                              <SelectValue placeholder={labels.ollamaModel} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {ollamaStatus?.models.map((model) => (
-                                <SelectItem key={`ollama-model-${model}`} value={model}>
-                                  {model}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
+                    <Dialog open={launchProjectOpen} onOpenChange={setLaunchProjectOpen}>
+                      <DialogTrigger asChild>
                         <button
-                          onClick={() => void launchProjectOllama(selectedProject.project_id)}
-                          disabled={
-                            launchingOllamaProjectId === selectedProject.project_id ||
-                            !selectedProject.connection_ready ||
-                            selectedProject.is_paused ||
-                            !canLaunchOllama
-                          }
+                          disabled={!selectedProject.connection_ready || selectedProject.is_paused}
                           className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-70"
                         >
-                          {launchingOllamaProjectId === selectedProject.project_id ? (
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <OllamaIcon className="h-5 w-5" />
-                          )}
-                          {labels.launchOllama}
+                          <Play className="h-4 w-4" />
+                          {labels.launchProject}
                         </button>
-                      </>
-                    ) : null}
-                    <button
-                      onClick={() => void launchProjectLMStudio(selectedProject.project_id)}
-                      disabled={
-                        launchingLMStudioProjectId === selectedProject.project_id ||
-                        !selectedProject.connection_ready ||
-                        selectedProject.is_paused
-                      }
-                      className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      {launchingLMStudioProjectId === selectedProject.project_id ? (
-                        <LoaderCircle className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Bot className="h-4 w-4" />
-                      )}
-                      {labels.launchLMStudio}
-                    </button>
+                      </DialogTrigger>
+                      <DialogContent className="sm:max-w-2xl">
+                        <DialogHeader>
+                          <DialogTitle>{labels.launchProject}</DialogTitle>
+                          <DialogDescription>{messages.launchProjectDescription}</DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          <div className="rounded-xl border border-border bg-background p-4">
+                            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                              <div className="min-w-0">
+                                <div className="mt-1 text-sm text-muted-foreground">
+                                  {shouldShowOllamaControls
+                                    ? (ollamaStatus?.models.length ?? 0) > 0
+                                      ? labels.ollamaModel
+                                      : messages.noOllamaModels
+                                    : messages.ollamaNotInstalled}
+                                </div>
+                              </div>
+                              <div className="flex w-full flex-col gap-3 lg:w-auto lg:min-w-[420px] lg:flex-row">
+                                <div className="lg:min-w-[240px]">
+                                  <Select
+                                    value={selectedOllamaModel || undefined}
+                                    onValueChange={setSelectedOllamaModel}
+                                    disabled={!shouldShowOllamaControls || (ollamaStatus?.models.length ?? 0) === 0}
+                                  >
+                                    <SelectTrigger className="h-11 rounded-xl border-border bg-background">
+                                      <SelectValue placeholder={labels.ollamaModel} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {ollamaStatus?.models.map((model) => (
+                                        <SelectItem key={`ollama-model-${model}`} value={model}>
+                                          {model}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                                <button
+                                  onClick={() => void launchProjectOllama(selectedProject.project_id)}
+                                  disabled={
+                                    launchingOllamaProjectId === selectedProject.project_id ||
+                                    !selectedProject.connection_ready ||
+                                    selectedProject.is_paused ||
+                                    !canLaunchOllama
+                                  }
+                                  className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-70"
+                                >
+                                  {launchingOllamaProjectId === selectedProject.project_id ? (
+                                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <OllamaIcon className="h-5 w-5" />
+                                  )}
+                                  {labels.launchOllama}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="rounded-xl border border-border bg-background p-4">
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 font-medium">
+                                  <Bot className="h-4 w-4" />
+                                  {labels.launchLMStudio}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => void launchProjectLMStudio(selectedProject.project_id)}
+                                disabled={
+                                  launchingLMStudioProjectId === selectedProject.project_id ||
+                                  !selectedProject.connection_ready ||
+                                  selectedProject.is_paused
+                                }
+                                className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
+                              >
+                                {launchingLMStudioProjectId === selectedProject.project_id ? (
+                                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Bot className="h-4 w-4" />
+                                )}
+                                {labels.launchLMStudio}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
                     <Menubar className="h-auto border-0 bg-transparent p-0 shadow-none">
                       <MenubarMenu>
                         <MenubarTrigger className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-border px-4 text-sm font-medium transition-colors hover:bg-accent">

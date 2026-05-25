@@ -50,6 +50,7 @@ export type Dictionary = {
     performance: string;
     timeWindow: string;
     refresh: string;
+    launchProject: string;
     launchOllama: string;
     launchLMStudio: string;
     ollamaModel: string;
@@ -298,6 +299,8 @@ export type Dictionary = {
     loadServerToolsError: string;
     updateServerToolsError: string;
     disabledToolsBadge: (count: number) => string;
+    launchProjectDescription: string;
+    ollamaNotInstalled: string;
   };
 };
 
@@ -355,6 +358,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       performance: 'Performance',
       timeWindow: 'Time window',
       refresh: 'Refresh',
+      launchProject: 'Launch',
       launchOllama: 'Launch Ollama',
       launchLMStudio: 'Add to LM Studio',
       ollamaModel: 'Ollama model',
@@ -631,6 +635,9 @@ export const dictionaries: Record<Language, Dictionary> = {
       loadServerToolsError: 'Failed to load server tools',
       updateServerToolsError: 'Failed to update server tools',
       disabledToolsBadge: (count: number) => `${count} tools off`,
+      launchProjectDescription:
+        'Choose how you want to start working with this project locally.',
+      ollamaNotInstalled: 'Ollama is not installed or not available in PATH.',
     },
   },
   ru: {
@@ -683,6 +690,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       performance: 'Производительность',
       timeWindow: 'Период',
       refresh: 'Обновить',
+      launchProject: 'Запустить',
       launchOllama: 'Запустить Ollama',
       launchLMStudio: 'Добавить в LM Studio',
       ollamaModel: 'Модель Ollama',
@@ -962,6 +970,9 @@ export const dictionaries: Record<Language, Dictionary> = {
       loadServerToolsError: 'Не удалось загрузить tools сервера',
       updateServerToolsError: 'Не удалось обновить tools сервера',
       disabledToolsBadge: (count: number) => `${count} tools выкл`,
+      launchProjectDescription:
+        'Выберите, как вы хотите запускать этот проект локально.',
+      ollamaNotInstalled: 'Ollama не установлена или недоступна в PATH.',
     },
   },
 };
