@@ -173,6 +173,20 @@ type InstallPackageResponse = {
   package: InstalledPackage;
 };
 
+type ServerActionResponse = {
+  server_id: number;
+  status: string;
+  health_status?: string;
+  health_error?: string;
+  health_checked_at?: string;
+};
+
+type LMStudioLaunchResponse = {
+  project_id: number;
+  server_name: string;
+  deeplink: string;
+};
+
 type AuditLog = {
   id: number;
   project_id: number | null;
@@ -709,6 +723,7 @@ export default function App() {
   const [uninstallingCatalogItemId, setUninstallingCatalogItemId] = useState<string | null>(null);
   const [busyProjectId, setBusyProjectId] = useState<number | null>(null);
   const [launchingOllamaProjectId, setLaunchingOllamaProjectId] = useState<number | null>(null);
+  const [launchingLMStudioProjectId, setLaunchingLMStudioProjectId] = useState<number | null>(null);
   const [busyServerId, setBusyServerId] = useState<number | null>(null);
   const [inspectOpen, setInspectOpen] = useState(false);
   const [inspectingServerId, setInspectingServerId] = useState<number | null>(null);
@@ -727,6 +742,7 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [connectionURLsExpanded, setConnectionURLsExpanded] = useState(false);
   const logsViewportRef = useRef<HTMLDivElement | null>(null);
+  const marketAutoSyncTriggeredRef = useRef(false);
   const dictionary = dictionaries[language];
   const { labels, messages } = dictionary;
   const languageOptions: Array<{ value: Language; label: string }> = [
@@ -893,6 +909,24 @@ export default function App() {
       void loadLogMetrics();
     }
   }, [view, selectedLogsProjectId, metricsWindow]);
+
+  useEffect(() => {
+    if (view !== 'market') {
+      marketAutoSyncTriggeredRef.current = false;
+      return;
+    }
+
+    if (marketAutoSyncTriggeredRef.current || catalogLoading || catalogSyncing) {
+      return;
+    }
+
+    if (catalogSourceMode === 'file' && localCatalogContent.trim() === '') {
+      return;
+    }
+
+    marketAutoSyncTriggeredRef.current = true;
+    void syncCatalog();
+  }, [view, catalogLoading, catalogSyncing, catalogSourceMode, localCatalogContent]);
 
   useEffect(() => {
     if (view !== 'logs') {
@@ -1464,6 +1498,27 @@ export default function App() {
     }
   }
 
+  async function launchProjectLMStudio(projectId: number) {
+    setLaunchingLMStudioProjectId(projectId);
+    setActionError(null);
+
+    try {
+      await apiRequest<LMStudioLaunchResponse>(
+        `/api/projects/${projectId}/launch-lmstudio`,
+        messages.requestFailed,
+        {
+          method: 'POST',
+        },
+      );
+    } catch (submitError) {
+      setActionError(
+        submitError instanceof Error ? submitError.message : messages.launchLMStudioError,
+      );
+    } finally {
+      setLaunchingLMStudioProjectId(null);
+    }
+  }
+
   async function copyConnectURL() {
     if (!selectedProject?.connect_url) {
       return;
@@ -1676,7 +1731,7 @@ export default function App() {
     setActionError(null);
 
     try {
-      await apiRequest<{ server_id: number; status: string }>(
+      const response = await apiRequest<ServerActionResponse>(
         `/api/servers/${serverId}/check`,
         messages.requestFailed,
         {
@@ -1684,9 +1739,27 @@ export default function App() {
         },
       );
 
+      const serverName =
+        projects.flatMap((project) => project.servers).find((server) => server.id === serverId)?.name ??
+        `Server ${serverId}`;
+
+      if (response.health_status === 'healthy') {
+        toast.success(messages.checkServerHealthy(serverName));
+      } else {
+        toast.error(
+          messages.checkServerFailed(
+            serverName,
+            response.health_error || messages.checkServerError,
+          ),
+        );
+      }
+
       await loadProjects();
       await loadLogs();
     } catch (submitError) {
+      toast.error(
+        submitError instanceof Error ? submitError.message : messages.checkServerError,
+      );
       setActionError(
         submitError instanceof Error ? submitError.message : messages.checkServerError,
       );
@@ -3072,6 +3145,22 @@ export default function App() {
                         </button>
                       </>
                     ) : null}
+                    <button
+                      onClick={() => void launchProjectLMStudio(selectedProject.project_id)}
+                      disabled={
+                        launchingLMStudioProjectId === selectedProject.project_id ||
+                        !selectedProject.connection_ready ||
+                        selectedProject.is_paused
+                      }
+                      className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {launchingLMStudioProjectId === selectedProject.project_id ? (
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Bot className="h-4 w-4" />
+                      )}
+                      {labels.launchLMStudio}
+                    </button>
                     <Menubar className="h-auto border-0 bg-transparent p-0 shadow-none">
                       <MenubarMenu>
                         <MenubarTrigger className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-border px-4 text-sm font-medium transition-colors hover:bg-accent">

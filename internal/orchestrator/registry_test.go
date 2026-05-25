@@ -96,3 +96,21 @@ func TestNormalizeProcessExitErrorSignalCompatibility(t *testing.T) {
 		t.Fatalf("normalizeProcessExitError(signal err) = %v, want nil", got)
 	}
 }
+
+func TestStopServerRemovesRunnerFromRegistry(t *testing.T) {
+	t.Parallel()
+
+	registry := NewRegistry(context.Background())
+	server := models.MCPServer{ID: 42, Name: "MySQL", LaunchCommand: "mysql-mcp serve"}
+	registry.runners[server.ID] = NewServerRunner(server)
+
+	if err := registry.StopServer(context.Background(), server.ID); err != nil {
+		t.Fatalf("StopServer() error = %v", err)
+	}
+	if runner := registry.Runner(server.ID); runner != nil {
+		t.Fatalf("Runner(%d) = %#v, want nil", server.ID, runner)
+	}
+	if status := registry.Status(server.ID); status != "Stopped" {
+		t.Fatalf("Status(%d) = %q, want Stopped", server.ID, status)
+	}
+}

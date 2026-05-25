@@ -781,7 +781,7 @@ func normalizeCatalogItem(
 			return nil, fmt.Errorf("catalog item %s install.strategy is required for stdio transport", id)
 		}
 		switch installStrategy {
-		case "binary_download", "npm", "python_venv", "remote_only", "docker_pull":
+		case "binary_download", "npm", "python_venv", "remote_only", "docker_pull", "go_install":
 		default:
 			return nil, fmt.Errorf("catalog item %s has unsupported install.strategy %q", id, installStrategy)
 		}
@@ -965,6 +965,8 @@ func buildInstalledIntegration(
 					if isPythonCommand(server.Command) {
 						server.Command = managedPythonPath(installedPkg.InstallDir)
 					}
+				case "binary_download", "go_install":
+					server.Command = managedBinaryPath(server.Command, installedPkg)
 				}
 			}
 		}
@@ -1292,6 +1294,37 @@ func managedPythonPath(installDir string) string {
 		return filepath.Join(installDir, "venv", "Scripts", "python.exe")
 	}
 	return filepath.Join(installDir, "venv", "bin", "python")
+}
+
+func managedBinaryPath(command string, installedPkg *models.InstalledPackage) string {
+	command = strings.TrimSpace(command)
+	if installedPkg == nil {
+		return command
+	}
+
+	installDir := strings.TrimSpace(installedPkg.InstallDir)
+	entryPoint := strings.TrimSpace(installedPkg.EntryPoint)
+	if installDir == "" || entryPoint == "" {
+		return applyInstallDirTemplate(command, installDir)
+	}
+
+	entryPath := filepath.Join(installDir, filepath.FromSlash(entryPoint))
+	if command == "" {
+		return entryPath
+	}
+	if strings.Contains(command, "{install_dir}") {
+		return applyInstallDirTemplate(command, installDir)
+	}
+
+	normalizedCommand := filepath.Clean(filepath.FromSlash(command))
+	normalizedEntry := filepath.Clean(filepath.FromSlash(entryPoint))
+	commandBase := strings.TrimSuffix(strings.ToLower(filepath.Base(normalizedCommand)), ".exe")
+	entryBase := strings.TrimSuffix(strings.ToLower(filepath.Base(normalizedEntry)), ".exe")
+	if normalizedCommand == normalizedEntry || commandBase == entryBase {
+		return entryPath
+	}
+
+	return applyInstallDirTemplate(command, installDir)
 }
 
 func isPythonCommand(command string) bool {

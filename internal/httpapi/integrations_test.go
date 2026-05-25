@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -127,6 +128,57 @@ func TestBuildInstalledIntegrationMovesSecretConfigIntoEnv(t *testing.T) {
 	envConfig, ok := storedConfig["env"].(map[string]any)
 	if !ok || envConfig["MYSQL_PASSWORD"] != "super-secret" {
 		t.Fatalf("stored env config = %#v", storedConfig["env"])
+	}
+}
+
+func TestBuildInstalledIntegrationGoInstallUsesManagedBinaryPath(t *testing.T) {
+	t.Parallel()
+
+	entryPoint := filepath.ToSlash(filepath.Join("bin", "go-mcp"))
+	if os.PathSeparator == '\\' {
+		entryPoint = filepath.ToSlash(filepath.Join("bin", "go-mcp.exe"))
+	}
+
+	item := models.IntegrationCatalogItem{
+		ID:               "go-mcp",
+		Name:             "Go MCP",
+		Transport:        models.ServerTransportSTDIO,
+		RuntimeType:      "go",
+		SourceType:       "go",
+		SourcePackage:    "example.com/mcp/go-mcp",
+		InstallStrategy:  "go_install",
+		Command:          "go-mcp",
+		ArgsJSON:         `["serve"]`,
+		WorkingDir:       "{install_dir}",
+		DefaultAutoStart: true,
+	}
+
+	installedPkg := &models.InstalledPackage{
+		InstallDir:      filepath.Join("/tmp", "go-mcp"),
+		InstallStrategy: "go_install",
+		EntryPoint:      entryPoint,
+	}
+	if os.PathSeparator == '\\' {
+		installedPkg.InstallDir = filepath.Join(`C:\tmp`, "go-mcp")
+	}
+
+	server, _, err := buildInstalledIntegration(9, item, installIntegrationRequest{
+		Name:   "Go MCP Prod",
+		Config: map[string]any{},
+	}, installedPkg)
+	if err != nil {
+		t.Fatalf("buildInstalledIntegration() error = %v", err)
+	}
+
+	expectedCommand := filepath.Join(installedPkg.InstallDir, filepath.FromSlash(entryPoint))
+	if server.Command != expectedCommand {
+		t.Fatalf("server.Command = %q, want %q", server.Command, expectedCommand)
+	}
+	if server.WorkingDir != installedPkg.InstallDir {
+		t.Fatalf("server.WorkingDir = %q, want %q", server.WorkingDir, installedPkg.InstallDir)
+	}
+	if server.LaunchCommand != strings.TrimSpace(expectedCommand+" serve") {
+		t.Fatalf("server.LaunchCommand = %q", server.LaunchCommand)
 	}
 }
 

@@ -202,6 +202,7 @@ func (s *Server) publishConnectSession(sessionID string, payload []byte) error {
 
 func (s *Server) dispatchProjectJSONRPC(
 	ctx context.Context,
+	actor string,
 	project models.Project,
 	servers []models.MCPServer,
 	payload []byte,
@@ -245,6 +246,9 @@ func (s *Server) dispatchProjectJSONRPC(
 			Result:  map[string]any{},
 		}), true, nil
 	case "tools/list":
+		s.logProjectRPC(ctx, actor, project.ID, nil, "tools/list", map[string]any{
+			"method": "tools/list",
+		})
 		tools, err := s.aggregateTools(ctx, servers)
 		if err != nil {
 			return nil, false, err
@@ -292,6 +296,11 @@ func (s *Server) dispatchProjectJSONRPC(
 		if err != nil {
 			return nil, false, err
 		}
+		s.logProjectRPC(ctx, actor, project.ID, &tool.Server.ID, "tools/call", map[string]any{
+			"tool":         params.Name,
+			"upstreamTool": tool.Origin.Name,
+			"arguments":    params.Arguments,
+		})
 		params.Name = tool.Origin.Name
 		result, err := s.callServerMethod(ctx, tool.Server, "tools/call", params)
 		if err != nil {
@@ -303,6 +312,9 @@ func (s *Server) dispatchProjectJSONRPC(
 			Result:  result,
 		}), true, nil
 	case "resources/list":
+		s.logProjectRPC(ctx, actor, project.ID, nil, "resources/list", map[string]any{
+			"method": "resources/list",
+		})
 		resources, err := s.aggregateResources(ctx, servers)
 		if err != nil {
 			return nil, false, err
@@ -329,6 +341,10 @@ func (s *Server) dispatchProjectJSONRPC(
 		if err != nil {
 			return nil, false, err
 		}
+		s.logProjectRPC(ctx, actor, project.ID, &resource.Server.ID, "resources/read", map[string]any{
+			"uri":         params.URI,
+			"upstreamURI": resource.Origin.URI,
+		})
 		params.URI = resource.Origin.URI
 		result, err := s.callServerMethod(ctx, resource.Server, "resources/read", params)
 		if err != nil {
@@ -340,6 +356,9 @@ func (s *Server) dispatchProjectJSONRPC(
 			Result:  result,
 		}), true, nil
 	case "prompts/list":
+		s.logProjectRPC(ctx, actor, project.ID, nil, "prompts/list", map[string]any{
+			"method": "prompts/list",
+		})
 		prompts, err := s.aggregatePrompts(ctx, servers)
 		if err != nil {
 			return nil, false, err
@@ -366,6 +385,11 @@ func (s *Server) dispatchProjectJSONRPC(
 		if err != nil {
 			return nil, false, err
 		}
+		s.logProjectRPC(ctx, actor, project.ID, &prompt.Server.ID, "prompts/get", map[string]any{
+			"name":           params.Name,
+			"upstreamPrompt": prompt.Origin.Name,
+			"arguments":      params.Arguments,
+		})
 		params.Name = prompt.Origin.Name
 		result, err := s.callServerMethod(ctx, prompt.Server, "prompts/get", params)
 		if err != nil {
@@ -389,6 +413,11 @@ func (s *Server) dispatchProjectJSONRPC(
 			},
 		}), true, nil
 	}
+}
+
+func (s *Server) logProjectRPC(ctx context.Context, actor string, projectID uint, serverID *uint, method string, detail any) {
+	action := "mcp_" + strings.NewReplacer("/", "_", "-", "_").Replace(strings.TrimSpace(method))
+	s.logAudit(ctx, &projectID, serverID, action, strings.TrimSpace(actor), truncateDetail(mustJSON(detail)))
 }
 
 func (s *Server) callServerMethod(ctx context.Context, server models.MCPServer, method string, params any) (json.RawMessage, error) {

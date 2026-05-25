@@ -47,6 +47,16 @@ func (m *memoryStore) UpdateInstalledPackage(_ context.Context, pkg *models.Inst
 	return errors.New("package not found")
 }
 
+func (m *memoryStore) DeleteInstalledPackage(_ context.Context, packageID uint) error {
+	for idx, existing := range m.packages {
+		if existing.ID == packageID {
+			m.packages = append(m.packages[:idx], m.packages[idx+1:]...)
+			return nil
+		}
+	}
+	return errors.New("package not found")
+}
+
 type fakeRunner struct {
 	calls []runnerCall
 	err   error
@@ -74,7 +84,7 @@ func (f fakeOutput) Run(_ context.Context, name string, args ...string) ([]byte,
 	}
 	key := name
 	if len(args) > 0 {
-		key += " " + args[0]
+		key += " " + strings.Join(args, " ")
 	}
 	if output, ok := f.byCommand[key]; ok {
 		return output, nil
@@ -377,5 +387,81 @@ func TestInstallCatalogPackageDockerPull(t *testing.T) {
 	}
 	if len(call.args) != 2 || call.args[0] != "pull" || call.args[1] != "ghcr.io/example/redis-mcp:latest" {
 		t.Fatalf("call.args = %#v", call.args)
+	}
+}
+
+func TestInstallCatalogPackageGoInstall(t *testing.T) {
+	t.Parallel()
+
+	store := &memoryStore{}
+	runner := &fakeRunner{}
+	goPathRoot := t.TempDir()
+	goBinDir := filepath.Join(goPathRoot, "bin")
+	if err := os.MkdirAll(goBinDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	binaryName := "go-mcp"
+	if os.PathSeparator == '\\' {
+		binaryName += ".exe"
+	}
+	sourceBinaryPath := filepath.Join(goBinDir, binaryName)
+	if err := os.WriteFile(sourceBinaryPath, []byte("binary"), 0o755); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	service := &Service{
+		store:    store,
+		rootDir:  filepath.Join(t.TempDir(), "packages"),
+		runner:   runner,
+		lookPath: func(file string) (string, error) { return file, nil },
+		mkdirAll: os.MkdirAll,
+		output: fakeOutput{
+			byCommand: map[string][]byte{
+				"go env GOBIN":  []byte(""),
+				"go env GOPATH": []byte(goPathRoot),
+			},
+		}.Run,
+		now: func() time.Time { return time.Now().UTC() },
+	}
+
+	item := models.IntegrationCatalogItem{
+		ID:               "go-mcp",
+		Name:             "Go MCP",
+		Version:          "1.2.3",
+		Transport:        models.ServerTransportSTDIO,
+		RuntimeType:      "go",
+		SourceType:       "go",
+		SourcePackage:    "example.com/mcp/go-mcp",
+		SourceVersion:    "v1.2.3",
+		InstallStrategy:  "go_install",
+		LaunchEntryPoint: filepath.ToSlash(filepath.Join("bin", binaryName)),
+	}
+
+	pkg, err := service.InstallCatalogPackage(context.Background(), item)
+	if err != nil {
+		t.Fatalf("InstallCatalogPackage() error = %v", err)
+	}
+	if pkg.Status != models.PackageStatusInstalled {
+		t.Fatalf("pkg.Status = %q, want %q", pkg.Status, models.PackageStatusInstalled)
+	}
+	if len(runner.calls) != 1 {
+		t.Fatalf("len(runner.calls) = %d, want 1", len(runner.calls))
+	}
+	call := runner.calls[0]
+	if call.name != "go" {
+		t.Fatalf("call.name = %q, want go", call.name)
+	}
+	if len(call.args) != 2 || call.args[0] != "install" || call.args[1] != "example.com/mcp/go-mcp@v1.2.3" {
+		t.Fatalf("call.args = %#v", call.args)
+	}
+
+	installedBinaryPath := filepath.Join(pkg.InstallDir, "bin", binaryName)
+	content, err := os.ReadFile(installedBinaryPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", installedBinaryPath, err)
+	}
+	if string(content) != "binary" {
+		t.Fatalf("installed binary content = %q", string(content))
 	}
 }

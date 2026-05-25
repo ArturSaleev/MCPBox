@@ -40,7 +40,13 @@ func (r *Registry) StopServer(ctx context.Context, serverID uint) error {
 		return nil
 	}
 
-	return runner.Stop(ctx)
+	err := runner.Stop(ctx)
+
+	r.mu.Lock()
+	delete(r.runners, serverID)
+	r.mu.Unlock()
+
+	return err
 }
 
 func (r *Registry) Status(serverID uint) string {
