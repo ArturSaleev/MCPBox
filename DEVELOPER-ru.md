@@ -4,58 +4,61 @@ English version: [DEVELOPER.md](./DEVELOPER.md)
 
 ## Обзор
 
-MCPBox — это control plane на Go для MCP-серверов.
+MCPBox - это control plane на Go для MCP-серверов.
 
-Он группирует MCP-серверы по проектам, хранит конфигурацию в SQLite, запускает локальные `stdio` MCP-процессы, проксирует удалённые `HTTP streaming` MCP-серверы, отдаёт встроенный React admin UI и предоставляет один MCP URL на проект.
+Он группирует MCP-серверы по проектам, хранит конфигурацию в SQLite, запускает локальные `stdio` MCP-процессы, проксирует удаленные `HTTP streaming` MCP-серверы, отдает встроенный React admin UI и предоставляет один MCP URL на проект.
 
-Сейчас MCPBox — это:
+Сейчас MCPBox - это:
 - control plane для MCP-серверов
-- проектный организатор локальных и удалённых MCP-backend'ов
-- aggregation endpoint для включённых серверов внутри проекта
+- проектный организатор локальных и удаленных MCP-бэкендов
+- aggregation endpoint для включенных серверов внутри проекта
 - операторский UI для управления проектами, серверами, inspection, health-check и логированием
 
-Сейчас MCPBox ещё не:
+Сейчас MCPBox еще не:
 - multi-user платформой с auth и ролями
-- полноценной observability-платформой, хотя теперь в нём уже есть базовые встроенные метрики по задержкам, ошибкам и трафику
-- распределённой системой оркестрации MCP между несколькими хостами
+- полноценной observability-платформой, хотя теперь в нем уже есть базовые встроенные метрики по задержкам, ошибкам и трафику
+- распределенной системой оркестрации MCP между несколькими хостами
 
-## Основная модель
+## Основная Модель
 
 - `Project`: логическая workspace-группа MCP-серверов для клиента, команды или окружения
-- `MCP Server`: либо локальный `stdio` сервер, который запускает MCPBox, либо удалённый `HTTP streaming` сервер
+- `MCP Server`: либо локальный `stdio` сервер, который запускает MCPBox, либо удаленный `HTTP streaming` сервер
 - `Catalog Item`: описание интеграции, синхронизированное из внешнего JSON manifest
 - `Installed Integration`: запись уровня проекта, которая связывает catalog item с конкретным `MCPServer`
 - `Installed Package`: переиспользуемый установленный runtime-пакет, который можно привязать к одному или нескольким проектам
 - `Project Package Instance`: связь уровня проекта между installed package и конкретным managed `MCPServer`
-- `Performance Metric`: лёгкая запись на один запрос, из которой строятся сводки по задержкам, ошибкам и трафику в экране логов
+- `Performance Metric`: легкая запись на один запрос, из которой строятся сводки по задержкам, ошибкам и трафику в экране логов
 
 Важное поведение:
 - у каждого проекта ровно один MCP URL
 - project URL имеет вид `/mcp/{project_token}`
-- endpoint проекта агрегирует все включённые серверы проекта
+- endpoint проекта агрегирует все включенные серверы проекта
 - если проект поставлен на паузу, новые MCP-подключения блокируются
-- отключённые серверы исключаются из project endpoint
+- отключенные серверы исключаются из project endpoint
 - локальные `stdio` серверы могут автоматически запускаться при старте приложения
 
-## Текущие возможности
+## Текущие Возможности
 
 ### Backend
 
 - Go HTTP API
 - SQLite через GORM
 - orchestration локальных `stdio` MCP-процессов
-- proxy для удалённых `HTTP streaming` MCP-серверов
+- proxy для удаленных `HTTP streaming` MCP-серверов
 - локальные Базы знаний / RAG-коллекции на on-disk Bleve полнотекстовых индексах
 - project-level endpoint `/mcp/{project_token}`
 - synchronous JSON-RPC request/response bridge для HTTP MCP-клиентов
 - legacy SSE compatibility mode для старых MCP-клиентов
-- агрегированный список `tools`, `resources` и `prompts` по включённым серверам проекта
+- агрегированный список `tools`, `resources` и `prompts` по включенным серверам проекта
 - маршрутизация tool, prompt и resource вызовов обратно в правильный backend
 - audit logging для управляющих действий и MCP-трафика
+- per-method aggregation audit logs для `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list` и `prompts/get`
 - pause/resume проекта
 - enable/disable сервера
 - inspection локального сервера
 - проверка health при create, update, start и manual check
+- углубленный health probing после `initialize`, включая безопасные follow-up probe-вызовы для database-style и filesystem-style серверов
+- sanitized health-check trace logging, чтобы диагностика сохранялась без утечки секретов
 - sync каталога из внешнего JSON manifest или локально загруженного manifest-файла
 - хранение installed integrations рядом с обычными MCP servers
 - install/uninstall lifecycle пакетов с переиспользованием пакета между проектами
@@ -63,8 +66,10 @@ MCPBox — это control plane на Go для MCP-серверов.
 - manifest-driven обработка секретов, чтобы чувствительные значения уходили в env, а не оставались в видимых CLI args
 - manifest-driven post-install health checks
 - Docker runtime MVP для stdio-ориентированных container-backed catalog items
-- лёгкие performance metrics по числу запросов, ошибкам, задержкам и трафику
+- поддержка `go_install` для Go-based stdio интеграций с размещением managed binary внутри директории установленного пакета
+- легкие performance metrics по числу запросов, ошибкам, задержкам и трафику
 - встроенный запуск Ollama через `github.com/mark3labs/mcphost/sdk`
+- LM Studio deeplink launcher через `POST /api/projects/{id}/launch-lmstudio`
 
 Примечание по Базе знаний:
 - текущий RAG-слой использует классический локальный полнотекстовый поиск, а не embedding-индексы
@@ -81,18 +86,22 @@ MCPBox — это control plane на Go для MCP-серверов.
 - flow дублирования проекта с переименованием до создания
 - модальный add-server flow для `stdio` и `HTTP streaming`
 - вкладка Market для sync каталога, установки пакетов, удаления пакетов и add-to-project flow
+- автоматический sync каталога при открытии Market view
 - отображение project MCP URL
 - start/stop локальных серверов
 - health status и ручное действие `Check`
+- немедленная обратная связь об успешном или неуспешном health-check после ручной проверки
 - audit log console с фильтрацией по проекту
 - встроенный performance dashboard внутри экрана логов
 - автообновляемый просмотр логов
 - `Info` modal для `stdio` серверов
 - определение статуса Ollama и выбор локальной модели
 - one-click действие `Launch Ollama` для подходящих проектов
+- диалог `Запустить` для выбора локального сценария запуска
+- действие `Add to LM Studio` из project UI
 - локализация English и Russian
 
-## Transport-модель
+## Transport-Модель
 
 Основной endpoint проекта:
 
@@ -112,28 +121,29 @@ POST /connect/{project_token}
 - `POST /mcp/{project_token}` без `sessionId` работает как synchronous HTTP JSON-RPC
 - `GET /mcp/{project_token}` открывает legacy SSE flow и возвращает `endpoint` event
 - дальнейшие SSE-запросы идут через `POST /mcp/{project_token}?sessionId=...`
-- paused project блокируется ещё до открытия transport-а
-- в project endpoint участвуют только включённые серверы
+- paused project блокируется еще до открытия transport-а
+- в project endpoint участвуют только включенные серверы
 - верхнеуровневый capability discovery MCPBox отвечает сам, после чего fan-out делает в серверы проекта
 
 Почему это важно:
 - LM Studio ожидает synchronous HTTP request/response для вызовов вроде `initialize` и `tools/list`
-- старые SSE-клиенты всё ещё используют legacy session model
+- старые SSE-клиенты все еще используют legacy session model
 - MCPBox поддерживает оба сценария без отдельных project URL
 
-## Поведение агрегатора
+## Поведение Агрегатора
 
-`/mcp/{project_token}` — это aggregation endpoint, а не route на один primary server.
+`/mcp/{project_token}` - это aggregation endpoint, а не route на один primary server.
 
 Текущее поведение:
 - `initialize` обрабатывается самим MCPBox
-- `tools/list`, `resources/list` и `prompts/list` объединяют результаты всех включённых серверов проекта
+- `tools/list`, `resources/list` и `prompts/list` объединяют результаты всех включенных серверов проекта
 - при необходимости MCPBox добавляет стабильные alias'ы, чтобы одинаковые имена из разных серверов не конфликтовали
 - tool calls, prompt fetch и resource read маршрутизируются обратно в сервер-источник
+- агрегированные вызовы также пишут нормализованные audit entries, чтобы downstream activity можно было отследить по методу и по backing server
 
-Благодаря этому один project URL может представлять несколько MCP-backend'ов без смены конфигурации клиента.
+Благодаря этому один project URL может представлять несколько MCP-бэкендов без смены конфигурации клиента.
 
-## Inspection для локальных `stdio`
+## Inspection Для Локальных `stdio`
 
 Для локальных `stdio` серверов MCPBox умеет делать live inspection MCP-возможностей.
 
@@ -143,26 +153,33 @@ POST /connect/{project_token}
 - доступные `tools`
 - доступные `resources`
 - доступные `prompts`
-- соседний `README.md`, если MCPBox находит его рядом с локальным путём сервера
+- соседний `README.md`, если MCPBox находит его рядом с локальным путем сервера
 
-Для удалённых `HTTP streaming` серверов это UI-действие специально не показывается.
+Для удаленных `HTTP streaming` серверов это UI-действие специально не показывается.
 
-## Health-проверка серверов
+## Health-Проверка Серверов
 
-MCPBox проверяет работоспособность MCP-сервера до того, как проблема всплывёт уже внутри AI-клиента.
+MCPBox проверяет работоспособность MCP-сервера до того, как проблема всплывет уже внутри AI-клиента.
 
 Текущее поведение:
 - при создании сервера MCPBox сразу выполняет health-check и сохраняет результат
-- при редактировании сервера MCPBox повторно проверяет обновлённую конфигурацию
-- ручной запуск локального `stdio` сервера считается успешным только если MCP health-check реально прошёл
-- UI показывает ручное действие `Check` и последнее состояние проверки
+- при редактировании сервера MCPBox повторно проверяет обновленную конфигурацию
+- ручной запуск локального `stdio` сервера считается успешным только если MCP health-check реально прошел
+- UI показывает ручное действие `Check` для локальных и удаленных серверов
+- API ответа `Check` теперь сразу возвращает обновленные health status, error text и timestamp
 
 Текущая стратегия проверки:
-- локальные `stdio` серверы проверяются через реальный MCP handshake: `initialize`, `notifications/initialized`, а также `tools/list`, `resources/list` и `prompts/list`, если сервер их поддерживает
-- удалённые `HTTP streaming` серверы проверяются через HTTP-запрос `initialize` к настроенному MCP URL
+- локальные `stdio` серверы проверяются через реальный MCP handshake: `initialize`, `notifications/initialized` и follow-up list вызовы
+- удаленные `HTTP streaming` серверы проверяются через тот же JSON-RPC flow поверх HTTP, а не только через поверхностную проверку доступности
+- если сервер публикует tools, MCPBox может сделать безопасный probe вроде `query`, `read_query`, `list_database` или filesystem listing, чтобы раньше поймать поломанную runtime-конфигурацию
+- неподдерживаемые list-методы вроде `resources/list` или `prompts/list` считаются допустимыми, если upstream сервер явно их не реализует
 - последнее состояние, текст ошибки и время проверки сохраняются в SQLite и показываются в UI
 
-## Каталог и интеграции
+Trace behavior:
+- каждый health run может писать `server_health_trace` audit entries с request, response и failure diagnostics
+- секреты маскируются в аргументах команд, URL, заголовках и JSON payload до записи trace details
+
+## Каталог И Интеграции
 
 MCPBox умеет синхронизировать внешний catalog manifest в SQLite и устанавливать его элементы в проекты.
 
@@ -177,10 +194,10 @@ DELETE /api/packages/{id}
 POST /api/projects/{id}/integrations
 ```
 
-Установленный catalog item создаёт обычный project-linked `MCPServer`, поэтому основной project endpoint остаётся `/mcp/{project_token}` без отдельной transport-модели.
+Установленный catalog item создает обычный project-linked `MCPServer`, поэтому основной project endpoint остается `/mcp/{project_token}` без отдельной transport-модели.
 
 Нюансы sync каталога:
-- `POST /api/catalog/sync` принимает либо удалённый `url`, либо `manifest_content` вместе с `file_name`
+- `POST /api/catalog/sync` принимает либо удаленный `url`, либо `manifest_content` вместе с `file_name`
 - legacy URL каталога вроде `https://webeasy.kz/mcpbox/catalog.json` нормализуются в `https://mcpbox.sh/catalog.json`
 - ошибки sync пишутся и в UI, и в audit log
 
@@ -192,16 +209,17 @@ POST /api/projects/{id}/integrations
 - config fields тоже могут объявлять `secret: true` и `env_var`, чтобы MCPBox сохранял секрет в `server.EnvJSON`, а не оставлял его в видимых CLI args
 - `health_check` может требовать post-install verification и при необходимости блокировать add-to-project
 - Docker catalog items сейчас ориентированы на stdio-style `docker run --rm -i ...` и установку через `docker_pull`
+- Go catalog items теперь могут использовать `install.strategy: "go_install"` вместе с `source.package` и entry point, чтобы установленный бинарник копировался в managed package directory
 
 Нюансы жизненного цикла пакета:
 - install пакета выполняется один раз на конкретную версию catalog item
-- uninstall пакета блокируется, пока хотя бы один проект всё ещё использует этот пакет
-- `Add to project` создаёт новый project package instance и обычный managed `MCPServer`
+- uninstall пакета блокируется, пока хотя бы один проект все еще использует этот пакет
+- `Add to project` создает новый project package instance и обычный managed `MCPServer`
 
 Нюанс жизненного цикла проекта:
-- `POST /api/projects/{id}/duplicate` клонирует метаданные проекта, серверы, package instances, installed integrations и подключённые knowledge-base links, создавая при этом новый token
+- `POST /api/projects/{id}/duplicate` клонирует метаданные проекта, серверы, package instances, installed integrations и подключенные knowledge-base links, создавая при этом новый token
 
-## Интеграция с Ollama
+## Интеграция С Ollama
 
 В MCPBox есть встроенный launcher для локального Ollama-сценария и тестирования MCP в один клик.
 
@@ -215,18 +233,29 @@ POST /api/projects/{id}/integrations
 - `ollama-chat` использует `github.com/mark3labs/mcphost/sdk`, поэтому отдельный бинарник `mcphost` пользователю не нужен
 
 Практический нюанс:
-- сама `ollama` всё равно должна быть установлена локально, потому что MCPBox не встраивает runtime модели, а запускает локальный Ollama-backed session
+- сама `ollama` все равно должна быть установлена локально, потому что MCPBox не встраивает runtime модели, а запускает локальный Ollama-backed session
 
-## Поведение при старте приложения
+## Интеграция С LM Studio
+
+MCPBox умеет подготовить локальный проект для LM Studio без ручной сборки конфигурации.
+
+Текущее поведение:
+- UI вызывает `POST /api/projects/{id}/launch-lmstudio`
+- MCPBox проверяет, что проект не на паузе и в нем есть хотя бы один включенный MCP-сервер или подключенная база знаний
+- backend строит `lmstudio://add_mcp` deeplink, который указывает обратно на project endpoint
+- имя сервера нормализуется из имени проекта и получает префикс `mcpbox_{project_id}_...`
+- MCPBox просит локальную ОС открыть deeplink и возвращает deeplink payload в API response
+
+## Поведение При Старте Приложения
 
 При старте MCPBox загружает проекты из хранилища и решает, какие локальные серверы нужно поднять автоматически.
 
 Текущее правило:
-- если проект не на паузе и в нём есть хотя бы один включённый `stdio` сервер с `auto_start=true`, MCPBox запускает все включённые `stdio` серверы этого проекта
+- если проект не на паузе и в нем есть хотя бы один включенный `stdio` сервер с `auto_start=true`, MCPBox запускает все включенные `stdio` серверы этого проекта
 
 Это намеренно project-oriented поведение, а не запуск только первого сервера в списке.
 
-## Логирование и контроль
+## Логирование И Контроль
 
 В MCPBox есть audit trail для операционного контроля.
 
@@ -239,13 +268,15 @@ POST /api/projects/{id}/integrations
 - попытки MCP-подключения
 - forwarded JSON-RPC payloads
 - health-check активность
+- per-method aggregated MCP traffic
 - действия запуска Ollama
+- подготовка и открытие deeplink для LM Studio
 
 Операционные детали:
 - типовые informational stderr-строки от Filesystem-подобных MCP-серверов фильтруются и не выглядят как ложные access errors
 - SQL-логирование GORM по умолчанию выключено, чтобы обычный MCP-трафик не засорял консоль
 
-Помимо audit logs MCPBox теперь хранит и лёгкие performance metrics.
+Помимо audit logs MCPBox теперь хранит и легкие performance metrics.
 
 Основной API route:
 
@@ -260,7 +291,7 @@ GET /api/logs/metrics?project_id={id}&window=24h
 - метрики записываются вокруг proxied JSON-RPC calls и managed server method calls
 - каждая запись хранит project, server, transport, operation, latency, request bytes, response bytes и success/failure
 - экран логов использует эти данные для summary cards, trend charts, top slow servers, top error servers, top traffic servers и recent failures
-- это намеренно лёгкий встроенный operational view, а не внешний Prometheus/OpenTelemetry-level observability stack
+- это намеренно легкий встроенный operational view, а не внешний Prometheus/OpenTelemetry-level observability stack
 
 ## Требования
 
@@ -268,16 +299,16 @@ GET /api/logs/metrics?project_id={id}&window=24h
 - Node.js и npm для сборки встроенного UI
 - Windows, Linux или macOS
 
-Внешняя БД не нужна. MCPBox по умолчанию создаёт локальный SQLite-файл.
+Внешняя БД не нужна. MCPBox по умолчанию создает локальный SQLite-файл.
 
-## Структура проекта
+## Структура Проекта
 
 ```text
 main.go                      точка входа приложения и startup orchestration
 internal/models              GORM-модели
 internal/storage             SQLite-хранилище и запросы
 internal/orchestrator        жизненный цикл MCP-процессов, inspection, stdio bridge
-internal/httpapi             HTTP API, MCP endpoint, встроенный UI, Ollama launch API
+internal/httpapi             HTTP API, MCP endpoint, встроенный UI, API запуска Ollama и LM Studio
 internal/ollamahost          встроенный Ollama chat host на базе mcphost/sdk
 internal/installer           сервис локальной установки пакетов
 html                         React + Vite исходники встроенной админки
@@ -323,7 +354,7 @@ go run . ollama-chat --config /path/to/project.yml --model llama3.2
 - `http://127.0.0.1:<port>/`
 - локальные IPv4 URL, например `http://192.168.x.x:<port>/`
 
-## Настройка порта
+## Настройка Порта
 
 Порядок приоритета:
 1. CLI-флаг `-port`

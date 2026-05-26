@@ -34,6 +34,19 @@ Key capabilities:
 - One-click Ollama launcher for local MCP testing through embedded `mcphost/sdk`
 - Single-binary deployment with embedded React UI and local SQLite storage
 
+## What Is New In 1.2.2
+
+- New `Launch Project` dialog that groups local launch actions in one place instead of exposing only a direct Ollama button
+- LM Studio launch support with `Add to LM Studio` flow through a generated `lmstudio://add_mcp` deeplink
+- Better Ollama launch UX with model refresh inside the dialog and clearer empty-state handling when Ollama is not installed or has no local models
+- Server `Check` action now returns the latest health result immediately so the UI can show success or failure feedback without waiting for a full project reload
+- Aggregated project MCP traffic now writes explicit audit events for `tools/list`, `tools/call`, `resources/list`, `resources/read`, `prompts/list`, and `prompts/get`
+- Health checks are much deeper for both local `stdio` and remote `HTTP streaming` servers: after `initialize`, MCPBox now verifies list endpoints and can run a safe follow-up probe such as DB query checks or filesystem listing
+- Health-check traces now record sanitized diagnostic details in the audit log, while masking secrets in command arguments, headers, URLs, and JSON payloads
+- Catalog install flow now supports `install.strategy: "go_install"` for Go-based integrations and maps managed binaries back into the generated server command
+- Registry cleanup on stop is safer: stopped server runners are removed from the in-memory registry instead of being left behind
+- Market view now auto-syncs the catalog on open, so the page can populate without an extra manual sync in the common case
+
 ## What Is New In 1.2.1
 
 - Market page cleanup and refactor so the catalog UI is no longer a large monolithic block inside `App.tsx`
@@ -95,6 +108,12 @@ For local Ollama testing:
 3. Choose a local Ollama model in the UI.
 4. Click `Launch Ollama`.
 
+For LM Studio:
+1. Open a project that has at least one enabled MCP server or connected knowledge base.
+2. Click `Launch Project`.
+3. Choose `Add to LM Studio`.
+4. Confirm the deeplink in LM Studio when your OS opens it.
+
 ## Build From Source
 
 Requirements:
@@ -128,7 +147,8 @@ Default port: `38180`
 - MCPBox uses a local SQLite database by default.
 - The current Knowledge Base / RAG implementation uses local full-text indexing with Bleve. It does not build or require embedding indexes at this stage.
 - The Docker runtime support in `1.2.1` is intentionally an MVP. Advanced container features such as compose-style orchestration, custom networks, and volume presets are not fully implemented yet.
+- The `go_install` package flow in `1.2.2` assumes the target integration can be installed through `go install module/path@version` and exposed through a concrete binary entry point.
 - Secret masking is applied in the UI and catalog install flow. Existing manually configured servers that still pass secrets directly in command arguments should be migrated to environment variables for full process-list safety.
-- Future `Pro` capabilities are documented separately in `PRO-ROADMAP.md` and are not part of the current `1.2.1` implementation.
+- Future `Pro` capabilities are documented separately in `PRO-ROADMAP.md` and are not part of the current `1.2.2` implementation.
 - The Ollama launcher is shown only when `ollama` is installed on the machine.
 - Local server inspection is available for `stdio` servers only.
