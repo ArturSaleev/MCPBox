@@ -3,11 +3,13 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -653,6 +655,696 @@ func TestServerToolDisableFiltersAggregatedToolsAndExposeManagerAPI(t *testing.T
 	}
 }
 
+func TestProjectToolsCallWritesAuditLog(t *testing.T) {
+	t.Parallel()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode upstream payload: %v", err)
+		}
+
+		method, _ := payload["method"].(string)
+		id := payload["id"]
+
+		switch method {
+		case "initialize":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"protocolVersion": "2025-03-26",
+					"serverInfo":      map[string]any{"name": "mysql", "version": "1.0.0"},
+					"capabilities":    map[string]any{"tools": map[string]any{}},
+				},
+			})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"tools": []map[string]any{
+						{
+							"name":        "query",
+							"description": "Run SQL",
+							"inputSchema": map[string]any{"type": "object"},
+						},
+					},
+				},
+			})
+		case "tools/call":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result":  map[string]any{"rows": []map[string]any{{"answer": 1}}},
+			})
+		default:
+			t.Fatalf("unexpected method %q", method)
+		}
+	}))
+	defer upstream.Close()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	project := &models.Project{Name: "Workspace"}
+	if err := store.CreateProject(context.Background(), project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	server := &models.MCPServer{
+		ProjectID: project.ID,
+		Name:      "MySQL Prod",
+		Transport: models.ServerTransportHTTPStream,
+		URL:       upstream.URL,
+		IsEnabled: true,
+	}
+	if err := store.AddServer(context.Background(), server); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+	toolsRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/mcp/"+project.Token,
+		bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`),
+	)
+	toolsResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(toolsResponse, toolsRequest)
+
+	if toolsResponse.Code != http.StatusOK {
+		t.Fatalf("tools/list status = %d, body = %s", toolsResponse.Code, toolsResponse.Body.String())
+	}
+
+	var toolsEnvelope struct {
+		Result struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(toolsResponse.Body.Bytes(), &toolsEnvelope); err != nil {
+		t.Fatalf("json.Unmarshal(tools/list) error = %v", err)
+	}
+	if len(toolsEnvelope.Result.Tools) != 1 {
+		t.Fatalf("len(tools) = %d, want 1", len(toolsEnvelope.Result.Tools))
+	}
+	toolName := toolsEnvelope.Result.Tools[0].Name
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/mcp/"+project.Token,
+		bytes.NewBufferString(fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"arguments":{"sql":"SELECT 1"}}}`, toolName)),
+	)
+	request.RemoteAddr = "127.0.0.1:54321"
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	logs, err := store.ListAuditLogs(context.Background(), &project.ID, 20)
+	if err != nil {
+		t.Fatalf("ListAuditLogs() error = %v", err)
+	}
+
+	var found *models.AuditLog
+	for i := range logs {
+		if logs[i].Action == "mcp_tools_call" {
+			found = &logs[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatalf("mcp_tools_call audit log not found: %#v", logs)
+	}
+	if found.ServerID == nil || *found.ServerID != server.ID {
+		t.Fatalf("ServerID = %#v, want %d", found.ServerID, server.ID)
+	}
+	if found.Actor != "127.0.0.1" {
+		t.Fatalf("Actor = %q", found.Actor)
+	}
+	if !strings.Contains(found.Detail, fmt.Sprintf(`"tool":%q`, toolName)) {
+		t.Fatalf("Detail = %s", found.Detail)
+	}
+	if !strings.Contains(found.Detail, `"upstreamTool":"query"`) {
+		t.Fatalf("Detail = %s", found.Detail)
+	}
+	if !strings.Contains(found.Detail, `"sql":"SELECT 1"`) {
+		t.Fatalf("Detail = %s", found.Detail)
+	}
+}
+
+func TestServerCheckReturnsFailedHealthWhenHTTPToolsListFails(t *testing.T) {
+	t.Parallel()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode upstream payload: %v", err)
+		}
+
+		method, _ := payload["method"].(string)
+		id := payload["id"]
+
+		switch method {
+		case "initialize":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"protocolVersion": "2025-03-26",
+					"serverInfo":      map[string]any{"name": "mysql", "version": "1.0.0"},
+					"capabilities":    map[string]any{"tools": map[string]any{}},
+				},
+			})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"error": map[string]any{
+					"code":    -32000,
+					"message": "Access denied for user 'wrong'",
+				},
+			})
+		default:
+			t.Fatalf("unexpected method %q", method)
+		}
+	}))
+	defer upstream.Close()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	project := &models.Project{Name: "Workspace"}
+	if err := store.CreateProject(context.Background(), project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	server := &models.MCPServer{
+		ProjectID: project.ID,
+		Name:      "MySQL Broken",
+		Transport: models.ServerTransportHTTPStream,
+		URL:       upstream.URL,
+		IsEnabled: true,
+	}
+	if err := store.AddServer(context.Background(), server); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+	request := httptest.NewRequest(http.MethodPost, "/api/servers/"+jsonNumber(server.ID)+"/check", nil)
+	request.RemoteAddr = "127.0.0.1:54321"
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	var payload struct {
+		ServerID        uint   `json:"server_id"`
+		HealthStatus    string `json:"health_status"`
+		HealthError     string `json:"health_error"`
+		HealthCheckedAt string `json:"health_checked_at"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.ServerID != server.ID {
+		t.Fatalf("ServerID = %d, want %d", payload.ServerID, server.ID)
+	}
+	if payload.HealthStatus != models.ServerHealthFailed {
+		t.Fatalf("HealthStatus = %q, want %q", payload.HealthStatus, models.ServerHealthFailed)
+	}
+	if !strings.Contains(payload.HealthError, "Access denied") {
+		t.Fatalf("HealthError = %q", payload.HealthError)
+	}
+	if payload.HealthCheckedAt == "" {
+		t.Fatal("HealthCheckedAt is empty")
+	}
+
+	updatedServer, err := store.GetServer(context.Background(), server.ID)
+	if err != nil {
+		t.Fatalf("GetServer() error = %v", err)
+	}
+	if updatedServer == nil {
+		t.Fatal("updatedServer is nil")
+	}
+	if updatedServer.HealthStatus != models.ServerHealthFailed {
+		t.Fatalf("updatedServer.HealthStatus = %q", updatedServer.HealthStatus)
+	}
+
+	logs, err := store.ListAuditLogs(context.Background(), &project.ID, 20)
+	if err != nil {
+		t.Fatalf("ListAuditLogs() error = %v", err)
+	}
+	found := false
+	for _, entry := range logs {
+		if entry.Action == "server_health_failed" && strings.Contains(entry.Detail, "Access denied") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("server_health_failed audit log not found: %#v", logs)
+	}
+}
+
+func TestServerCheckReturnsFailedHealthWhenDBQueryProbeFails(t *testing.T) {
+	t.Parallel()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode upstream payload: %v", err)
+		}
+
+		method, _ := payload["method"].(string)
+		id := payload["id"]
+
+		switch method {
+		case "initialize":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"protocolVersion": "2025-03-26",
+					"serverInfo":      map[string]any{"name": "mysql", "version": "1.0.0"},
+					"capabilities":    map[string]any{"tools": map[string]any{}},
+				},
+			})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"tools": []map[string]any{
+						{
+							"name":        "query",
+							"description": "Run SQL",
+							"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"sql": map[string]any{"type": "string"}}},
+						},
+					},
+				},
+			})
+		case "tools/call":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"error": map[string]any{
+					"code":    -32000,
+					"message": "Access denied for user 'wrong'",
+				},
+			})
+		default:
+			t.Fatalf("unexpected method %q", method)
+		}
+	}))
+	defer upstream.Close()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	project := &models.Project{Name: "Workspace"}
+	if err := store.CreateProject(context.Background(), project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	server := &models.MCPServer{
+		ProjectID: project.ID,
+		Name:      "MySQL Broken",
+		Transport: models.ServerTransportHTTPStream,
+		URL:       upstream.URL,
+		IsEnabled: true,
+	}
+	if err := store.AddServer(context.Background(), server); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+	request := httptest.NewRequest(http.MethodPost, "/api/servers/"+jsonNumber(server.ID)+"/check", nil)
+	request.RemoteAddr = "127.0.0.1:54321"
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	var payload struct {
+		HealthStatus string `json:"health_status"`
+		HealthError  string `json:"health_error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.HealthStatus != models.ServerHealthFailed {
+		t.Fatalf("HealthStatus = %q, want %q", payload.HealthStatus, models.ServerHealthFailed)
+	}
+	if !strings.Contains(payload.HealthError, "Access denied") {
+		t.Fatalf("HealthError = %q", payload.HealthError)
+	}
+}
+
+func TestServerCheckReturnsFailedHealthWhenDBReadQueryProbeFails(t *testing.T) {
+	t.Parallel()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode upstream payload: %v", err)
+		}
+
+		method, _ := payload["method"].(string)
+		id := payload["id"]
+
+		switch method {
+		case "initialize":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"protocolVersion": "2025-03-26",
+					"serverInfo":      map[string]any{"name": "go-mcp-mysql", "version": "0.1.0"},
+					"capabilities":    map[string]any{"tools": map[string]any{"listChanged": true}},
+				},
+			})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"tools": []map[string]any{
+						{
+							"name":        "read_query",
+							"description": "Execute a read-only SQL query",
+							"inputSchema": map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}},
+						},
+					},
+				},
+			})
+		case "tools/call":
+			params, _ := payload["params"].(map[string]any)
+			if gotName, _ := params["name"].(string); gotName != "read_query" {
+				t.Fatalf("tools/call name = %q, want read_query", gotName)
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"error": map[string]any{
+					"code":    -32000,
+					"message": "dial tcp 127.0.0.1:233061: connectex: No connection could be made because the target machine actively refused it.",
+				},
+			})
+		default:
+			t.Fatalf("unexpected method %q", method)
+		}
+	}))
+	defer upstream.Close()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	project := &models.Project{Name: "Workspace"}
+	if err := store.CreateProject(context.Background(), project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	server := &models.MCPServer{
+		ProjectID: project.ID,
+		Name:      "MySQL Broken",
+		Transport: models.ServerTransportHTTPStream,
+		URL:       upstream.URL,
+		IsEnabled: true,
+	}
+	if err := store.AddServer(context.Background(), server); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+	request := httptest.NewRequest(http.MethodPost, "/api/servers/"+jsonNumber(server.ID)+"/check", nil)
+	request.RemoteAddr = "127.0.0.1:54321"
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	var payload struct {
+		HealthStatus string `json:"health_status"`
+		HealthError  string `json:"health_error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.HealthStatus != models.ServerHealthFailed {
+		t.Fatalf("HealthStatus = %q, want %q", payload.HealthStatus, models.ServerHealthFailed)
+	}
+	if !strings.Contains(payload.HealthError, "233061") {
+		t.Fatalf("HealthError = %q", payload.HealthError)
+	}
+}
+
+func TestServerCheckReturnsFailedHealthWhenListDatabaseProbeFails(t *testing.T) {
+	t.Parallel()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode upstream payload: %v", err)
+		}
+
+		method, _ := payload["method"].(string)
+		id := payload["id"]
+
+		switch method {
+		case "initialize":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"protocolVersion": "2025-03-26",
+					"serverInfo":      map[string]any{"name": "go-mcp-mysql", "version": "0.1.0"},
+					"capabilities":    map[string]any{"tools": map[string]any{"listChanged": true}},
+				},
+			})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"tools": []map[string]any{
+						{
+							"name":        "list_database",
+							"description": "List all databases in the MySQL server",
+							"inputSchema": map[string]any{"type": "object"},
+						},
+					},
+				},
+			})
+		case "tools/call":
+			params, _ := payload["params"].(map[string]any)
+			if gotName, _ := params["name"].(string); gotName != "list_database" {
+				t.Fatalf("tools/call name = %q, want list_database", gotName)
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"error": map[string]any{
+					"code":    -32000,
+					"message": "dial tcp 127.0.0.1:233061: connectex: No connection could be made because the target machine actively refused it.",
+				},
+			})
+		default:
+			t.Fatalf("unexpected method %q", method)
+		}
+	}))
+	defer upstream.Close()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	project := &models.Project{Name: "Workspace"}
+	if err := store.CreateProject(context.Background(), project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	server := &models.MCPServer{
+		ProjectID: project.ID,
+		Name:      "MySQL Broken",
+		Transport: models.ServerTransportHTTPStream,
+		URL:       upstream.URL,
+		IsEnabled: true,
+	}
+	if err := store.AddServer(context.Background(), server); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+	request := httptest.NewRequest(http.MethodPost, "/api/servers/"+jsonNumber(server.ID)+"/check", nil)
+	request.RemoteAddr = "127.0.0.1:54321"
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	var payload struct {
+		HealthStatus string `json:"health_status"`
+		HealthError  string `json:"health_error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.HealthStatus != models.ServerHealthFailed {
+		t.Fatalf("HealthStatus = %q, want %q", payload.HealthStatus, models.ServerHealthFailed)
+	}
+	if !strings.Contains(payload.HealthError, "233061") {
+		t.Fatalf("HealthError = %q", payload.HealthError)
+	}
+}
+
+func TestServerCheckReturnsFailedHealthWhenProbeReturnsIsErrorResult(t *testing.T) {
+	t.Parallel()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode upstream payload: %v", err)
+		}
+
+		method, _ := payload["method"].(string)
+		id := payload["id"]
+
+		switch method {
+		case "initialize":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"protocolVersion": "2025-03-26",
+					"serverInfo":      map[string]any{"name": "go-mcp-mysql", "version": "0.1.0"},
+					"capabilities":    map[string]any{"tools": map[string]any{"listChanged": true}},
+				},
+			})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "tools/list":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"tools": []map[string]any{
+						{
+							"name":        "list_database",
+							"description": "List all databases in the MySQL server",
+							"inputSchema": map[string]any{"type": "object"},
+						},
+					},
+				},
+			})
+		case "tools/call":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"isError": true,
+					"content": []map[string]any{
+						{
+							"type": "text",
+							"text": "failed to establish database connection: dial tcp: address 233061: invalid port",
+						},
+					},
+				},
+			})
+		default:
+			t.Fatalf("unexpected method %q", method)
+		}
+	}))
+	defer upstream.Close()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	project := &models.Project{Name: "Workspace"}
+	if err := store.CreateProject(context.Background(), project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	server := &models.MCPServer{
+		ProjectID: project.ID,
+		Name:      "MySQL Broken",
+		Transport: models.ServerTransportHTTPStream,
+		URL:       upstream.URL,
+		IsEnabled: true,
+	}
+	if err := store.AddServer(context.Background(), server); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+	request := httptest.NewRequest(http.MethodPost, "/api/servers/"+jsonNumber(server.ID)+"/check", nil)
+	request.RemoteAddr = "127.0.0.1:54321"
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	var payload struct {
+		HealthStatus string `json:"health_status"`
+		HealthError  string `json:"health_error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.HealthStatus != models.ServerHealthFailed {
+		t.Fatalf("HealthStatus = %q, want %q", payload.HealthStatus, models.ServerHealthFailed)
+	}
+	if !strings.Contains(payload.HealthError, "invalid port") {
+		t.Fatalf("HealthError = %q", payload.HealthError)
+	}
+}
+
 func TestOllamaStatusEndpoint(t *testing.T) {
 	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
 	if err != nil {
@@ -947,6 +1639,91 @@ func TestLaunchProjectOllamaWithConnectedKnowledgeBaseOnly(t *testing.T) {
 	}
 	if !strings.Contains(launchedCommand, "ollama-chat --config") {
 		t.Fatalf("launch command = %q", launchedCommand)
+	}
+}
+
+func TestLaunchProjectLMStudioBuildsDeeplinkAndLaunches(t *testing.T) {
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	project := &models.Project{Name: "My OTP prod", RootPath: t.TempDir()}
+	if err := store.CreateProject(context.Background(), project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if err := store.AddServer(context.Background(), &models.MCPServer{
+		ProjectID: project.ID,
+		Name:      "Filesystem",
+		Transport: models.ServerTransportHTTPStream,
+		URL:       "http://127.0.0.1:8999/mcp",
+		IsEnabled: true,
+	}); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	var launchedURL string
+	api.urlLauncher = func(target string) error {
+		launchedURL = target
+		return nil
+	}
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/projects/"+jsonNumber(project.ID)+"/launch-lmstudio",
+		bytes.NewBufferString(`{}`),
+	)
+	request.Host = "mcpbox.local:38180"
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	var payload lmStudioLaunchResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.ServerName != fmt.Sprintf("mcpbox_%d_my_otp_prod", project.ID) {
+		t.Fatalf("payload.ServerName = %q", payload.ServerName)
+	}
+	if launchedURL != payload.Deeplink {
+		t.Fatalf("launchedURL = %q, want %q", launchedURL, payload.Deeplink)
+	}
+	if !strings.HasPrefix(payload.Deeplink, "lmstudio://add_mcp?") {
+		t.Fatalf("payload.Deeplink = %q", payload.Deeplink)
+	}
+
+	parsed, err := url.Parse(payload.Deeplink)
+	if err != nil {
+		t.Fatalf("url.Parse() error = %v", err)
+	}
+	configBase64 := parsed.Query().Get("config")
+	configBytes, err := base64.StdEncoding.DecodeString(configBase64)
+	if err != nil {
+		t.Fatalf("DecodeString() error = %v", err)
+	}
+
+	var config map[string]string
+	if err := json.Unmarshal(configBytes, &config); err != nil {
+		t.Fatalf("json.Unmarshal(config) error = %v", err)
+	}
+	if config["url"] != "http://mcpbox.local:38180/mcp/"+project.Token {
+		t.Fatalf("config url = %q", config["url"])
+	}
+}
+
+func TestNormalizeClientIntegrationNameSupportsUnicode(t *testing.T) {
+	t.Parallel()
+
+	got := normalizeClientIntegrationName("  Мой OTP prod / API  ")
+	want := "мой_otp_prod_api"
+	if got != want {
+		t.Fatalf("normalizeClientIntegrationName() = %q, want %q", got, want)
 	}
 }
 

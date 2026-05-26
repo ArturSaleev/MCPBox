@@ -173,6 +173,20 @@ type InstallPackageResponse = {
   package: InstalledPackage;
 };
 
+type ServerActionResponse = {
+  server_id: number;
+  status: string;
+  health_status?: string;
+  health_error?: string;
+  health_checked_at?: string;
+};
+
+type LMStudioLaunchResponse = {
+  project_id: number;
+  server_name: string;
+  deeplink: string;
+};
+
 type AuditLog = {
   id: number;
   project_id: number | null;
@@ -669,6 +683,7 @@ export default function App() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [creatingProject, setCreatingProject] = useState(false);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
+  const [launchProjectOpen, setLaunchProjectOpen] = useState(false);
   const [duplicateProjectOpen, setDuplicateProjectOpen] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<number | null>(null);
   const [duplicatingProjectId, setDuplicatingProjectId] = useState<number | null>(null);
@@ -696,6 +711,7 @@ export default function App() {
   const [catalogSettings, setCatalogSettings] = useState<CatalogSettings | null>(null);
   const [installedPackages, setInstalledPackages] = useState<InstalledPackage[]>([]);
   const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null);
+  const [ollamaRefreshing, setOllamaRefreshing] = useState(false);
   const [selectedOllamaModel, setSelectedOllamaModel] = useState('');
   const [catalogURL, setCatalogURL] = useState(defaultCatalogSourceURL);
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -709,6 +725,7 @@ export default function App() {
   const [uninstallingCatalogItemId, setUninstallingCatalogItemId] = useState<string | null>(null);
   const [busyProjectId, setBusyProjectId] = useState<number | null>(null);
   const [launchingOllamaProjectId, setLaunchingOllamaProjectId] = useState<number | null>(null);
+  const [launchingLMStudioProjectId, setLaunchingLMStudioProjectId] = useState<number | null>(null);
   const [busyServerId, setBusyServerId] = useState<number | null>(null);
   const [inspectOpen, setInspectOpen] = useState(false);
   const [inspectingServerId, setInspectingServerId] = useState<number | null>(null);
@@ -727,6 +744,7 @@ export default function App() {
   const [copied, setCopied] = useState(false);
   const [connectionURLsExpanded, setConnectionURLsExpanded] = useState(false);
   const logsViewportRef = useRef<HTMLDivElement | null>(null);
+  const marketAutoSyncTriggeredRef = useRef(false);
   const dictionary = dictionaries[language];
   const { labels, messages } = dictionary;
   const languageOptions: Array<{ value: Language; label: string }> = [
@@ -895,6 +913,24 @@ export default function App() {
   }, [view, selectedLogsProjectId, metricsWindow]);
 
   useEffect(() => {
+    if (view !== 'market') {
+      marketAutoSyncTriggeredRef.current = false;
+      return;
+    }
+
+    if (marketAutoSyncTriggeredRef.current || catalogLoading || catalogSyncing) {
+      return;
+    }
+
+    if (catalogSourceMode === 'file' && localCatalogContent.trim() === '') {
+      return;
+    }
+
+    marketAutoSyncTriggeredRef.current = true;
+    void syncCatalog();
+  }, [view, catalogLoading, catalogSyncing, catalogSourceMode, localCatalogContent]);
+
+  useEffect(() => {
     if (view !== 'logs') {
       return;
     }
@@ -1047,7 +1083,11 @@ export default function App() {
     }
   }
 
-  async function loadOllamaStatus() {
+  async function loadOllamaStatus(options?: { silent?: boolean }) {
+    if (!options?.silent) {
+      setOllamaRefreshing(true);
+    }
+
     try {
       const nextStatus = await apiRequest<OllamaStatus>(
         '/api/ollama/status',
@@ -1056,6 +1096,8 @@ export default function App() {
       setOllamaStatus(nextStatus);
     } catch {
       setOllamaStatus(null);
+    } finally {
+      setOllamaRefreshing(false);
     }
   }
 
@@ -1457,10 +1499,33 @@ export default function App() {
           body: JSON.stringify({ model: selectedOllamaModel }),
         },
       );
+      setLaunchProjectOpen(false);
     } catch (submitError) {
       setActionError(submitError instanceof Error ? submitError.message : messages.launchOllamaError);
     } finally {
       setLaunchingOllamaProjectId(null);
+    }
+  }
+
+  async function launchProjectLMStudio(projectId: number) {
+    setLaunchingLMStudioProjectId(projectId);
+    setActionError(null);
+
+    try {
+      await apiRequest<LMStudioLaunchResponse>(
+        `/api/projects/${projectId}/launch-lmstudio`,
+        messages.requestFailed,
+        {
+          method: 'POST',
+        },
+      );
+      setLaunchProjectOpen(false);
+    } catch (submitError) {
+      setActionError(
+        submitError instanceof Error ? submitError.message : messages.launchLMStudioError,
+      );
+    } finally {
+      setLaunchingLMStudioProjectId(null);
     }
   }
 
@@ -1676,7 +1741,7 @@ export default function App() {
     setActionError(null);
 
     try {
-      await apiRequest<{ server_id: number; status: string }>(
+      const response = await apiRequest<ServerActionResponse>(
         `/api/servers/${serverId}/check`,
         messages.requestFailed,
         {
@@ -1684,9 +1749,27 @@ export default function App() {
         },
       );
 
+      const serverName =
+        projects.flatMap((project) => project.servers).find((server) => server.id === serverId)?.name ??
+        `Server ${serverId}`;
+
+      if (response.health_status === 'healthy') {
+        toast.success(messages.checkServerHealthy(serverName));
+      } else {
+        toast.error(
+          messages.checkServerFailed(
+            serverName,
+            response.health_error || messages.checkServerError,
+          ),
+        );
+      }
+
       await loadProjects();
       await loadLogs();
     } catch (submitError) {
+      toast.error(
+        submitError instanceof Error ? submitError.message : messages.checkServerError,
+      );
       setActionError(
         submitError instanceof Error ? submitError.message : messages.checkServerError,
       );
@@ -3034,44 +3117,151 @@ export default function App() {
                   </div>
 
                   <div className="flex flex-wrap justify-end gap-3">
-                    {shouldShowOllamaControls ? (
-                      <>
-                        <div className="min-w-[220px]">
-                          <Select
-                            value={selectedOllamaModel || undefined}
-                            onValueChange={setSelectedOllamaModel}
-                          >
-                            <SelectTrigger className="h-11 rounded-xl border-border bg-background">
-                              <SelectValue placeholder={labels.ollamaModel} />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {ollamaStatus?.models.map((model) => (
-                                <SelectItem key={`ollama-model-${model}`} value={model}>
-                                  {model}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
+                    <Dialog open={launchProjectOpen} onOpenChange={setLaunchProjectOpen}>
+                      <DialogTrigger asChild>
                         <button
-                          onClick={() => void launchProjectOllama(selectedProject.project_id)}
-                          disabled={
-                            launchingOllamaProjectId === selectedProject.project_id ||
-                            !selectedProject.connection_ready ||
-                            selectedProject.is_paused ||
-                            !canLaunchOllama
-                          }
+                          disabled={!selectedProject.connection_ready || selectedProject.is_paused}
                           className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-70"
                         >
-                          {launchingOllamaProjectId === selectedProject.project_id ? (
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <OllamaIcon className="h-5 w-5" />
-                          )}
-                          {labels.launchOllama}
+                          <Play className="h-4 w-4" />
+                          {labels.launchProject}
                         </button>
-                      </>
-                    ) : null}
+                      </DialogTrigger>
+                      <DialogContent className="sm:max-w-2xl">
+                        <DialogHeader>
+                          <DialogTitle className="text-2xl font-bold">{labels.launchProject}</DialogTitle>
+                          <DialogDescription className="text-muted-foreground">
+                            {messages.launchProjectDescription}
+                          </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="space-y-6 py-4">
+                          {/* Ollama Section */}
+                          <div className="rounded-2xl border border-border bg-card p-6 shadow-sm transition-all hover:shadow-md">
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10">
+                                  <OllamaIcon className="h-6 w-6 text-blue-500" />
+                                </div>
+                                <div>
+                                  <h3 className="font-semibold">{labels.ollamaModel}</h3>
+                                  <p className="text-sm text-muted-foreground">
+                                    {shouldShowOllamaControls
+                                      ? (ollamaStatus?.models.length ?? 0) > 0
+                                        ? `${ollamaStatus?.models.length} ${labels.modelsAvailable}`
+                                        : messages.noOllamaModels
+                                      : messages.ollamaNotInstalled}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
+                                <div className="sm:min-w-[200px]">
+                                  <div className="flex items-center gap-2">
+                                    <Select
+                                      value={selectedOllamaModel || undefined}
+                                      onValueChange={setSelectedOllamaModel}
+                                      disabled={!shouldShowOllamaControls || (ollamaStatus?.models.length ?? 0) === 0}
+                                    >
+                                      <SelectTrigger className="h-11 rounded-lg border-border bg-background">
+                                        <SelectValue placeholder={labels.selectModel} />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        {ollamaStatus?.models.map((model) => (
+                                          <SelectItem key={`ollama-model-${model}`} value={model}>
+                                            {model}
+                                          </SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <button
+                                          type="button"
+                                          onClick={() => void loadOllamaStatus()}
+                                          disabled={ollamaRefreshing}
+                                          className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-background transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                                          aria-label={labels.refresh}
+                                        >
+                                          <RefreshCw
+                                            className={`h-4 w-4 ${ollamaRefreshing ? 'animate-spin' : ''}`}
+                                          />
+                                        </button>
+                                      </TooltipTrigger>
+                                      <TooltipContent>{labels.refresh}</TooltipContent>
+                                    </Tooltip>
+                                  </div>
+                                </div>
+
+                                <button
+                                  onClick={() => void launchProjectOllama(selectedProject.project_id)}
+                                  disabled={
+                                    launchingOllamaProjectId === selectedProject.project_id ||
+                                    !selectedProject.connection_ready ||
+                                    selectedProject.is_paused ||
+                                    !canLaunchOllama
+                                  }
+                                  className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 text-sm font-medium text-white transition-all hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  {launchingOllamaProjectId === selectedProject.project_id ? (
+                                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Play className="h-4 w-4" />
+                                  )}
+                                  {labels.launch}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* LM Studio Section */}
+                          <div className="rounded-2xl border border-border bg-card p-6 shadow-sm transition-all hover:shadow-md">
+                            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-purple-500/10">
+                                  <Bot className="h-6 w-6 text-purple-500" />
+                                </div>
+                                <div>
+                                  <h3 className="font-semibold">{labels.launchLMStudio}</h3>
+                                  <p className="text-sm text-muted-foreground">
+                                    {messages.launchLMStudioDescription}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <button
+                                onClick={() => void launchProjectLMStudio(selectedProject.project_id)}
+                                disabled={
+                                  launchingLMStudioProjectId === selectedProject.project_id ||
+                                  !selectedProject.connection_ready ||
+                                  selectedProject.is_paused
+                                }
+                                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 text-sm font-medium transition-all hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {launchingLMStudioProjectId === selectedProject.project_id ? (
+                                  <LoaderCircle className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Play className="h-4 w-4" />
+                                )}
+                                {labels.launch}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="rounded-lg bg-blue-500/5 p-4">
+                          <div className="flex items-start gap-3">
+                            <Info className="mt-0.5 h-5 w-5 text-blue-500" />
+                            <div>
+                              <p className="text-sm font-medium text-blue-500">{labels.tip}</p>
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                {messages.launchProjectTip}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
                     <Menubar className="h-auto border-0 bg-transparent p-0 shadow-none">
                       <MenubarMenu>
                         <MenubarTrigger className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-border px-4 text-sm font-medium transition-colors hover:bg-accent">

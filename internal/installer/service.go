@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -159,6 +160,8 @@ func (s *Service) installPackage(ctx context.Context, pkg *models.InstalledPacka
 	switch strings.TrimSpace(item.InstallStrategy) {
 	case "remote_only":
 		return nil
+	case "go_install":
+		return s.installGoPackage(ctx, pkg, item)
 	case "binary_download":
 		if strings.TrimSpace(item.SourceURL) == "" {
 			return errors.New("binary_download requires source.url")
@@ -216,6 +219,54 @@ func (s *Service) installPackage(ctx context.Context, pkg *models.InstalledPacka
 	default:
 		return fmt.Errorf("unsupported install strategy %q", item.InstallStrategy)
 	}
+}
+
+func (s *Service) installGoPackage(ctx context.Context, pkg *models.InstalledPackage, item models.IntegrationCatalogItem) error {
+	if _, err := s.requireRuntime("go"); err != nil {
+		return err
+	}
+
+	modulePath := strings.TrimSpace(item.SourcePackage)
+	if modulePath == "" {
+		return errors.New("go_install requires source.package")
+	}
+
+	versionQuery := strings.TrimSpace(item.SourceVersion)
+	if versionQuery == "" {
+		versionQuery = strings.TrimSpace(item.Version)
+	}
+	if versionQuery == "" {
+		versionQuery = "latest"
+	}
+
+	packageSpec := modulePath + "@" + versionQuery
+	if err := s.runner.Run(ctx, pkg.InstallDir, "go", "install", packageSpec); err != nil {
+		return err
+	}
+
+	goBinDir, err := s.detectGoBinDir(ctx)
+	if err != nil {
+		return err
+	}
+
+	binaryName := installedBinaryName(item, pkg)
+	sourcePath := filepath.Join(goBinDir, binaryName)
+	targetRelativePath := strings.TrimSpace(pkg.EntryPoint)
+	if targetRelativePath == "" {
+		targetRelativePath = binaryName
+	}
+	targetPath := filepath.Join(pkg.InstallDir, filepath.FromSlash(targetRelativePath))
+
+	if err := s.mkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return fmt.Errorf("prepare go binary dir: %w", err)
+	}
+	if err := copyFile(sourcePath, targetPath); err != nil {
+		return fmt.Errorf("copy go binary: %w", err)
+	}
+	if os.PathSeparator != '\\' {
+		_ = os.Chmod(targetPath, 0o755)
+	}
+	return nil
 }
 
 func (s *Service) requireRuntime(name string) (string, error) {
@@ -307,6 +358,34 @@ func (s *Service) detectVersion(ctx context.Context, executable string) (string,
 	return version, nil
 }
 
+func (s *Service) detectGoBinDir(ctx context.Context) (string, error) {
+	outputFunc := s.output
+	if outputFunc == nil {
+		outputFunc = execCombinedOutput
+	}
+
+	if rawGOBIN, err := outputFunc(ctx, "go", "env", "GOBIN"); err == nil {
+		if value := strings.TrimSpace(string(rawGOBIN)); value != "" {
+			return value, nil
+		}
+	}
+
+	rawGOPATH, err := outputFunc(ctx, "go", "env", "GOPATH")
+	if err != nil {
+		return "", fmt.Errorf("detect GOPATH: %w", err)
+	}
+	goPath := strings.TrimSpace(string(rawGOPATH))
+	if goPath == "" {
+		return "", errors.New("go env GOPATH returned empty value")
+	}
+	firstPath := strings.Split(goPath, string(os.PathListSeparator))[0]
+	firstPath = strings.TrimSpace(firstPath)
+	if firstPath == "" {
+		return "", errors.New("go env GOPATH returned empty path entry")
+	}
+	return filepath.Join(firstPath, "bin"), nil
+}
+
 func (s *Service) installDir(itemID, version string) string {
 	return filepath.Join(s.rootDir, sanitizePathSegment(itemID), sanitizePathSegment(version))
 }
@@ -318,6 +397,51 @@ func sanitizePathSegment(value string) string {
 	}
 	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "*", "-", "?", "-", "\"", "-", "<", "-", ">", "-", "|", "-")
 	return replacer.Replace(value)
+}
+
+func installedBinaryName(item models.IntegrationCatalogItem, pkg *models.InstalledPackage) string {
+	if entryPoint := strings.TrimSpace(pkg.EntryPoint); entryPoint != "" {
+		return filepath.Base(filepath.FromSlash(entryPoint))
+	}
+	if launchEntryPoint := strings.TrimSpace(item.LaunchEntryPoint); launchEntryPoint != "" {
+		return filepath.Base(filepath.FromSlash(launchEntryPoint))
+	}
+	if command := strings.TrimSpace(item.Command); command != "" && !strings.Contains(command, "{install_dir}") {
+		return filepath.Base(filepath.FromSlash(command))
+	}
+	modulePath := strings.TrimSpace(item.SourcePackage)
+	modulePath = strings.TrimRight(modulePath, "/")
+	if modulePath != "" {
+		modulePath = filepath.Base(filepath.FromSlash(modulePath))
+	}
+	if modulePath == "" {
+		modulePath = sanitizePathSegment(item.ID)
+	}
+	if os.PathSeparator == '\\' && !strings.HasSuffix(strings.ToLower(modulePath), ".exe") {
+		modulePath += ".exe"
+	}
+	return modulePath
+}
+
+func copyFile(sourcePath, targetPath string) error {
+	sourceFile, err := os.Open(sourcePath)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	targetFile, err := os.Create(targetPath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = targetFile.Close()
+	}()
+
+	if _, err := io.Copy(targetFile, sourceFile); err != nil {
+		return err
+	}
+	return targetFile.Close()
 }
 
 func pipRelativePath() string {

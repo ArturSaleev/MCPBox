@@ -50,7 +50,9 @@ export type Dictionary = {
     performance: string;
     timeWindow: string;
     refresh: string;
+    launchProject: string;
     launchOllama: string;
+    launchLMStudio: string;
     ollamaModel: string;
     pauseProject: string;
     resumeProject: string;
@@ -206,6 +208,8 @@ export type Dictionary = {
     inspectDescription: string;
     inspectServerError: string;
     checkServerError: string;
+    checkServerHealthy: (name: string) => string;
+    checkServerFailed: (name: string, reason: string) => string;
     requestFailed: (status: number) => string;
     marketDescription: string;
     searchCatalogPlaceholder: string;
@@ -247,7 +251,8 @@ export type Dictionary = {
     systemDependencyVersion: (name: string, version: string) => string;
     systemDependencyRequired: (name: string) => string;
     envSchemaDescription: string;
-      launchOllamaError: string;
+    launchOllamaError: string;
+    launchLMStudioError: string;
     noOllamaModels: string;
     knowledgeBaseHeroTitle: string;
     knowledgeBaseHeroDescription: string;
@@ -294,6 +299,8 @@ export type Dictionary = {
     loadServerToolsError: string;
     updateServerToolsError: string;
     disabledToolsBadge: (count: number) => string;
+    launchProjectDescription: string;
+    ollamaNotInstalled: string;
   };
 };
 
@@ -351,7 +358,9 @@ export const dictionaries: Record<Language, Dictionary> = {
       performance: 'Performance',
       timeWindow: 'Time window',
       refresh: 'Refresh',
+      launchProject: 'Launch',
       launchOllama: 'Launch Ollama',
+      launchLMStudio: 'Add to LM Studio',
       ollamaModel: 'Ollama model',
       pauseProject: 'Pause project',
       resumeProject: 'Resume project',
@@ -516,6 +525,8 @@ export const dictionaries: Record<Language, Dictionary> = {
         'Live MCP inspection for this local STDIO server plus nearby README if found.',
       inspectServerError: 'Failed to inspect server',
       checkServerError: 'Failed to verify server health',
+      checkServerHealthy: (name: string) => `${name} passed the health check.`,
+      checkServerFailed: (name: string, reason: string) => `${name} failed the health check: ${reason}`,
       requestFailed: (status: number) => `Request failed with status ${status}`,
       marketDescription:
         'Sync the external integration manifest into SQLite and install selected items into the current project as linked MCP servers.',
@@ -563,6 +574,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       systemDependencyRequired: (name: string) => `${name} required`,
       envSchemaDescription: 'These values will be passed to the server process as environment variables.',
       launchOllamaError: 'Failed to launch Ollama terminal.',
+      launchLMStudioError: 'Failed to open LM Studio.',
       noOllamaModels: 'No local Ollama models found.',
       knowledgeBaseHeroTitle: 'Global Knowledge Collections',
       knowledgeBaseHeroDescription:
@@ -623,6 +635,9 @@ export const dictionaries: Record<Language, Dictionary> = {
       loadServerToolsError: 'Failed to load server tools',
       updateServerToolsError: 'Failed to update server tools',
       disabledToolsBadge: (count: number) => `${count} tools off`,
+      launchProjectDescription:
+        'Choose how you want to start working with this project locally.',
+      ollamaNotInstalled: 'Ollama is not installed or not available in PATH.',
     },
   },
   ru: {
@@ -675,7 +690,9 @@ export const dictionaries: Record<Language, Dictionary> = {
       performance: 'Производительность',
       timeWindow: 'Период',
       refresh: 'Обновить',
+      launchProject: 'Запустить',
       launchOllama: 'Запустить Ollama',
+      launchLMStudio: 'Добавить в LM Studio',
       ollamaModel: 'Модель Ollama',
       pauseProject: 'Приостановить проект',
       resumeProject: 'Возобновить проект',
@@ -841,6 +858,8 @@ export const dictionaries: Record<Language, Dictionary> = {
         'Живой MCP inspection для локального STDIO сервера и nearby README, если он найден.',
       inspectServerError: 'Не удалось проинспектировать сервер',
       checkServerError: 'Не удалось проверить сервер',
+      checkServerHealthy: (name: string) => `${name} успешно прошел проверку.`,
+      checkServerFailed: (name: string, reason: string) => `${name} не прошел проверку: ${reason}`,
       requestFailed: (status: number) => `Запрос завершился со статусом ${status}`,
       marketDescription:
         'Синхронизируйте внешний манифест интеграций в SQLite и устанавливайте выбранные элементы в текущий проект как связанные MCP-серверы.',
@@ -890,6 +909,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       systemDependencyRequired: (name: string) => `Нужен ${name}`,
       envSchemaDescription: 'Эти значения будут переданы процессу сервера как переменные окружения.',
       launchOllamaError: 'Не удалось запустить терминал Ollama.',
+      launchLMStudioError: 'Не удалось открыть LM Studio.',
       noOllamaModels: 'Локальные модели Ollama не найдены.',
       knowledgeBaseHeroTitle: 'Глобальные коллекции знаний',
       knowledgeBaseHeroDescription:
@@ -950,6 +970,9 @@ export const dictionaries: Record<Language, Dictionary> = {
       loadServerToolsError: 'Не удалось загрузить tools сервера',
       updateServerToolsError: 'Не удалось обновить tools сервера',
       disabledToolsBadge: (count: number) => `${count} tools выкл`,
+      launchProjectDescription:
+        'Выберите, как вы хотите запускать этот проект локально.',
+      ollamaNotInstalled: 'Ollama не установлена или недоступна в PATH.',
     },
   },
 };

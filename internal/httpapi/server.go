@@ -34,6 +34,7 @@ type Server struct {
 	registry           *orchestrator.Registry
 	installer          *installer.Service
 	terminalLauncher   func(cwd, shellCommand string) error
+	urlLauncher        func(target string) error
 	mux                *http.ServeMux
 	sessionMu          sync.RWMutex
 	sessions           map[string]connectSession
@@ -169,6 +170,14 @@ type performanceFailureRecord struct {
 	CreatedAt     string `json:"created_at"`
 }
 
+type serverActionResponse struct {
+	ServerID        uint   `json:"server_id"`
+	Status          string `json:"status"`
+	HealthStatus    string `json:"health_status,omitempty"`
+	HealthError     string `json:"health_error,omitempty"`
+	HealthCheckedAt string `json:"health_checked_at,omitempty"`
+}
+
 type projectStatusResponse struct {
 	ProjectID             uint                           `json:"project_id"`
 	Name                  string                         `json:"name"`
@@ -264,6 +273,7 @@ func NewServerWithInstaller(store *storage.Store, registry *orchestrator.Registr
 		registry:           registry,
 		installer:          packageInstaller,
 		terminalLauncher:   launchTerminalSession,
+		urlLauncher:        launchExternalURL,
 		mux:                http.NewServeMux(),
 		sessions:           make(map[string]connectSession),
 		oauth:              make(map[string]oauthSession),
@@ -474,6 +484,8 @@ func (s *Server) handleProjectAction(w http.ResponseWriter, r *http.Request) {
 		s.handleProjectInstallIntegration(w, r, projectID)
 	case "launch-ollama":
 		s.handleLaunchProjectOllama(w, r, *project)
+	case "launch-lmstudio":
+		s.handleLaunchProjectLMStudio(w, r, *project)
 	case "pause":
 		s.handleSetProjectPaused(w, r, projectID, true)
 	case "resume":
@@ -721,7 +733,27 @@ func (s *Server) handleServerAction(w http.ResponseWriter, r *http.Request) {
 	case "enable":
 		err = s.store.SetServerEnabled(r.Context(), server.ID, true)
 	case "check":
-		err = s.refreshServerHealth(r.Context(), clientActor(r), *server, s.registry.Runner(server.ID))
+		checkErr := s.refreshServerHealth(r.Context(), clientActor(r), *server, s.registry.Runner(server.ID))
+		updatedServer, getErr := s.store.GetServer(r.Context(), server.ID)
+		if getErr != nil {
+			writeError(w, http.StatusInternalServerError, getErr)
+			return
+		}
+		if updatedServer == nil {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, http.StatusOK, serverActionResponse{
+			ServerID:        updatedServer.ID,
+			Status:          s.serverStatus(*updatedServer),
+			HealthStatus:    serverHealthStatus(*updatedServer),
+			HealthError:     updatedServer.HealthError,
+			HealthCheckedAt: formatServerHealthCheckedAt(updatedServer.HealthCheckedAt),
+		})
+		if checkErr != nil {
+			return
+		}
+		return
 	case "oauth-start":
 		s.handleServerOAuthStart(w, r, *server)
 		return
@@ -741,9 +773,9 @@ func (s *Server) handleServerAction(w http.ResponseWriter, r *http.Request) {
 	action := "server_" + tail
 	s.logAudit(r.Context(), &projectID, &server.ID, action, clientActor(r), server.Name)
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"server_id": server.ID,
-		"status":    s.serverStatus(*server),
+	writeJSON(w, http.StatusOK, serverActionResponse{
+		ServerID: server.ID,
+		Status:   s.serverStatus(*server),
 	})
 }
 
@@ -1036,7 +1068,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, err)
 				return
 			}
-			response, hasResponse, err := s.dispatchProjectJSONRPC(r.Context(), *project, servers, payload)
+			response, hasResponse, err := s.dispatchProjectJSONRPC(r.Context(), clientActor(r), *project, servers, payload)
 			if err != nil {
 				writeError(w, http.StatusBadGateway, err)
 				return
@@ -1057,7 +1089,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		response, hasResponse, err := s.dispatchProjectJSONRPC(r.Context(), *project, servers, payload)
+		response, hasResponse, err := s.dispatchProjectJSONRPC(r.Context(), clientActor(r), *project, servers, payload)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, err)
 			return
@@ -1723,20 +1755,27 @@ func formatServerHealthCheckedAt(checkedAt *time.Time) string {
 func (s *Server) refreshServerHealth(ctx context.Context, actor string, server models.MCPServer, runner *orchestrator.ServerRunner) error {
 	checkCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
+	trace := func(event, detail string) {
+		s.logAudit(ctx, &server.ProjectID, &server.ID, "server_health_trace", actor, truncateDetail(fmt.Sprintf("%s: %s", event, detail)))
+	}
+
+	envVars := decodeKeyValuePairsSafe(server.EnvJSON)
+	trace("started", fmt.Sprintf("transport=%s status=%s launch=%s url=%s", server.Transport, s.serverStatus(server), displayLaunchCommand(server, decodeJSONArray(server.ArgsJSON), envVars, nil), sanitizeHealthServerURL(server.URL)))
 
 	if normalizedAuthType(server.AuthType) == models.ServerAuthTypeOAuth2 {
 		var err error
 		server, err = s.ensureOAuthAccessToken(checkCtx, server)
 		if err != nil {
+			trace("oauth_error", err.Error())
 			return err
 		}
 	}
 
 	var err error
 	if runner != nil && runner.Running() && server.Transport == models.ServerTransportSTDIO {
-		err = orchestrator.CheckRunningServer(checkCtx, runner)
+		err = orchestrator.CheckRunningServerWithTrace(checkCtx, runner, trace)
 	} else {
-		err = orchestrator.CheckServer(checkCtx, server)
+		err = orchestrator.CheckServerWithTrace(checkCtx, server, trace)
 	}
 
 	checkedAt := time.Now().UTC()
@@ -1752,12 +1791,41 @@ func (s *Server) refreshServerHealth(ctx context.Context, actor string, server m
 	}
 
 	if err == nil {
+		trace("completed", "health check passed")
 		s.logAudit(ctx, &server.ProjectID, &server.ID, "server_health_ok", actor, server.Name)
 		return nil
 	}
 
+	trace("completed", "health check failed")
 	s.logAudit(ctx, &server.ProjectID, &server.ID, "server_health_failed", actor, detail)
 	return err
+}
+
+func sanitizeHealthServerURL(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return ""
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL
+	}
+	if parsed.User != nil {
+		username := parsed.User.Username()
+		if username != "" {
+			parsed.User = url.UserPassword(username, "********")
+		} else {
+			parsed.User = nil
+		}
+	}
+	query := parsed.Query()
+	for key := range query {
+		if isSensitiveSettingName(key) {
+			query.Set(key, "********")
+		}
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
 }
 
 func (s *Server) ensureOAuthAccessToken(ctx context.Context, server models.MCPServer) (models.MCPServer, error) {

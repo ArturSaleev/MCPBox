@@ -108,6 +108,21 @@
 - `Free` использует практичный line/text chunking и Bleve
 - `Pro` должен добавить syntax-aware понимание кода
 
+### 7. Agent Memory Layer
+
+Цель:
+- дать подключенным моделям переиспользуемую систему памяти для предпочтений пользователя, фактов проекта и ранее принятых решений между сессиями
+
+Планируемое направление:
+- project-scoped и user-scoped записи памяти для фактов, предпочтений, troubleshooting notes и pinned decisions
+- MCP tools и API routes для поиска, добавления, просмотра, обновления и удаления memory-записей
+- retrieval, который подмешивает в контекст только релевантную память вместо повторной передачи всей истории диалога
+- optional future semantic ranking для recall памяти после более простого structured или full-text MVP
+
+Отличие от Free:
+- `Free` дает только контекст текущей сессии и project knowledge search
+- `Pro` должен добавить явное долгосрочное хранилище памяти и retrieval для агентов
+
 ## Граница Между Free И Pro
 
 `Free / 1.2.0`:
@@ -124,3 +139,4 @@
 - multi-user auth и role controls
 - централизованный team deployment и security guardrails
 - AST-aware code intelligence
+- долгосрочная agent memory для пользователей и проектов
