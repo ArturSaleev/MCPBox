@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"MCPBox/internal/models"
-	"MCPBox/internal/orchestrator"
-	"MCPBox/internal/rag"
+	"github.com/ArturSaleev/MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/orchestrator"
+	"github.com/ArturSaleev/MCPBox/internal/rag"
 )
 
 type projectRequestEnvelope struct {

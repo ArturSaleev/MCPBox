@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/models"
 	"gorm.io/gorm"
 )
 

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/models"
 )
 
 func TestSanitizeHeadersForTraceMasksSecrets(t *testing.T) {

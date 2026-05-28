@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"testing"
 
-	"MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/models"
 )
 
 func TestRunnerForProjectRequiresEnabledServer(t *testing.T) {

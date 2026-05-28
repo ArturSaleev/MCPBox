@@ -1,29 +1,13 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { Toaster, toast } from 'sonner';
 import {
-  AlertCircle,
   Bot,
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
-  Copy,
   Database,
   FolderKanban,
-  Info,
-  LoaderCircle,
-  MoreHorizontal,
-  Pause,
-  Pencil,
-  Play,
-  Plus,
-  Radio,
-  RefreshCw,
-  Server,
-  Settings2,
+  LogOut,
+  Shield,
   ShoppingBag,
-  Square,
   TextSearch,
-  Trash2,
 } from 'lucide-react';
 import {
   defaultLanguage,
@@ -33,37 +17,39 @@ import {
   Language,
 } from './i18n';
 import logo from '../styles/logo.png';
-import { MarketView } from './components/MarketView';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from './components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from './components/ui/select';
-import {
-  Menubar,
-  MenubarContent,
-  MenubarItem,
-  MenubarMenu,
-  MenubarTrigger,
-} from './components/ui/menubar';
-import { Tooltip, TooltipContent, TooltipTrigger } from './components/ui/tooltip';
+import { AppShell } from './components/AppShell';
+import { ProjectsSidebar } from './components/ProjectsSidebar';
 import type {
   CatalogItem,
   CatalogSettings,
   InstalledPackage,
   ProjectOption,
 } from './market';
+
+const KnowledgeView = lazy(async () => {
+  const module = await import('./components/KnowledgeView');
+  return { default: module.KnowledgeView };
+});
+
+const LogsView = lazy(async () => {
+  const module = await import('./components/LogsView');
+  return { default: module.LogsView };
+});
+
+const MarketView = lazy(async () => {
+  const module = await import('./components/MarketView');
+  return { default: module.MarketView };
+});
+
+const ProjectsView = lazy(async () => {
+  const module = await import('./components/ProjectsView');
+  return { default: module.ProjectsView };
+});
+
+const ProAccessView = lazy(async () => {
+  const module = await import('./components/ProAccessView');
+  return { default: module.ProAccessView };
+});
 
 type ServerStatus = {
   id: number;
@@ -258,12 +244,112 @@ type ApiError = {
   error: string;
 };
 
-type KnowledgeSearchAuditDetail = {
-  tool?: string;
-  query?: string;
-  collections?: string[];
-  results?: number;
+type EditionMeta = {
+  edition_id: string;
+  edition_name: string;
+  capabilities: string[];
 };
+
+type ProPrincipal = {
+  name: string;
+  scopes: string[];
+  roles: string[];
+  user_id?: number;
+  session_id?: number;
+  auth_method?: string;
+  is_bootstrap: boolean;
+};
+
+type ProTokenRecord = {
+  id: number;
+  name: string;
+  scopes: string[];
+  expires_at?: string;
+  last_used_at?: string;
+  revoked_at?: string;
+  created_at: string;
+};
+
+type CreateProTokenResponse = {
+  token: string;
+  record: ProTokenRecord;
+};
+
+type ProUserRecord = {
+  id: number;
+  email: string;
+  display_name: string;
+  auth_provider: string;
+  external_id: string;
+  is_bootstrap: boolean;
+  roles: string[];
+  scopes: string[];
+  last_login_at?: string;
+  disabled_at?: string;
+  created_at: string;
+};
+
+type ProRoleRecord = {
+  id: number;
+  name: string;
+  display_name: string;
+  description: string;
+  scopes: string[];
+  is_system: boolean;
+  created_at: string;
+};
+
+type ProSessionRecord = {
+  id: number;
+  user_id: number;
+  user_name: string;
+  label: string;
+  auth_method: string;
+  roles: string[];
+  scopes: string[];
+  expires_at?: string;
+  last_used_at?: string;
+  revoked_at?: string;
+  created_at: string;
+};
+
+type CreateProUserResponse = ProUserRecord;
+type UpdateProUserResponse = ProUserRecord;
+type DisableProUserResponse = ProUserRecord;
+type EnableProUserResponse = ProUserRecord;
+
+type CreateProSessionResponse = {
+  token: string;
+  record: ProSessionRecord | null;
+};
+
+type ProLocalLoginResponse = {
+  token: string;
+  user: ProUserRecord;
+  session: ProSessionRecord | null;
+};
+
+type ProSSOConfig = {
+  enabled: boolean;
+  provider_name?: string;
+  issuer_url?: string;
+  redirect_url?: string;
+  start_url?: string;
+  allowed_hosted_domain?: string;
+  default_role?: string;
+  session_days?: number;
+  auto_create_users?: boolean;
+  scopes?: string[];
+};
+
+type ProScopePreset = {
+  id: 'reader' | 'operator' | 'admin';
+  label: string;
+  scopes: string[];
+  description: string;
+};
+
+type LogsFilterMode = 'all' | 'pro';
 
 type OllamaLaunchResponse = {
   project_id: number;
@@ -326,6 +412,7 @@ type ServerToolStatus = {
 
 const legacyCatalogSourceURL = 'https://webeasy.kz/mcpbox/catalog.json';
 const defaultCatalogSourceURL = 'https://mcpbox.sh/catalog.json';
+const proAuthStorageKey = 'mcpbox-pro-auth-token';
 
 type ProjectFormState = {
   name: string;
@@ -360,43 +447,6 @@ type KeyValuePair = {
   key: string;
   value: string;
 };
-
-function isSecretLikeName(name: string) {
-  const normalized = name.trim().toLowerCase();
-  if (!normalized) {
-    return false;
-  }
-
-  return (
-    normalized.includes('password') ||
-    normalized.includes('passwd') ||
-    normalized.includes('secret') ||
-    normalized.includes('token') ||
-    normalized.includes('private_key') ||
-    normalized.includes('private-key') ||
-    normalized.includes('api_key') ||
-    normalized.includes('api-key') ||
-    normalized === 'authorization'
-  );
-}
-
-function isSecretLikeHeaderName(name: string) {
-  const normalized = name.trim().toLowerCase();
-  if (!normalized) {
-    return false;
-  }
-
-  return (
-    normalized === 'authorization' ||
-    normalized === 'proxy-authorization' ||
-    normalized === 'cookie' ||
-    normalized === 'set-cookie' ||
-    normalized.includes('api-key') ||
-    normalized.includes('x-api-key') ||
-    normalized.includes('token') ||
-    normalized.includes('secret')
-  );
-}
 
 function normalizeCatalogSourceURL(url: string) {
   const trimmed = url.trim();
@@ -471,45 +521,24 @@ async function apiRequest<T>(
   return (await response.json()) as T;
 }
 
-function statusTone(status: string) {
-  return status === 'Running'
-    ? 'bg-status-running/15 text-status-running border-status-running/30'
-    : status === 'Disabled'
-      ? 'bg-amber-500/10 text-amber-600 border-amber-500/30'
-    : status === 'Remote'
-      ? 'bg-electric-blue/12 text-electric-blue border-electric-blue/30'
-    : 'bg-muted text-muted-foreground border-border';
-}
-
-function statusIcon(status: string) {
-  return status === 'Running' ? (
-    <Play className="h-3.5 w-3.5 fill-current" />
-  ) : status === 'Disabled' ? (
-    <Pause className="h-3.5 w-3.5" />
-  ) : status === 'Remote' ? (
-    <Radio className="h-3.5 w-3.5" />
-  ) : (
-    <Square className="h-3.5 w-3.5" />
-  );
-}
-
-function healthTone(status: string) {
-  return status === 'healthy'
-    ? 'bg-status-running/15 text-status-running border-status-running/30'
-    : status === 'failed'
-      ? 'bg-destructive/10 text-destructive border-destructive/30'
-      : 'bg-muted text-muted-foreground border-border';
-}
-
-function healthLabel(status: string, labels: typeof dictionaries.en.labels) {
-  if (status === 'healthy') {
-    return labels.healthy;
-  }
-  if (status === 'failed') {
-    return labels.failed;
+async function proAPIRequest<T>(
+  token: string,
+  input: RequestInfo,
+  requestFailedMessage: (status: number) => string,
+  init?: RequestInit,
+): Promise<T> {
+  const trimmedToken = token.trim();
+  if (!trimmedToken) {
+    throw new Error('Missing Pro admin token');
   }
 
-  return labels.unknown;
+  return apiRequest<T>(input, requestFailedMessage, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${trimmedToken}`,
+      ...(init?.headers ?? {}),
+    },
+  });
 }
 
 function formatSchema(schema: unknown) {
@@ -524,135 +553,11 @@ function formatSchema(schema: unknown) {
   }
 }
 
-function formatAuditAction(action: string) {
-  if (action === 'tool_call_project_knowledge_search') {
-    return 'tool_call -> search_project_knowledge';
+function hasProScope(principal: ProPrincipal | null, scope: string) {
+  if (!principal) {
+    return false;
   }
-  return action;
-}
-
-function formatAuditDetail(entry: AuditLog) {
-  if (entry.action !== 'tool_call_project_knowledge_search') {
-    return entry.detail;
-  }
-
-  try {
-    const parsed = JSON.parse(entry.detail) as KnowledgeSearchAuditDetail;
-    const collections = parsed.collections?.length ? `[${parsed.collections.join(', ')}]` : '[all connected collections]';
-    const query = parsed.query ? `query="${parsed.query}"` : '';
-    const results =
-      typeof parsed.results === 'number' ? `results=${parsed.results}` : '';
-    return [collections, query, results]
-      .filter((part) => part && part.trim() !== '')
-      .join(' ');
-  } catch {
-    return entry.detail;
-  }
-}
-
-function formatBytes(value: number) {
-  if (!Number.isFinite(value) || value <= 0) {
-    return '0 B';
-  }
-
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let size = value;
-  let unitIndex = 0;
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex += 1;
-  }
-  return `${size >= 100 || unitIndex === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
-}
-
-function formatLatency(value: number) {
-  if (!Number.isFinite(value) || value <= 0) {
-    return '0 ms';
-  }
-  if (value >= 1000) {
-    return `${(value / 1000).toFixed(2)} s`;
-  }
-  return `${Math.round(value)} ms`;
-}
-
-function formatPercent(value: number) {
-  if (!Number.isFinite(value) || value <= 0) {
-    return '0%';
-  }
-  return `${value.toFixed(value >= 10 ? 0 : 1)}%`;
-}
-
-function buildChartPath(values: number[], width: number, height: number) {
-  if (values.length === 0) {
-    return '';
-  }
-  const max = Math.max(...values, 1);
-  const step = values.length > 1 ? width / (values.length - 1) : width;
-  return values
-    .map((value, index) => {
-      const x = index * step;
-      const y = height - (value / max) * height;
-      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(2)} ${y.toFixed(2)}`;
-    })
-    .join(' ');
-}
-
-function TrendChart({
-  title,
-  subtitle,
-  primaryValues,
-  secondaryValues,
-  primaryColor,
-  secondaryColor,
-  labels,
-}: {
-  title: string;
-  subtitle: string;
-  primaryValues: number[];
-  secondaryValues: number[];
-  primaryColor: string;
-  secondaryColor: string;
-  labels: { primary: string; secondary: string };
-}) {
-  const width = 320;
-  const height = 120;
-  const hasData =
-    primaryValues.some((value) => value > 0) || secondaryValues.some((value) => value > 0);
-  const primaryPath = buildChartPath(primaryValues, width, height);
-  const secondaryPath = buildChartPath(secondaryValues, width, height);
-
-  return (
-    <div className="rounded-2xl border border-border bg-card p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h3 className="text-lg font-semibold">{title}</h3>
-          <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: primaryColor }} />
-            {labels.primary}
-          </span>
-          <span className="inline-flex items-center gap-2">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: secondaryColor }} />
-            {labels.secondary}
-          </span>
-        </div>
-      </div>
-      <div className="mt-4">
-        {hasData ? (
-          <svg viewBox={`0 0 ${width} ${height}`} className="h-32 w-full">
-            <path d={secondaryPath} fill="none" stroke={secondaryColor} strokeWidth="3" strokeLinecap="round" />
-            <path d={primaryPath} fill="none" stroke={primaryColor} strokeWidth="3" strokeLinecap="round" />
-          </svg>
-        ) : (
-          <div className="flex h-32 items-center justify-center rounded-xl bg-background text-sm text-muted-foreground">
-            {subtitle}
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  return principal.scopes.includes('pro:admin') || principal.scopes.includes(scope);
 }
 
 function OllamaIcon({ className }: { className?: string }) {
@@ -666,13 +571,19 @@ function OllamaIcon({ className }: { className?: string }) {
 }
 
 export default function App() {
-  const [view, setView] = useState<'projects' | 'knowledge' | 'market' | 'logs'>('projects');
+  const [view, setView] = useState<'projects' | 'knowledge' | 'market' | 'logs' | 'pro'>('projects');
   const [language, setLanguage] = useState<Language>(detectInitialLanguage);
+  const [editionMeta, setEditionMeta] = useState<EditionMeta>({
+    edition_id: 'free',
+    edition_name: 'MCPBox',
+    capabilities: [],
+  });
   const [projects, setProjects] = useState<ProjectStatus[]>([]);
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [logMetrics, setLogMetrics] = useState<PerformanceMetricsResponse | null>(null);
   const [selectedLogsProjectId, setSelectedLogsProjectId] = useState<number | null>(null);
   const [metricsWindow, setMetricsWindow] = useState<MetricsWindow>('1h');
+  const [logsFilterMode, setLogsFilterMode] = useState<LogsFilterMode>('all');
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [projectForm, setProjectForm] = useState<ProjectFormState>(emptyProjectForm);
   const [serverForm, setServerForm] = useState<ServerFormState>(emptyServerForm);
@@ -741,26 +652,298 @@ export default function App() {
   const [serverToolsError, setServerToolsError] = useState<string | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [authServerId, setAuthServerId] = useState<number | null>(null);
+  const [proAuthToken, setProAuthToken] = useState('');
+  const [proPrincipal, setProPrincipal] = useState<ProPrincipal | null>(null);
+  const [proTokens, setProTokens] = useState<ProTokenRecord[]>([]);
+  const [proUsers, setProUsers] = useState<ProUserRecord[]>([]);
+  const [proRoles, setProRoles] = useState<ProRoleRecord[]>([]);
+  const [proSessions, setProSessions] = useState<ProSessionRecord[]>([]);
+  const [proSSOConfig, setProSSOConfig] = useState<ProSSOConfig | null>(null);
+  const [proLoading, setProLoading] = useState(false);
+  const [proLocalLoginLoading, setProLocalLoginLoading] = useState(false);
+  const [proAuthBootstrapping, setProAuthBootstrapping] = useState(false);
+  const [proCreateOpen, setProCreateOpen] = useState(false);
+  const [proCreatingToken, setProCreatingToken] = useState(false);
+  const [proRevokingTokenId, setProRevokingTokenId] = useState<number | null>(null);
+  const [proCreateUserOpen, setProCreateUserOpen] = useState(false);
+  const [proCreatingUser, setProCreatingUser] = useState(false);
+  const [proEditUserOpen, setProEditUserOpen] = useState(false);
+  const [proUpdatingUserRoles, setProUpdatingUserRoles] = useState(false);
+  const [proDisablingUserId, setProDisablingUserId] = useState<number | null>(null);
+  const [proEnablingUserId, setProEnablingUserId] = useState<number | null>(null);
+  const [proDeletingUserId, setProDeletingUserId] = useState<number | null>(null);
+  const [proSessionsFilterUserId, setProSessionsFilterUserId] = useState('all');
+  const [proEditingUserId, setProEditingUserId] = useState<string>('');
+  const [proEditingUserName, setProEditingUserName] = useState('');
+  const [proEditingUserRoles, setProEditingUserRoles] = useState('reader');
+  const [proCreateSessionOpen, setProCreateSessionOpen] = useState(false);
+  const [proCreatingSession, setProCreatingSession] = useState(false);
+  const [proRevokingSessionId, setProRevokingSessionId] = useState<number | null>(null);
+  const [proNewTokenName, setProNewTokenName] = useState('');
+  const [proLoginEmail, setProLoginEmail] = useState('');
+  const [proLoginPassword, setProLoginPassword] = useState('');
+  const [proNewTokenScopes, setProNewTokenScopes] = useState('pro:read, pro:write');
+  const [proNewTokenExpiresDays, setProNewTokenExpiresDays] = useState('30');
+  const [proCreatedTokenValue, setProCreatedTokenValue] = useState<string | null>(null);
+  const [proNewUserName, setProNewUserName] = useState('');
+  const [proNewUserEmail, setProNewUserEmail] = useState('');
+  const [proNewUserRoles, setProNewUserRoles] = useState('reader');
+  const [proNewSessionUserId, setProNewSessionUserId] = useState('');
+  const [proNewSessionLabel, setProNewSessionLabel] = useState('');
+  const [proNewSessionExpiresDays, setProNewSessionExpiresDays] = useState('30');
+  const [proCreatedSessionToken, setProCreatedSessionToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [connectionURLsExpanded, setConnectionURLsExpanded] = useState(false);
   const logsViewportRef = useRef<HTMLDivElement | null>(null);
   const marketAutoSyncTriggeredRef = useRef(false);
+  const previousViewRef = useRef(view);
   const dictionary = dictionaries[language];
   const { labels, messages } = dictionary;
   const languageOptions: Array<{ value: Language; label: string }> = [
     { value: 'en', label: labels.english },
     { value: 'ru', label: labels.russian },
   ];
+  const proCopy =
+    language === 'ru'
+      ? {
+          nav: 'Pro',
+          title: 'MCPBox Pro',
+          subtitle: 'Токены агентов и защищенный Pro API',
+          signInSSO: 'Войти через SSO',
+          localLogin: 'Войти по email и паролю',
+          password: 'Пароль',
+          login: 'Войти',
+          loginHint: 'Локальный admin создаётся из консоли командой `admin create`. После входа MCPBox Pro выдаёт внутреннюю сессию.',
+          signOut: 'Выйти',
+          ssoAvailable: 'SSO доступен',
+          ssoIssuer: 'Issuer',
+          ssoRedirectURL: 'Redirect URL',
+          ssoScopes: 'Scopes',
+          ssoDomainHint: 'Разрешённый домен',
+          ssoDefaultRole: 'Роль по умолчанию',
+          ssoSessionDays: 'Сессия (дней)',
+          ssoAutoCreate: 'Автосоздание пользователей',
+          ssoEnabledLabel: 'Включено',
+          ssoDisabledLabel: 'Выключено',
+          connectedAs: 'Подключено как',
+          scopes: 'Скоупы',
+          createToken: 'Создать токен',
+          createTokenHint: 'Operator может создавать Reader/Operator токены. Admin нужен для admin токенов и revoke.',
+          tokenName: 'Название токена',
+          tokenNamePlaceholder: 'CI agent',
+          tokenScopes: 'Scopes',
+          tokenScopesPlaceholder: 'pro:read, pro:write',
+          expiresDays: 'Срок (дней)',
+          expiryPolicy: 'Срок жизни',
+          expiryHint: '0 означает бессрочно. Можно выбрать preset или ввести своё число дней.',
+          noExpiry: 'Бессрочно',
+          oneDay: '1 день',
+          sevenDays: '7 дней',
+          thirtyDays: '30 дней',
+          ninetyDays: '90 дней',
+          oneYear: '365 дней',
+          activeTokens: 'Активные токены',
+          noTokens: 'Токенов пока нет. Создай первый токен ниже.',
+          revoke: 'Отозвать',
+          adminOnly: 'Только для admin',
+          oneTimeSecret: 'Показывается только один раз',
+          copyToken: 'Скопировать токен',
+          authHint: 'Pro endpoints защищены bearer token. Значение хранится только в localStorage этого браузера.',
+          verifyFailed: 'Не удалось проверить Pro token',
+          loadTokensFailed: 'Не удалось загрузить токены',
+          createFailed: 'Не удалось создать токен',
+          revokeFailed: 'Не удалось отозвать токен',
+          users: 'Пользователи',
+          rolesTitle: 'Роли',
+          sessionsTitle: 'Сессии',
+          noUsers: 'Пользователей пока нет.',
+          noSessions: 'Сессий пока нет.',
+          createUser: 'Создать пользователя',
+          editUserRoles: 'Изменить роли',
+          disableUser: 'Отключить',
+          enableUser: 'Включить',
+          deleteUser: 'Удалить',
+          createSession: 'Создать сессию',
+          displayName: 'Имя',
+          email: 'Email',
+          roleNames: 'Роли',
+          sessionLabel: 'Название сессии',
+          issueSession: 'Выпустить сессию',
+          createdSessionToken: 'Session token',
+          currentSession: 'Текущая сессия',
+          revokeCurrentSession: 'Завершить текущую сессию',
+          authMethod: 'Метод доступа',
+          rolesLabel: 'Роли',
+          userId: 'Пользователь',
+          sessionId: 'Сессия',
+          allUsers: 'Все пользователи',
+          sessionsFilter: 'Фильтр сессий',
+          createUserFailed: 'Не удалось создать пользователя',
+          updateUserRolesFailed: 'Не удалось обновить роли пользователя',
+          disableUserFailed: 'Не удалось отключить пользователя',
+          enableUserFailed: 'Не удалось включить пользователя',
+          deleteUserFailed: 'Не удалось удалить пользователя',
+          disableUserConfirm: 'Отключить пользователя? Все его активные сессии будут отозваны.',
+          enableUserConfirm: 'Включить пользователя снова?',
+          deleteUserConfirm: 'Удалить пользователя? Это удалит его роли и отзовёт активные сессии.',
+          createSessionFailed: 'Не удалось создать сессию',
+          revokeSessionFailed: 'Не удалось отозвать сессию',
+          revokeCurrentSessionConfirm: 'Завершить текущую активную сессию? После этого потребуется войти заново.',
+          me: 'Текущий доступ',
+          statusReady: 'Готово',
+          notConnected: 'Не подключено',
+        }
+      : {
+          nav: 'Pro',
+          title: 'MCPBox Pro',
+          subtitle: 'Agent tokens and protected Pro API',
+          signInSSO: 'Sign in with SSO',
+          localLogin: 'Sign in with email and password',
+          password: 'Password',
+          login: 'Sign in',
+          loginHint: 'The first local admin is created from the CLI with `admin create`. MCPBox Pro then issues its own internal session.',
+          signOut: 'Sign out',
+          ssoAvailable: 'SSO available',
+          ssoIssuer: 'Issuer',
+          ssoRedirectURL: 'Redirect URL',
+          ssoScopes: 'Scopes',
+          ssoDomainHint: 'Allowed domain',
+          ssoDefaultRole: 'Default role',
+          ssoSessionDays: 'Session days',
+          ssoAutoCreate: 'Auto-create users',
+          ssoEnabledLabel: 'Enabled',
+          ssoDisabledLabel: 'Disabled',
+          connectedAs: 'Connected as',
+          scopes: 'Scopes',
+          createToken: 'Create token',
+          createTokenHint: 'Operator can create Reader/Operator tokens. Admin is required for admin tokens and revoke.',
+          tokenName: 'Token name',
+          tokenNamePlaceholder: 'CI agent',
+          tokenScopes: 'Scopes',
+          tokenScopesPlaceholder: 'pro:read, pro:write',
+          expiresDays: 'Expires (days)',
+          expiryPolicy: 'Lifetime',
+          expiryHint: '0 means no expiry. You can choose a preset or enter a custom number of days.',
+          noExpiry: 'No expiry',
+          oneDay: '1 day',
+          sevenDays: '7 days',
+          thirtyDays: '30 days',
+          ninetyDays: '90 days',
+          oneYear: '365 days',
+          activeTokens: 'Active tokens',
+          noTokens: 'No tokens yet. Create the first token below.',
+          revoke: 'Revoke',
+          adminOnly: 'Admin only',
+          oneTimeSecret: 'Shown only once',
+          copyToken: 'Copy token',
+          authHint: 'Pro endpoints are protected by bearer token. The value is stored only in this browser localStorage.',
+          verifyFailed: 'Failed to verify Pro token',
+          loadTokensFailed: 'Failed to load tokens',
+          createFailed: 'Failed to create token',
+          revokeFailed: 'Failed to revoke token',
+          users: 'Users',
+          rolesTitle: 'Roles',
+          sessionsTitle: 'Sessions',
+          noUsers: 'No users yet.',
+          noSessions: 'No sessions yet.',
+          createUser: 'Create user',
+          editUserRoles: 'Edit roles',
+          disableUser: 'Disable',
+          enableUser: 'Enable',
+          deleteUser: 'Delete',
+          createSession: 'Create session',
+          displayName: 'Display name',
+          email: 'Email',
+          roleNames: 'Roles',
+          sessionLabel: 'Session label',
+          issueSession: 'Issue session',
+          createdSessionToken: 'Session token',
+          currentSession: 'Current session',
+          revokeCurrentSession: 'Revoke current session',
+          authMethod: 'Auth method',
+          rolesLabel: 'Roles',
+          userId: 'User',
+          sessionId: 'Session',
+          allUsers: 'All users',
+          sessionsFilter: 'Session filter',
+          createUserFailed: 'Failed to create user',
+          updateUserRolesFailed: 'Failed to update user roles',
+          disableUserFailed: 'Failed to disable user',
+          enableUserFailed: 'Failed to enable user',
+          deleteUserFailed: 'Failed to delete user',
+          disableUserConfirm: 'Disable this user? All active sessions will be revoked.',
+          enableUserConfirm: 'Enable this user again?',
+          deleteUserConfirm: 'Delete this user? This removes role links and revokes active sessions.',
+          createSessionFailed: 'Failed to create session',
+          revokeSessionFailed: 'Failed to revoke session',
+          revokeCurrentSessionConfirm: 'Revoke the current active session? You will need to sign in again after that.',
+          me: 'Current access',
+          statusReady: 'Ready',
+          notConnected: 'Not connected',
+        };
+  const proScopePresets: ProScopePreset[] =
+    language === 'ru'
+      ? [
+          {
+            id: 'reader',
+            label: 'Reader',
+            scopes: ['pro:read'],
+            description: 'Только просмотр Pro API и token activity',
+          },
+          {
+            id: 'operator',
+            label: 'Operator',
+            scopes: ['pro:read', 'pro:write'],
+            description: 'Рабочие операции без полного admin-доступа',
+          },
+          {
+            id: 'admin',
+            label: 'Admin',
+            scopes: ['pro:admin'],
+            description: 'Полный доступ ко всем Pro операциям',
+          },
+        ]
+      : [
+          {
+            id: 'reader',
+            label: 'Reader',
+            scopes: ['pro:read'],
+            description: 'Read-only access to Pro API and token activity',
+          },
+          {
+            id: 'operator',
+            label: 'Operator',
+            scopes: ['pro:read', 'pro:write'],
+            description: 'Operational access without full admin rights',
+          },
+          {
+            id: 'admin',
+            label: 'Admin',
+            scopes: ['pro:admin'],
+            description: 'Full access to all Pro operations',
+          },
+        ];
+  const viewLoadingFallback = (
+    <div className="flex min-h-[40vh] items-center justify-center rounded-2xl border border-border bg-card/50">
+      <div className="text-sm text-muted-foreground">{messages.loadingProjects}</div>
+    </div>
+  );
   const metricsWindowOptions: Array<{ value: MetricsWindow; label: string }> = [
     { value: '5m', label: labels.last5Minutes },
     { value: '1h', label: labels.lastHour },
     { value: '24h', label: labels.last24Hours },
   ];
+  const hasProAccess =
+    editionMeta.edition_id === 'pro' ||
+    editionMeta.capabilities.includes('auth') ||
+    editionMeta.capabilities.includes('agent_tokens');
+  const isProEdition = editionMeta.edition_id === 'pro';
   const navigationItems = [
     { id: 'projects' as const, label: labels.projects, icon: FolderKanban },
     { id: 'knowledge' as const, label: labels.knowledgeBase, icon: Database },
     { id: 'market' as const, label: labels.market, icon: ShoppingBag },
     { id: 'logs' as const, label: labels.logs, icon: TextSearch },
+    ...(hasProAccess ? [{ id: 'pro' as const, label: proCopy.nav, icon: Shield }] : []),
   ];
 
   const selectedProject =
@@ -825,6 +1008,56 @@ export default function App() {
   const errorTrendValues = logMetrics?.trends.map((entry) => entry.error_count) ?? [];
   const avgLatencyTrendValues = logMetrics?.trends.map((entry) => entry.avg_latency_ms) ?? [];
   const p95LatencyTrendValues = logMetrics?.trends.map((entry) => entry.p95_latency_ms) ?? [];
+  const proAuditActions = new Set([
+    'token_created',
+    'token_revoked',
+    'token_used',
+    'session_created',
+    'session_used',
+    'session_revoked',
+    'user_created',
+    'user_roles_updated',
+    'user_enabled',
+    'user_disabled',
+    'user_deleted',
+    'local_login',
+    'sso_login',
+  ]);
+  const proActivityCopy =
+    language === 'ru'
+      ? {
+          title: 'Pro activity',
+          subtitle: 'События токенов, сессий и защищенного Pro API',
+          all: 'Вся активность',
+          proOnly: 'Только Pro auth',
+          created: 'Создано',
+          used: 'Использовано',
+          revoked: 'Отозвано',
+          empty: 'Pro auth activity пока нет.',
+        }
+      : {
+          title: 'Pro activity',
+          subtitle: 'Agent token, session, and protected Pro API events',
+          all: 'All activity',
+          proOnly: 'Pro auth only',
+          created: 'Created',
+          used: 'Used',
+          revoked: 'Revoked',
+          empty: 'No Pro auth activity yet.',
+        };
+  const proActivityLogs = logs.filter((entry) => proAuditActions.has(entry.action));
+  const visibleLogs =
+    logsFilterMode === 'pro' ? proActivityLogs : logs;
+  const proCreatedCount = proActivityLogs.filter((entry) => entry.action === 'token_created' || entry.action === 'session_created').length;
+  const proUsedCount = proActivityLogs.filter((entry) => entry.action === 'token_used' || entry.action === 'session_used' || entry.action === 'local_login' || entry.action === 'sso_login').length;
+  const proRevokedCount = proActivityLogs.filter((entry) => entry.action === 'token_revoked' || entry.action === 'session_revoked').length;
+  const canWritePro = hasProScope(proPrincipal, 'pro:write');
+  const canAdminPro = hasProScope(proPrincipal, 'pro:admin');
+  const proAuthLocked = isProEdition && !proPrincipal;
+  const activeView = proAuthLocked ? 'pro' : view;
+  const visibleNavigationItems = proAuthLocked
+    ? navigationItems.filter((item) => item.id === 'pro')
+    : navigationItems;
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -834,6 +1067,37 @@ export default function App() {
     window.localStorage.setItem(languageStorageKey, language);
     document.documentElement.lang = language;
   }, [language]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    setProAuthToken(window.localStorage.getItem(proAuthStorageKey) ?? '');
+
+    const url = new URL(window.location.href);
+    const sessionToken = url.searchParams.get('pro_session_token');
+    const ssoError = url.searchParams.get('pro_sso_error');
+    const targetView = url.searchParams.get('pro_view');
+    if (sessionToken) {
+      updateAndPersistProAuthToken(sessionToken);
+      if (targetView === 'pro') {
+        setView('pro');
+      }
+      url.searchParams.delete('pro_session_token');
+      url.searchParams.delete('pro_view');
+      window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+    }
+    if (ssoError) {
+      if (targetView === 'pro') {
+        setView('pro');
+      }
+      toast.error(ssoError);
+      url.searchParams.delete('pro_sso_error');
+      url.searchParams.delete('pro_view');
+      window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+    }
+  }, []);
 
   useEffect(() => {
     setConnectionURLsExpanded(false);
@@ -886,8 +1150,45 @@ export default function App() {
   }, [selectedLogsProjectId]);
 
   useEffect(() => {
-    void Promise.all([loadProjects(true), loadRAGCollections(), loadCatalog(true), loadInstalledPackages(), loadOllamaStatus()]);
+    void Promise.all([
+      loadEditionMeta(),
+      loadProjects(true),
+      loadRAGCollections(),
+      loadCatalog(true),
+      loadInstalledPackages(),
+      loadOllamaStatus(),
+    ]);
   }, []);
+
+  useEffect(() => {
+    if (!hasProAccess || activeView !== 'pro' || !proAuthToken.trim() || proPrincipal) {
+      return;
+    }
+
+    void loadProSession();
+  }, [hasProAccess, activeView, proAuthToken, proPrincipal]);
+
+  useEffect(() => {
+    if (!hasProAccess) {
+      setProSSOConfig(null);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const config = await apiRequest<ProSSOConfig>('/api/pro/sso/config', messages.requestFailed);
+        setProSSOConfig(config);
+      } catch {
+        setProSSOConfig(null);
+      }
+    })();
+  }, [hasProAccess]);
+
+  useEffect(() => {
+    if (!hasProAccess && view === 'pro') {
+      setView('projects');
+    }
+  }, [hasProAccess, view]);
 
   useEffect(() => {
     if (!ollamaStatus?.installed) {
@@ -913,9 +1214,16 @@ export default function App() {
   }, [view, selectedLogsProjectId, metricsWindow]);
 
   useEffect(() => {
+    const previousView = previousViewRef.current;
+    previousViewRef.current = view;
+
     if (view !== 'market') {
       marketAutoSyncTriggeredRef.current = false;
       return;
+    }
+
+    if (previousView !== 'market') {
+      marketAutoSyncTriggeredRef.current = false;
     }
 
     if (marketAutoSyncTriggeredRef.current || catalogLoading || catalogSyncing) {
@@ -984,6 +1292,19 @@ export default function App() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  }
+
+  async function loadEditionMeta() {
+    try {
+      const meta = await apiRequest<EditionMeta>('/api/meta', messages.requestFailed);
+      setEditionMeta(meta);
+    } catch {
+      setEditionMeta({
+        edition_id: 'free',
+        edition_name: 'MCPBox',
+        capabilities: [],
+      });
     }
   }
 
@@ -1111,6 +1432,435 @@ export default function App() {
     } catch (loadError) {
       setActionError(loadError instanceof Error ? loadError.message : messages.loadPackagesError);
     }
+  }
+
+  async function loadProSession(tokenOverride?: string) {
+    const activeToken = (tokenOverride ?? proAuthToken).trim();
+    if (!activeToken) {
+      setProPrincipal(null);
+      setProTokens([]);
+      setProUsers([]);
+      setProRoles([]);
+      setProSessions([]);
+      return;
+    }
+
+    setProLoading(true);
+    try {
+      const [principal, tokens, users, roles, sessions] = await Promise.all([
+        proAPIRequest<ProPrincipal>(activeToken, '/api/pro/auth/me', messages.requestFailed),
+        proAPIRequest<ProTokenRecord[]>(activeToken, '/api/pro/tokens', messages.requestFailed),
+        proAPIRequest<ProUserRecord[]>(activeToken, '/api/pro/users', messages.requestFailed),
+        proAPIRequest<ProRoleRecord[]>(activeToken, '/api/pro/roles', messages.requestFailed),
+        proAPIRequest<ProSessionRecord[]>(activeToken, '/api/pro/sessions', messages.requestFailed),
+      ]);
+      setProPrincipal(principal);
+      setProTokens(tokens);
+      setProUsers(users);
+      setProRoles(roles);
+      setProSessions(sessions);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(proAuthStorageKey, activeToken);
+      }
+    } catch (loadError) {
+      resetProAccess(false);
+      toast.error(loadError instanceof Error ? loadError.message : proCopy.loadTokensFailed);
+    } finally {
+      setProLoading(false);
+    }
+  }
+
+  function resetProAccess(clearToken = false) {
+    setProPrincipal(null);
+    setProTokens([]);
+    setProUsers([]);
+    setProRoles([]);
+    setProSessions([]);
+    setProCreatedTokenValue(null);
+    setProCreatedSessionToken(null);
+    setProLoginPassword('');
+    setProAuthBootstrapping(false);
+    if (clearToken) {
+      updateAndPersistProAuthToken('');
+    }
+  }
+
+  async function connectProToken() {
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    setProLoading(true);
+    try {
+      const principal = await proAPIRequest<ProPrincipal>(
+        proAuthToken,
+        '/api/pro/auth/me',
+        messages.requestFailed,
+      );
+      setProPrincipal(principal);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(proAuthStorageKey, proAuthToken.trim());
+      }
+      await loadProSession(proAuthToken);
+    } catch (verifyError) {
+      toast.error(verifyError instanceof Error ? verifyError.message : proCopy.verifyFailed);
+    } finally {
+      setProLoading(false);
+    }
+  }
+
+  async function loginProLocal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    setProLocalLoginLoading(true);
+    setProAuthBootstrapping(true);
+    try {
+      const payload = await apiRequest<ProLocalLoginResponse>('/api/pro/login', messages.requestFailed, {
+        method: 'POST',
+        body: JSON.stringify({
+          email: proLoginEmail,
+          password: proLoginPassword,
+          expires_in_days: 30,
+        }),
+      });
+      setProPrincipal({
+        name: payload.user.display_name,
+        scopes: payload.user.scopes,
+        roles: payload.user.roles,
+        user_id: payload.user.id,
+        session_id: payload.session?.id,
+        auth_method: payload.session?.auth_method ?? 'local_password',
+        is_bootstrap: payload.user.is_bootstrap,
+      });
+      updateAndPersistProAuthToken(payload.token);
+      setProLoginPassword('');
+      setView('pro');
+      await loadProSession(payload.token);
+    } catch (loginError) {
+      setProPrincipal(null);
+      toast.error(loginError instanceof Error ? loginError.message : proCopy.verifyFailed);
+    } finally {
+      setProAuthBootstrapping(false);
+      setProLocalLoginLoading(false);
+    }
+  }
+
+  function startProSSOSignIn() {
+    if (typeof window === 'undefined' || !proSSOConfig?.enabled || !proSSOConfig.start_url) {
+      return;
+    }
+    const url = new URL(proSSOConfig.start_url, window.location.origin);
+    url.searchParams.set('return_to', '/?pro_view=pro');
+    window.location.assign(url.toString());
+  }
+
+  async function createProToken(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    setProCreatingToken(true);
+    try {
+      const payload = await proAPIRequest<CreateProTokenResponse>(
+        proAuthToken,
+        '/api/pro/tokens',
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            name: proNewTokenName,
+            scopes: proNewTokenScopes
+              .split(',')
+              .map((scope) => scope.trim())
+              .filter(Boolean),
+            expires_in_days: Number(proNewTokenExpiresDays || '0'),
+          }),
+        },
+      );
+      setProCreatedTokenValue(payload.token);
+      setProCreateOpen(false);
+      setProNewTokenName('');
+      setProNewTokenScopes('pro:read, pro:write');
+      setProNewTokenExpiresDays('30');
+      await loadProSession();
+    } catch (createError) {
+      toast.error(createError instanceof Error ? createError.message : proCopy.createFailed);
+    } finally {
+      setProCreatingToken(false);
+    }
+  }
+
+  async function revokeProToken(tokenId: number) {
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    setProRevokingTokenId(tokenId);
+    try {
+      await proAPIRequest(
+        proAuthToken,
+        `/api/pro/tokens/${tokenId}`,
+        messages.requestFailed,
+        { method: 'DELETE' },
+      );
+      await loadProSession();
+    } catch (revokeError) {
+      toast.error(revokeError instanceof Error ? revokeError.message : proCopy.revokeFailed);
+    } finally {
+      setProRevokingTokenId(null);
+    }
+  }
+
+  async function createProUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    setProCreatingUser(true);
+    try {
+      await proAPIRequest<CreateProUserResponse>(
+        proAuthToken,
+        '/api/pro/users',
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            display_name: proNewUserName,
+            email: proNewUserEmail,
+            role_names: proNewUserRoles
+              .split(',')
+              .map((role) => role.trim())
+              .filter(Boolean),
+          }),
+        },
+      );
+      setProCreateUserOpen(false);
+      setProNewUserName('');
+      setProNewUserEmail('');
+      setProNewUserRoles('reader');
+      await loadProSession();
+    } catch (createError) {
+      toast.error(createError instanceof Error ? createError.message : proCopy.createUserFailed);
+    } finally {
+      setProCreatingUser(false);
+    }
+  }
+
+  function startEditProUser(user: ProUserRecord) {
+    setProEditingUserId(String(user.id));
+    setProEditingUserName(user.display_name);
+    setProEditingUserRoles(user.roles.join(', '));
+    setProEditUserOpen(true);
+  }
+
+  async function updateProUserRoles(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    setProUpdatingUserRoles(true);
+    try {
+      await proAPIRequest<UpdateProUserResponse>(
+        proAuthToken,
+        `/api/pro/users/${Number(proEditingUserId || '0')}`,
+        messages.requestFailed,
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            role_names: proEditingUserRoles
+              .split(',')
+              .map((role) => role.trim())
+              .filter(Boolean),
+          }),
+        },
+      );
+      setProEditUserOpen(false);
+      setProEditingUserId('');
+      setProEditingUserName('');
+      setProEditingUserRoles('reader');
+      await loadProSession();
+    } catch (updateError) {
+      toast.error(updateError instanceof Error ? updateError.message : proCopy.updateUserRolesFailed);
+    } finally {
+      setProUpdatingUserRoles(false);
+    }
+  }
+
+  async function disableProUser(user: ProUserRecord) {
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+    if (!window.confirm(proCopy.disableUserConfirm)) {
+      return;
+    }
+
+    setProDisablingUserId(user.id);
+    try {
+      await proAPIRequest<DisableProUserResponse>(
+        proAuthToken,
+        `/api/pro/users/${user.id}/disable`,
+        messages.requestFailed,
+        { method: 'POST' },
+      );
+      if (proPrincipal?.user_id === user.id) {
+        setProCreatedSessionToken(null);
+      }
+      await loadProSession();
+    } catch (disableError) {
+      toast.error(disableError instanceof Error ? disableError.message : proCopy.disableUserFailed);
+    } finally {
+      setProDisablingUserId(null);
+    }
+  }
+
+  async function enableProUser(user: ProUserRecord) {
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+    if (!window.confirm(proCopy.enableUserConfirm)) {
+      return;
+    }
+
+    setProEnablingUserId(user.id);
+    try {
+      await proAPIRequest<EnableProUserResponse>(
+        proAuthToken,
+        `/api/pro/users/${user.id}/enable`,
+        messages.requestFailed,
+        { method: 'POST' },
+      );
+      await loadProSession();
+    } catch (enableError) {
+      toast.error(enableError instanceof Error ? enableError.message : proCopy.enableUserFailed);
+    } finally {
+      setProEnablingUserId(null);
+    }
+  }
+
+  async function deleteProUser(user: ProUserRecord) {
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+    if (!window.confirm(proCopy.deleteUserConfirm)) {
+      return;
+    }
+
+    setProDeletingUserId(user.id);
+    try {
+      await proAPIRequest(
+        proAuthToken,
+        `/api/pro/users/${user.id}`,
+        messages.requestFailed,
+        { method: 'DELETE' },
+      );
+      if (proEditingUserId === String(user.id)) {
+        setProEditUserOpen(false);
+        setProEditingUserId('');
+        setProEditingUserName('');
+        setProEditingUserRoles('reader');
+      }
+      if (proSessionsFilterUserId === String(user.id)) {
+        setProSessionsFilterUserId('all');
+      }
+      await loadProSession();
+    } catch (deleteError) {
+      toast.error(deleteError instanceof Error ? deleteError.message : proCopy.deleteUserFailed);
+    } finally {
+      setProDeletingUserId(null);
+    }
+  }
+
+  async function createProSession(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    setProCreatingSession(true);
+    try {
+      const payload = await proAPIRequest<CreateProSessionResponse>(
+        proAuthToken,
+        '/api/pro/sessions',
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            user_id: Number(proNewSessionUserId || '0'),
+            label: proNewSessionLabel,
+            auth_method: 'local',
+            expires_in_days: Number(proNewSessionExpiresDays || '0'),
+          }),
+        },
+      );
+      setProCreatedSessionToken(payload.token);
+      setProCreateSessionOpen(false);
+      setProNewSessionUserId('');
+      setProNewSessionLabel('');
+      setProNewSessionExpiresDays('30');
+      await loadProSession();
+    } catch (createError) {
+      toast.error(createError instanceof Error ? createError.message : proCopy.createSessionFailed);
+    } finally {
+      setProCreatingSession(false);
+    }
+  }
+
+  async function revokeProSession(sessionId: number) {
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    const isCurrentSession = proPrincipal?.session_id === sessionId;
+    setProRevokingSessionId(sessionId);
+    try {
+      await proAPIRequest(
+        proAuthToken,
+        `/api/pro/sessions/${sessionId}`,
+        messages.requestFailed,
+        { method: 'DELETE' },
+      );
+      if (isCurrentSession) {
+        resetProAccess(true);
+        return;
+      }
+      await loadProSession();
+    } catch (revokeError) {
+      toast.error(revokeError instanceof Error ? revokeError.message : proCopy.revokeSessionFailed);
+    } finally {
+      setProRevokingSessionId(null);
+    }
+  }
+
+  async function revokeCurrentProSession() {
+    if (!proPrincipal?.session_id) {
+      return;
+    }
+    if (!window.confirm(proCopy.revokeCurrentSessionConfirm)) {
+      return;
+    }
+    await revokeProSession(proPrincipal.session_id);
+  }
+
+  async function signOutPro() {
+    if (proPrincipal?.session_id) {
+      await revokeCurrentProSession();
+      return;
+    }
+    resetProAccess(true);
+    setView('projects');
   }
 
   async function syncCatalog() {
@@ -1534,9 +2284,20 @@ export default function App() {
       return;
     }
 
-    await navigator.clipboard.writeText(selectedProject.connect_url);
+    await copyToClipboard(selectedProject.connect_url);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
+  }
+
+  async function copyToClipboard(value: string) {
+    await navigator.clipboard.writeText(value);
+  }
+
+  function updateAndPersistProAuthToken(value: string) {
+    setProAuthToken(value);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(proAuthStorageKey, value);
+    }
   }
 
   async function setServerEnabled(serverId: number, enabled: boolean) {
@@ -2198,833 +2959,134 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <AppShell
+      logoSrc={logo}
+      labels={labels}
+      navigationItems={visibleNavigationItems}
+      view={activeView}
+      setView={setView}
+      immersive={proAuthLocked}
+      footer={
+        !proAuthLocked && proPrincipal ? (
+          <button
+            onClick={() => void signOutPro()}
+            aria-label={proCopy.signOut}
+            className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-transparent bg-card text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-destructive"
+          >
+            <LogOut className="h-5 w-5" />
+          </button>
+        ) : null
+      }
+      sidebar={
+        activeView === 'projects' && !proAuthLocked ? (
+          <ProjectsSidebar
+            labels={labels}
+            messages={messages}
+            language={language}
+            languageOptions={languageOptions}
+            setLanguage={setLanguage}
+            onRefresh={() => Promise.all([loadProjects(), loadOllamaStatus()])}
+            refreshing={refreshing}
+            projects={projects}
+            loading={loading}
+            selectedProjectId={selectedProjectId}
+            setSelectedProjectId={setSelectedProjectId}
+            createProjectOpen={createProjectOpen}
+            setCreateProjectOpen={setCreateProjectOpen}
+            editingProjectId={editingProjectId}
+            projectForm={projectForm}
+            setProjectForm={setProjectForm}
+            resetProjectForm={() => {
+              setEditingProjectId(null);
+              setProjectForm(emptyProjectForm);
+            }}
+            createProject={createProject}
+            creatingProject={creatingProject}
+            duplicateProjectOpen={duplicateProjectOpen}
+            setDuplicateProjectOpen={setDuplicateProjectOpen}
+            duplicateProjectName={duplicateProjectName}
+            setDuplicateProjectName={setDuplicateProjectName}
+            duplicateProject={duplicateProject}
+            duplicatingProjectId={duplicatingProjectId}
+            selectedProject={selectedProject}
+          />
+        ) : null
+      }
+      error={error}
+      actionError={actionError}
+    >
       <Toaster position="top-right" richColors />
-      <div className="flex min-h-screen w-full">
-        <aside className="sticky top-0 flex h-screen w-20 shrink-0 flex-col items-center border-r border-border bg-sidebar/55 px-3 py-6">
-          <div className="flex h-full flex-col items-center gap-3">
-            <div className="mb-2 flex h-12 w-12 items-center justify-center">
-              <img src={logo} alt={labels.appTitle} className="max-h-full w-auto object-contain" />
-            </div>
-            {navigationItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = view === item.id;
-
-              return (
-                <Tooltip key={item.id}>
-                  <TooltipTrigger asChild>
-                    <button
-                      onClick={() => setView(item.id)}
-                      aria-label={item.label}
-                      className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl border transition-colors ${
-                        isActive
-                          ? 'border-electric-blue/40 bg-electric-blue text-white shadow-[0_12px_30px_rgba(38,132,255,0.22)]'
-                          : 'border-transparent bg-card text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground'
-                      }`}
-                    >
-                      <Icon className="h-5 w-5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right" sideOffset={10}>
-                    {item.label}
-                  </TooltipContent>
-                </Tooltip>
-              );
-            })}
-          </div>
-        </aside>
-
-        {view === 'projects' ? (
-        <aside className="w-full max-w-sm border-r border-border bg-sidebar/40">
-          <div className="border-b border-border px-6 py-5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm uppercase tracking-[0.24em] text-electric-blue">{labels.appTitle}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <Select value={language} onValueChange={(value) => setLanguage(value as Language)}>
-                  <SelectTrigger
-                    className="h-10 w-[150px] rounded-md border-border bg-card text-xs"
-                    aria-label={labels.language}
-                  >
-                    <SelectValue placeholder={labels.language} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {languageOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <button
-                  onClick={() => void Promise.all([loadProjects(), loadOllamaStatus()])}
-                  className="rounded-md border border-border bg-card p-2 transition-colors hover:bg-accent"
-                  aria-label="Refresh projects"
-                >
-                  <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-                </button>
-              </div>
-            </div>
-            <p className="mt-3 text-sm text-muted-foreground">
-              {labels.appDescription}
-            </p>
-          </div>
-
-          <div className="space-y-6 p-6">
-            <section className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-medium text-muted-foreground">{labels.projects}</h2>
-                <div className="flex items-center gap-2">
-                  <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
-                    {projects.length}
-                  </span>
-                  <Dialog
-                    open={createProjectOpen}
-                    onOpenChange={(open) => {
-                      setCreateProjectOpen(open);
-                      if (!open) {
-                        setEditingProjectId(null);
-                        setProjectForm(emptyProjectForm);
-                      }
-                    }}
-                  >
-                    <DialogTrigger asChild>
-                      <button className="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-electric-blue px-3 text-xs font-medium text-white transition-colors hover:bg-electric-blue/90">
-                        <Plus className="h-3.5 w-3.5" />
-                        {labels.createProject}
-                      </button>
-                    </DialogTrigger>
-                    <DialogContent className="sm:max-w-xl">
-                      <DialogHeader>
-                          <DialogTitle>{editingProjectId ? 'Edit Project' : labels.createProject}</DialogTitle>
-                        <DialogDescription>{messages.projectHelper}</DialogDescription>
-                      </DialogHeader>
-
-                      <form className="space-y-3" onSubmit={createProject}>
-                        <label className="block space-y-2">
-                          <span className="text-sm text-muted-foreground">{labels.name}</span>
-                          <input
-                            required
-                            value={projectForm.name}
-                            onChange={(event) =>
-                              setProjectForm((current) => ({ ...current, name: event.target.value }))
-                            }
-                            className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                            placeholder={messages.projectNamePlaceholder}
-                          />
-                        </label>
-
-                        <label className="block space-y-2">
-                          <span className="text-sm text-muted-foreground">{labels.description}</span>
-                          <textarea
-                            value={projectForm.description}
-                            onChange={(event) =>
-                              setProjectForm((current) => ({
-                                ...current,
-                                description: event.target.value,
-                              }))
-                            }
-                            rows={3}
-                            className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm outline-none transition-colors focus:border-electric-blue"
-                            placeholder={messages.projectDescriptionPlaceholder}
-                          />
-                        </label>
-
-                        <button
-                          type="submit"
-                          disabled={creatingProject}
-                          className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
-                        >
-                              {creatingProject ? (
-                                <LoaderCircle className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Plus className="h-4 w-4" />
-                              )}
-                              {editingProjectId ? 'Save Project' : labels.createProject}
-                            </button>
-                          </form>
-                        </DialogContent>
-                  </Dialog>
-                  <Dialog
-                    open={duplicateProjectOpen}
-                    onOpenChange={(open) => {
-                      setDuplicateProjectOpen(open);
-                      if (!open) {
-                        setDuplicateProjectName('');
-                      }
-                    }}
-                  >
-                    <DialogContent className="sm:max-w-xl">
-                      <DialogHeader>
-                        <DialogTitle>{labels.duplicateProject}</DialogTitle>
-                        <DialogDescription>{messages.duplicateProjectDescription}</DialogDescription>
-                      </DialogHeader>
-
-                      <form className="space-y-3" onSubmit={duplicateProject}>
-                        <label className="block space-y-2">
-                          <span className="text-sm text-muted-foreground">{labels.name}</span>
-                          <input
-                            required
-                            value={duplicateProjectName}
-                            onChange={(event) => setDuplicateProjectName(event.target.value)}
-                            className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                            placeholder={messages.duplicateProjectNamePlaceholder}
-                          />
-                        </label>
-
-                        <button
-                          type="submit"
-                          disabled={!selectedProject || duplicatingProjectId === selectedProject?.project_id}
-                          className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
-                        >
-                          {duplicatingProjectId === selectedProject?.project_id ? (
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Copy className="h-4 w-4" />
-                          )}
-                          {labels.duplicateProject}
-                        </button>
-                      </form>
-                    </DialogContent>
-                  </Dialog>
-                </div>
-              </div>
-
-              {loading ? (
-                <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-5 text-sm text-muted-foreground">
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                  {messages.loadingProjects}
-                </div>
-              ) : projects.length === 0 ? (
-                <div className="rounded-lg border border-dashed border-border bg-card px-4 py-5 text-sm text-muted-foreground">
-                  {messages.noProjects}
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {projects.map((project) => {
-                    const runningCount = project.servers.filter(
-                      (server) => server.status === 'Running',
-                    ).length;
-
-                    return (
-                      <button
-                        key={project.project_id}
-                        onClick={() => setSelectedProjectId(project.project_id)}
-                        className={`w-full rounded-xl border p-4 text-left transition-colors ${
-                          selectedProjectId === project.project_id
-                            ? 'border-electric-blue bg-electric-blue/8'
-                            : 'border-border bg-card hover:bg-accent/60'
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="font-medium">{project.name}</div>
-                            <div className="mt-1 text-sm text-muted-foreground">
-                              {project.description || messages.workspaceGroupFallback}
-                            </div>
-                          </div>
-                          {project.connection_ready ? (
-                            <Radio className="mt-0.5 h-4 w-4 text-status-running" />
-                          ) : (
-                            <AlertCircle className="mt-0.5 h-4 w-4 text-amber-500" />
-                          )}
-                        </div>
-                        <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-                          <span>{messages.serverCount(project.servers.length)}</span>
-                          <span>•</span>
-                          <span>{messages.runningCount(runningCount)}</span>
-                          {project.is_paused ? (
-                            <>
-                              <span>•</span>
-                              <span className="text-amber-600">{labels.paused}</span>
-                            </>
-                          ) : null}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-
-          </div>
-        </aside>
-        ) : null}
-
-        <main className="flex-1 p-6 md:p-8">
-          {error ? (
-            <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-              {error}
-            </div>
-          ) : null}
-
-          {actionError ? (
-            <div className="mb-6 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-              {actionError}
-            </div>
-          ) : null}
-
-          {view === 'logs' ? (
-            <section className="space-y-6">
-              <div className="rounded-2xl border border-border bg-card p-6">
-                <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-                  <div>
-                    <h2 className="text-2xl font-semibold">{labels.performance}</h2>
-                    <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-                      {messages.performanceDescription}
-                    </p>
-                  </div>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                    <div className="min-w-[220px]">
-                      <Select
-                        value={selectedLogsProjectId === null ? 'all' : String(selectedLogsProjectId)}
-                        onValueChange={(value) =>
-                          setSelectedLogsProjectId(value === 'all' ? null : Number(value))
-                        }
-                      >
-                        <SelectTrigger className="h-10 rounded-md border-border bg-background text-sm">
-                          <SelectValue placeholder={labels.filterByProject} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">{labels.allProjects}</SelectItem>
-                          {projects.map((project) => (
-                            <SelectItem key={`logs-project-${project.project_id}`} value={String(project.project_id)}>
-                              {project.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="min-w-[200px]">
-                      <Select value={metricsWindow} onValueChange={(value) => setMetricsWindow(value as MetricsWindow)}>
-                        <SelectTrigger className="h-10 rounded-md border-border bg-background text-sm">
-                          <SelectValue placeholder={labels.timeWindow} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {metricsWindowOptions.map((option) => (
-                            <SelectItem key={`metrics-window-${option.value}`} value={option.value}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <button
-                      onClick={() => {
-                        void loadLogs();
-                        void loadLogMetrics();
-                      }}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent"
-                    >
-                      <RefreshCw className={`h-4 w-4 ${(logsLoading || metricsLoading) ? 'animate-spin' : ''}`} />
-                      {labels.refresh}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                <div className="rounded-2xl border border-border bg-card p-5">
-                  <div className="text-sm text-muted-foreground">{labels.requests}</div>
-                  <div className="mt-2 text-2xl font-semibold">{logMetrics?.summary.request_count ?? 0}</div>
-                </div>
-                <div className="rounded-2xl border border-border bg-card p-5">
-                  <div className="text-sm text-muted-foreground">{labels.errors}</div>
-                  <div className="mt-2 text-2xl font-semibold">{logMetrics?.summary.error_count ?? 0}</div>
-                  <div className="mt-1 text-sm text-muted-foreground">
-                    {formatPercent(logMetrics?.summary.error_rate ?? 0)} {labels.errorRate.toLowerCase()}
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-border bg-card p-5">
-                  <div className="text-sm text-muted-foreground">{labels.avgLatency}</div>
-                  <div className="mt-2 text-2xl font-semibold">
-                    {formatLatency(logMetrics?.summary.avg_latency_ms ?? 0)}
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-border bg-card p-5">
-                  <div className="text-sm text-muted-foreground">{labels.p95Latency}</div>
-                  <div className="mt-2 text-2xl font-semibold">
-                    {formatLatency(logMetrics?.summary.p95_latency_ms ?? 0)}
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-border bg-card p-5">
-                  <div className="text-sm text-muted-foreground">{labels.trafficIn}</div>
-                  <div className="mt-2 text-2xl font-semibold">
-                    {formatBytes(logMetrics?.summary.traffic_in ?? 0)}
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-border bg-card p-5">
-                  <div className="text-sm text-muted-foreground">{labels.trafficOut}</div>
-                  <div className="mt-2 text-2xl font-semibold">
-                    {formatBytes(logMetrics?.summary.traffic_out ?? 0)}
-                  </div>
-                </div>
-              </div>
-
-              {metricsLoading && !logMetrics ? (
-                <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-5 text-sm text-muted-foreground">
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                  {messages.loadingMetrics}
-                </div>
-              ) : null}
-
-              {logMetrics && logMetrics.trends.length > 0 ? (
-                <div className="grid gap-4 xl:grid-cols-2">
-                  <TrendChart
-                    title={labels.requestVolume}
-                    subtitle={`${filteredLogsProject?.name ?? labels.allProjects} · ${metricsWindowOptions.find((option) => option.value === metricsWindow)?.label ?? ''}`}
-                    primaryValues={requestTrendValues}
-                    secondaryValues={errorTrendValues}
-                    primaryColor="#22c55e"
-                    secondaryColor="#f97316"
-                    labels={{ primary: labels.requests, secondary: labels.errors }}
-                  />
-                  <TrendChart
-                    title={labels.latencyTrend}
-                    subtitle={`${filteredLogsProject?.name ?? labels.allProjects} · ${metricsWindowOptions.find((option) => option.value === metricsWindow)?.label ?? ''}`}
-                    primaryValues={avgLatencyTrendValues}
-                    secondaryValues={p95LatencyTrendValues}
-                    primaryColor="#0ea5e9"
-                    secondaryColor="#a855f7"
-                    labels={{ primary: labels.avgLatency, secondary: labels.p95Latency }}
-                  />
-                </div>
-              ) : (
-                <div className="rounded-2xl border border-dashed border-border bg-card px-4 py-8 text-center text-muted-foreground">
-                  {messages.noMetrics}
-                </div>
-              )}
-
-              <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-                <div className="rounded-2xl border border-border bg-card p-6">
-                  <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-border bg-background px-4 py-3 text-sm">
-                    <div>
-                      <div className="font-medium">{labels.auditLogs}</div>
-                      <div className="text-muted-foreground">
-                        {filteredLogsProject?.name ?? labels.allProjects}
-                      </div>
-                    </div>
-                    <div className="rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
-                      {logs.length} {labels.requests}
-                    </div>
-                  </div>
-
-                  {logsLoading ? (
-                    <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-4 py-5 text-sm text-muted-foreground">
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                      {messages.loadingLogs}
-                    </div>
-                  ) : logs.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-border bg-background px-4 py-8 text-center text-muted-foreground">
-                      {messages.noLogs}
-                    </div>
-                  ) : (
-                    <div className="overflow-hidden rounded-xl border border-border bg-[#0b0f14]">
-                      <div ref={logsViewportRef} className="max-h-[70vh] overflow-y-auto">
-                        {logs.map((entry) => (
-                          <div
-                            key={entry.id}
-                            className="border-b border-white/5 px-4 py-3 font-mono text-xs text-slate-200 last:border-b-0"
-                          >
-                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                              <span className="text-slate-500">
-                                {new Date(entry.created_at).toLocaleTimeString()}
-                              </span>
-                              <span className="text-electric-blue">{formatAuditAction(entry.action)}</span>
-                              <span className="text-slate-400">
-                                {entry.actor || labels.unknownActor}
-                              </span>
-                              {entry.project_id ? (
-                                <span className="text-emerald-400">
-                                  {projectNameFromLog(entry.project_id)}
-                                </span>
-                              ) : null}
-                              {entry.server_id ? (
-                                <span className="text-amber-300">
-                                  {serverNameFromLog(entry.server_id)}
-                                </span>
-                              ) : null}
-                            </div>
-                            {entry.detail ? (
-                              <div className="mt-1 break-words text-slate-300/85">
-                                {formatAuditDetail(entry)}
-                              </div>
-                            ) : null}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <aside className="space-y-4">
-                  <div className="rounded-2xl border border-border bg-card p-5">
-                    <h3 className="text-lg font-semibold">{labels.topSlowServers}</h3>
-                    <div className="mt-3 space-y-2">
-                      {(logMetrics?.top_slow_servers ?? []).map((entry) => (
-                        <div
-                          key={`slow-server-${entry.server_id}`}
-                          className="rounded-lg bg-background px-3 py-3 text-sm"
-                        >
-                          <div className="font-medium">
-                            {serverNamesById[entry.server_id] ?? messages.serverTag(entry.server_id)}
-                          </div>
-                          <div className="mt-1 flex items-center justify-between gap-3 text-muted-foreground">
-                            <span>{entry.request_count} {labels.requests}</span>
-                            <span>{formatLatency(entry.p95_latency_ms)}</span>
-                          </div>
-                        </div>
-                      ))}
-                      {(logMetrics?.top_slow_servers.length ?? 0) === 0 ? (
-                        <div className="rounded-lg bg-background px-3 py-2 text-sm text-muted-foreground">
-                          {messages.noMetrics}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-border bg-card p-5">
-                    <h3 className="text-lg font-semibold">{labels.topErrorServers}</h3>
-                    <div className="mt-3 space-y-2">
-                      {(logMetrics?.top_error_servers ?? []).map((entry) => (
-                        <div
-                          key={`error-server-${entry.server_id}`}
-                          className="rounded-lg bg-background px-3 py-3 text-sm"
-                        >
-                          <div className="font-medium">
-                            {serverNamesById[entry.server_id] ?? messages.serverTag(entry.server_id)}
-                          </div>
-                          <div className="mt-1 flex items-center justify-between gap-3 text-muted-foreground">
-                            <span>{entry.error_count} {labels.errors.toLowerCase()}</span>
-                            <span>{formatPercent(entry.error_rate)}</span>
-                          </div>
-                        </div>
-                      ))}
-                      {(logMetrics?.top_error_servers.length ?? 0) === 0 ? (
-                        <div className="rounded-lg bg-background px-3 py-2 text-sm text-muted-foreground">
-                          {messages.noMetrics}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-border bg-card p-5">
-                    <h3 className="text-lg font-semibold">{labels.topTrafficServers}</h3>
-                    <div className="mt-3 space-y-2">
-                      {(logMetrics?.top_traffic_servers ?? []).map((entry) => (
-                        <div
-                          key={`traffic-server-${entry.server_id}`}
-                          className="rounded-lg bg-background px-3 py-3 text-sm"
-                        >
-                          <div className="font-medium">
-                            {serverNamesById[entry.server_id] ?? messages.serverTag(entry.server_id)}
-                          </div>
-                          <div className="mt-1 flex items-center justify-between gap-3 text-muted-foreground">
-                            <span>{formatBytes(entry.total_traffic)}</span>
-                            <span>{entry.request_count} {labels.requests}</span>
-                          </div>
-                        </div>
-                      ))}
-                      {(logMetrics?.top_traffic_servers.length ?? 0) === 0 ? (
-                        <div className="rounded-lg bg-background px-3 py-2 text-sm text-muted-foreground">
-                          {messages.noMetrics}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-border bg-card p-5">
-                    <h3 className="text-lg font-semibold">{labels.recentFailures}</h3>
-                    <div className="mt-3 space-y-2">
-                      {(logMetrics?.recent_failures ?? []).map((entry) => (
-                        <div
-                          key={`failure-${entry.id}`}
-                          className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-3 text-sm"
-                        >
-                          <div className="font-medium">
-                            {entry.server_id
-                              ? serverNamesById[entry.server_id] ?? messages.serverTag(entry.server_id)
-                              : entry.project_id
-                                ? projectNamesById[entry.project_id] ?? messages.projectTag(entry.project_id)
-                                : labels.performance}
-                          </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {entry.operation} · {formatLatency(entry.latency_ms)} · {new Date(entry.created_at).toLocaleTimeString()}
-                          </div>
-                          <div className="mt-2 break-words text-xs text-foreground/80">
-                            {entry.error_detail}
-                          </div>
-                        </div>
-                      ))}
-                      {(logMetrics?.recent_failures.length ?? 0) === 0 ? (
-                        <div className="rounded-lg bg-background px-3 py-2 text-sm text-muted-foreground">
-                          {messages.noMetrics}
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </aside>
-              </div>
-            </section>
-          ) : view === 'knowledge' ? (
-            <section className="space-y-6">
-              <div className="rounded-2xl border border-border bg-card p-6">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div>
-                    <p className="text-sm uppercase tracking-[0.24em] text-electric-blue">
-                      {labels.knowledgeBase}
-                    </p>
-                    <h2 className="mt-2 text-3xl font-semibold">{messages.knowledgeBaseHeroTitle}</h2>
-                    <p className="mt-2 max-w-3xl text-muted-foreground">
-                      {messages.knowledgeBaseHeroDescription}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="rounded-xl border border-border bg-background px-4 py-3">
-                      <div className="text-sm text-muted-foreground">{labels.collections}</div>
-                      <div className="mt-1 text-2xl font-semibold">{allRAGCollections.length}</div>
-                    </div>
-                    <Dialog
-                      open={createRAGCollectionOpen}
-                      onOpenChange={(open) => {
-                        setCreateRAGCollectionOpen(open);
-                        if (!open) {
-                          setRAGCollectionForm(emptyRAGCollectionForm);
-                          setEditingRAGCollectionId(null);
-                        }
-                      }}
-                    >
-                      <DialogTrigger asChild>
-                        <button className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90">
-                          <Plus className="h-4 w-4" />
-                          {labels.createCollection}
-                        </button>
-                      </DialogTrigger>
-                      <DialogContent className="sm:max-w-xl">
-                        <DialogHeader>
-                          <DialogTitle>{editingRAGCollectionId ? 'Edit Knowledge Base' : messages.createKnowledgeBaseTitle}</DialogTitle>
-                          <DialogDescription>
-                            {editingRAGCollectionId ? messages.editKnowledgeBaseDescription : messages.createKnowledgeBaseDescription}
-                          </DialogDescription>
-                        </DialogHeader>
-                        <form className="space-y-4" onSubmit={createRAGCollection}>
-                          <label className="block space-y-2">
-                            <span className="text-sm text-muted-foreground">{labels.name}</span>
-                            <input
-                              required
-                              value={ragCollectionForm.name}
-                              onChange={(event) =>
-                                setRAGCollectionForm((current) => ({ ...current, name: event.target.value }))
-                              }
-                              className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                              placeholder={messages.collectionNamePlaceholder}
-                            />
-                          </label>
-                          <label className="block space-y-2">
-                            <span className="text-sm text-muted-foreground">{messages.sourceFolderTitle}</span>
-                            <input
-                              required
-                              value={ragCollectionForm.source_path}
-                              onChange={(event) =>
-                                setRAGCollectionForm((current) => ({ ...current, source_path: event.target.value }))
-                              }
-                              className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                              placeholder={messages.sourceFolderPlaceholder}
-                            />
-                          </label>
-                          <label className="flex items-center gap-3 rounded-md border border-border bg-background px-3 py-3 text-sm">
-                            <input
-                              type="checkbox"
-                              checked={ragCollectionForm.auto_reindex}
-                              onChange={(event) =>
-                                setRAGCollectionForm((current) => ({ ...current, auto_reindex: event.target.checked }))
-                              }
-                              className="h-4 w-4 rounded border-border"
-                            />
-                            <div>
-                              <div className="font-medium">{messages.autoReindexTitle}</div>
-                              <div className="text-muted-foreground">{messages.autoReindexDescription}</div>
-                            </div>
-                          </label>
-                          <DialogFooter>
-                            <button
-                              type="submit"
-                              disabled={creatingRAGCollection}
-                              className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
-                            >
-                              {creatingRAGCollection ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                              {editingRAGCollectionId ? 'Save Knowledge Base' : labels.create}
-                            </button>
-                          </DialogFooter>
-                        </form>
-                      </DialogContent>
-                    </Dialog>
-                  </div>
-                </div>
-              </div>
-
-              <section className="rounded-2xl border border-border bg-card p-6">
-                {allRAGCollections.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border bg-background px-4 py-6 text-sm text-muted-foreground">
-                    {messages.noKnowledgeBasesCreated}
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {allRAGCollections.map((collection) => (
-                      <div key={collection.collection_id} className="rounded-xl border border-border bg-background p-4">
-                        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <Database className="h-4 w-4 text-electric-blue" />
-                              <div className="font-medium">{collection.name}</div>
-                            </div>
-                            <div className="mt-2 flex flex-wrap items-center gap-2">
-                              <span className="rounded-full border border-electric-blue/20 bg-electric-blue/8 px-2.5 py-1 text-[11px] font-medium text-electric-blue">
-                                {messages.supportedFormatsLabel}: {messages.supportedFormatsValue}
-                              </span>
-                              {collection.auto_reindex ? (
-                                <span className="rounded-full border border-status-running/30 bg-status-running/10 px-2.5 py-1 text-[11px] font-medium text-status-running">
-                                  {messages.autoReindexBadge}
-                                </span>
-                              ) : null}
-                            </div>
-                            <div className="mt-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                              {collection.collection_id} · {collection.data_type}
-                            </div>
-                            <code className="mt-2 block overflow-x-auto text-xs text-electric-blue">
-                              {collection.index_path}
-                            </code>
-                          </div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <button
-                              onClick={() => startEditRAGCollection(collection)}
-                              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent"
-                            >
-                              <Pencil className="h-4 w-4" />
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => void deleteRAGCollection(collection.collection_id)}
-                              disabled={linkingCollectionId === collection.collection_id}
-                              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-destructive/30 px-4 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-70"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              {labels.delete}
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="mt-4 grid gap-4 xl:grid-cols-2">
-                          <div className="rounded-xl border border-border bg-card p-4">
-                            <div className="text-sm font-medium">{messages.indexFolderTitle}</div>
-                            <p className="mt-1 text-sm text-muted-foreground">
-                              {messages.indexFolderDescription}
-                            </p>
-                            <input
-                              value={ragIndexPaths[collection.collection_id] ?? ''}
-                              onChange={(event) =>
-                                setRAGIndexPaths((current) => ({
-                                  ...current,
-                                  [collection.collection_id]: event.target.value,
-                                }))
-                              }
-                              className="mt-3 h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                              placeholder={messages.indexFolderPlaceholder}
-                            />
-                            <button
-                              onClick={() => void indexRAGCollection(collection.collection_id)}
-                              disabled={indexingCollectionId === collection.collection_id}
-                              className="mt-3 inline-flex h-10 items-center justify-center gap-2 rounded-md bg-foreground px-4 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-70"
-                            >
-                              {indexingCollectionId === collection.collection_id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                              {labels.index}
-                            </button>
-                          </div>
-
-                          <div className="rounded-xl border border-border bg-card p-4">
-                            <div className="text-sm font-medium">{messages.searchCollectionTitle}</div>
-                            <p className="mt-1 text-sm text-muted-foreground">
-                              {messages.searchCollectionDescription}
-                            </p>
-                            <div className="mt-3 flex gap-3">
-                              <input
-                                value={ragSearchQueries[collection.collection_id] ?? ''}
-                                onChange={(event) =>
-                                  setRAGSearchQueries((current) => ({
-                                    ...current,
-                                    [collection.collection_id]: event.target.value,
-                                  }))
-                                }
-                                className="h-10 min-w-0 flex-1 rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                                placeholder={messages.searchCollectionPlaceholder}
-                              />
-                              <button
-                                onClick={() => void searchRAGCollection(collection.collection_id)}
-                                disabled={searchingCollectionId === collection.collection_id}
-                                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
-                              >
-                                {searchingCollectionId === collection.collection_id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <TextSearch className="h-4 w-4" />}
-                                {labels.search}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <Dialog
-                open={ragSearchResultsOpen}
-                onOpenChange={(open) => {
-                  setRAGSearchResultsOpen(open);
-                  if (!open) {
-                    setActiveRAGSearchCollectionId(null);
-                  }
-                }}
-              >
-                <DialogContent className="sm:max-w-4xl">
-                  <DialogHeader>
-                    <DialogTitle>{messages.searchResultsTitle}</DialogTitle>
-                    <DialogDescription>
-                      {messages.searchResultsDescription(activeRAGSearchCollection?.name ?? labels.knowledgeBase)}
-                    </DialogDescription>
-                  </DialogHeader>
-
-                  {activeRAGSearchCollection ? (
-                    <div className="rounded-xl border border-border bg-background px-4 py-3 text-sm">
-                      <div className="font-medium">{activeRAGSearchCollection.name}</div>
-                      <div className="mt-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                        {activeRAGSearchCollection.collection_id} · {activeRAGSearchCollection.data_type}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {activeRAGSearchResults.length === 0 ? (
-                    <div className="rounded-xl border border-dashed border-border bg-background px-4 py-8 text-sm text-muted-foreground">
-                      {messages.searchResultsEmpty}
-                    </div>
-                  ) : (
-                    <div className="max-h-[65vh] space-y-3 overflow-y-auto pr-1">
-                      {activeRAGSearchResults.map((item) => (
-                        <div key={item.id} className="rounded-lg border border-border bg-background p-3">
-                          <code className="block overflow-x-auto text-xs text-electric-blue">{item.file_path}</code>
-                          {item.section ? (
-                            <div className="mt-2 inline-flex rounded-full border border-electric-blue/20 bg-electric-blue/8 px-2.5 py-1 text-[11px] font-medium text-electric-blue">
-                              {item.section}
-                            </div>
-                          ) : null}
-                          <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-xs text-foreground/85">{item.content}</pre>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </DialogContent>
-              </Dialog>
-            </section>
-          ) : view === 'market' ? (
+      <Suspense fallback={viewLoadingFallback}>
+        {activeView === 'logs' ? (
+            <LogsView
+              labels={labels}
+              messages={messages}
+              projects={projects}
+              selectedLogsProjectId={selectedLogsProjectId}
+              setSelectedLogsProjectId={setSelectedLogsProjectId}
+              metricsWindow={metricsWindow}
+              setMetricsWindow={setMetricsWindow}
+              metricsWindowOptions={metricsWindowOptions}
+              logsLoading={logsLoading}
+              metricsLoading={metricsLoading}
+              onRefresh={() => {
+                void loadLogs();
+                void loadLogMetrics();
+              }}
+              logMetrics={logMetrics}
+              filteredLogsProjectName={filteredLogsProject?.name ?? null}
+              requestTrendValues={requestTrendValues}
+              errorTrendValues={errorTrendValues}
+              avgLatencyTrendValues={avgLatencyTrendValues}
+              p95LatencyTrendValues={p95LatencyTrendValues}
+              hasProAccess={hasProAccess}
+              logsFilterMode={logsFilterMode}
+              setLogsFilterMode={setLogsFilterMode}
+              proActivityCopy={proActivityCopy}
+              visibleLogs={visibleLogs}
+              proCreatedCount={proCreatedCount}
+              proUsedCount={proUsedCount}
+              proRevokedCount={proRevokedCount}
+              logsViewportRef={logsViewportRef}
+              projectNameFromLog={projectNameFromLog}
+              serverNameFromLog={serverNameFromLog}
+              serverNamesById={serverNamesById}
+              projectNamesById={projectNamesById}
+            />
+          ) : activeView === 'knowledge' ? (
+            <KnowledgeView
+              labels={labels}
+              messages={messages}
+              allRAGCollections={allRAGCollections}
+              createRAGCollectionOpen={createRAGCollectionOpen}
+              setCreateRAGCollectionOpen={setCreateRAGCollectionOpen}
+              editingRAGCollectionId={editingRAGCollectionId}
+              ragCollectionForm={ragCollectionForm}
+              setRAGCollectionForm={setRAGCollectionForm}
+              resetRAGCollectionForm={() => {
+                setRAGCollectionForm(emptyRAGCollectionForm);
+                setEditingRAGCollectionId(null);
+              }}
+              createRAGCollection={createRAGCollection}
+              creatingRAGCollection={creatingRAGCollection}
+              startEditRAGCollection={startEditRAGCollection}
+              deleteRAGCollection={deleteRAGCollection}
+              linkingCollectionId={linkingCollectionId}
+              ragIndexPaths={ragIndexPaths}
+              setRAGIndexPaths={setRAGIndexPaths}
+              indexRAGCollection={indexRAGCollection}
+              indexingCollectionId={indexingCollectionId}
+              ragSearchQueries={ragSearchQueries}
+              setRAGSearchQueries={setRAGSearchQueries}
+              searchRAGCollection={searchRAGCollection}
+              searchingCollectionId={searchingCollectionId}
+              ragSearchResultsOpen={ragSearchResultsOpen}
+              setRAGSearchResultsOpen={setRAGSearchResultsOpen}
+              activeRAGSearchCollection={activeRAGSearchCollection}
+              setActiveRAGSearchCollectionId={setActiveRAGSearchCollectionId}
+              activeRAGSearchResults={activeRAGSearchResults}
+            />
+          ) : activeView === 'market' ? (
             <MarketView
               labels={labels}
               messages={messages}
@@ -3054,1445 +3116,216 @@ export default function App() {
               onPerformCatalogInstall={performCatalogInstall}
               onActionError={setActionError}
             />
-          ) : !selectedProject ? (
-            <div className="flex min-h-[60vh] items-center justify-center rounded-2xl border border-dashed border-border bg-card/50">
-              <div className="max-w-md text-center">
-                <Server className="mx-auto h-12 w-12 text-electric-blue" />
-                <h2 className="mt-4 text-2xl font-semibold">{labels.noProjectSelected}</h2>
-                <p className="mt-2 text-muted-foreground">
-                  {messages.emptySelectionBody}
-                </p>
-              </div>
-            </div>
+          ) : activeView === 'pro' ? (
+            <ProAccessView
+              logoSrc={logo}
+              editionName={editionMeta.edition_name}
+              proCopy={proCopy}
+              proPrincipal={proPrincipal}
+              proLoading={proLoading}
+              proLocalLoginLoading={proLocalLoginLoading}
+              proLoginEmail={proLoginEmail}
+              proLoginPassword={proLoginPassword}
+              proSSOEnabled={!!proSSOConfig?.enabled}
+              proSSOProviderName={proSSOConfig?.provider_name}
+              proSSOIssuerURL={proSSOConfig?.issuer_url}
+              proSSORedirectURL={proSSOConfig?.redirect_url}
+              proSSOScopes={proSSOConfig?.scopes}
+              proSSOHostedDomain={proSSOConfig?.allowed_hosted_domain}
+              proSSODefaultRole={proSSOConfig?.default_role}
+              proSSOSessionDays={proSSOConfig?.session_days}
+              proSSOAutoCreateUsers={proSSOConfig?.auto_create_users}
+              proCreateOpen={proCreateOpen}
+              proCreatingToken={proCreatingToken}
+              proRevokingTokenId={proRevokingTokenId}
+              proNewTokenName={proNewTokenName}
+              proNewTokenScopes={proNewTokenScopes}
+              proNewTokenExpiresDays={proNewTokenExpiresDays}
+              proCreatedTokenValue={proCreatedTokenValue}
+              proCreatedSessionToken={proCreatedSessionToken}
+              proTokens={proTokens}
+              proUsers={proUsers}
+              proRoles={proRoles}
+              proSessions={proSessions}
+              proScopePresets={proScopePresets}
+              canWritePro={canWritePro}
+              canAdminPro={canAdminPro}
+              proCreateUserOpen={proCreateUserOpen}
+              proCreatingUser={proCreatingUser}
+              proEditUserOpen={proEditUserOpen}
+              proUpdatingUserRoles={proUpdatingUserRoles}
+              proDisablingUserId={proDisablingUserId}
+              proEnablingUserId={proEnablingUserId}
+              proDeletingUserId={proDeletingUserId}
+              proSessionsFilterUserId={proSessionsFilterUserId}
+              proEditingUserId={proEditingUserId}
+              proEditingUserName={proEditingUserName}
+              proEditingUserRoles={proEditingUserRoles}
+              proCreateSessionOpen={proCreateSessionOpen}
+              proCreatingSession={proCreatingSession}
+              proRevokingSessionId={proRevokingSessionId}
+              proNewUserName={proNewUserName}
+              proNewUserEmail={proNewUserEmail}
+              proNewUserRoles={proNewUserRoles}
+              proNewSessionUserId={proNewSessionUserId}
+              proNewSessionLabel={proNewSessionLabel}
+              proNewSessionExpiresDays={proNewSessionExpiresDays}
+              onSetProCreateOpen={(open) => {
+                setProCreateOpen(open);
+                if (!open) {
+                  setProCreatedTokenValue(null);
+                }
+              }}
+              onSetProCreateUserOpen={(open) => {
+                setProCreateUserOpen(open);
+                if (!open) {
+                  setProNewUserName('');
+                  setProNewUserEmail('');
+                  setProNewUserRoles('reader');
+                }
+              }}
+              onSetProEditUserOpen={(open) => {
+                setProEditUserOpen(open);
+                if (!open) {
+                  setProEditingUserId('');
+                  setProEditingUserName('');
+                  setProEditingUserRoles('reader');
+                }
+              }}
+              onSetProCreateSessionOpen={(open) => {
+                setProCreateSessionOpen(open);
+                if (!open) {
+                  setProCreatedSessionToken(null);
+                  setProNewSessionUserId('');
+                  setProNewSessionLabel('');
+                  setProNewSessionExpiresDays('30');
+                }
+              }}
+              onSetProLoginEmail={setProLoginEmail}
+              onSetProLoginPassword={setProLoginPassword}
+              onSetProNewTokenName={setProNewTokenName}
+              onSetProNewTokenScopes={setProNewTokenScopes}
+              onSetProNewTokenExpiresDays={setProNewTokenExpiresDays}
+              onSetProNewUserName={setProNewUserName}
+              onSetProNewUserEmail={setProNewUserEmail}
+              onSetProNewUserRoles={setProNewUserRoles}
+              onSetProEditingUserRoles={setProEditingUserRoles}
+              onSetProSessionsFilterUserId={setProSessionsFilterUserId}
+              onSetProNewSessionUserId={setProNewSessionUserId}
+              onSetProNewSessionLabel={setProNewSessionLabel}
+              onSetProNewSessionExpiresDays={setProNewSessionExpiresDays}
+              onLoginProLocal={loginProLocal}
+              onStartProSSOSignIn={startProSSOSignIn}
+              onCreateProToken={createProToken}
+              onCreateProUser={createProUser}
+              onStartEditProUser={startEditProUser}
+              onUpdateProUserRoles={updateProUserRoles}
+              onDisableProUser={disableProUser}
+              onEnableProUser={enableProUser}
+              onDeleteProUser={deleteProUser}
+              onCreateProSession={createProSession}
+              onRevokeCurrentProSession={revokeCurrentProSession}
+              onCopyToken={copyToClipboard}
+              onRevokeProToken={revokeProToken}
+              onRevokeProSession={revokeProSession}
+            />
           ) : (
-            <div className="space-y-6">
-              <section className="rounded-2xl border border-border bg-card p-6">
-                <div className="space-y-4">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                    <div>
-                      <p className="text-sm uppercase tracking-[0.24em] text-electric-blue">
-                        {labels.projectOverview}
-                      </p>
-                      <h2 className="mt-2 text-3xl font-semibold">{selectedProject.name}</h2>
-                      <p className="mt-2 max-w-2xl text-muted-foreground">
-                        {selectedProject.description || messages.overviewFallbackDescription}
-                      </p>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-4">
-                      <div className="rounded-xl border border-border bg-background px-4 py-3">
-                        <div className="text-sm text-muted-foreground">{labels.servers}</div>
-                        <div className="mt-1 text-2xl font-semibold">
-                          {selectedProject.servers.length}
-                        </div>
-                      </div>
-                      <div className="rounded-xl border border-border bg-background px-4 py-3">
-                        <div className="text-sm text-muted-foreground">{labels.running}</div>
-                        <div className="mt-1 text-2xl font-semibold">
-                          {
-                            selectedProject.servers.filter((server) => server.status === 'Running')
-                              .length
-                          }
-                        </div>
-                      </div>
-                      <div className="rounded-xl border border-border bg-background px-4 py-3">
-                        <div className="text-sm text-muted-foreground">{labels.healthy}</div>
-                        <div className="mt-1 text-2xl font-semibold">
-                          {selectedProjectHealthyCount}
-                        </div>
-                      </div>
-                      {/*<div className="rounded-xl border border-border bg-background px-4 py-3">*/}
-                      {/*  <div className="text-sm text-muted-foreground">{labels.oauthConnected}</div>*/}
-                      {/*  <div className="mt-1 text-2xl font-semibold">*/}
-                      {/*    {selectedProjectOAuthConnectedCount}*/}
-                      {/*  </div>*/}
-                      {/*</div>*/}
-                      <div className="rounded-xl border border-border bg-background px-4 py-3">
-                        <div className="text-sm text-muted-foreground">{labels.connectedKnowledgeBases}</div>
-                        <div className="mt-1 text-2xl font-semibold">
-                          {selectedProject.rag_collections.length}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap justify-end gap-3">
-                    <Dialog open={launchProjectOpen} onOpenChange={setLaunchProjectOpen}>
-                      <DialogTrigger asChild>
-                        <button
-                          disabled={!selectedProject.connection_ready || selectedProject.is_paused}
-                          className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-70"
-                        >
-                          <Play className="h-4 w-4" />
-                          {labels.launchProject}
-                        </button>
-                      </DialogTrigger>
-                      <DialogContent className="sm:max-w-2xl">
-                        <DialogHeader>
-                          <DialogTitle className="text-2xl font-bold">{labels.launchProject}</DialogTitle>
-                          <DialogDescription className="text-muted-foreground">
-                            {messages.launchProjectDescription}
-                          </DialogDescription>
-                        </DialogHeader>
-
-                        <div className="space-y-6 py-4">
-                          {/* Ollama Section */}
-                          <div className="rounded-2xl border border-border bg-card p-6 shadow-sm transition-all hover:shadow-md">
-                            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                              <div className="flex items-center gap-3">
-                                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-500/10">
-                                  <OllamaIcon className="h-6 w-6 text-blue-500" />
-                                </div>
-                                <div>
-                                  <h3 className="font-semibold">{labels.ollamaModel}</h3>
-                                  <p className="text-sm text-muted-foreground">
-                                    {shouldShowOllamaControls
-                                      ? (ollamaStatus?.models.length ?? 0) > 0
-                                        ? `${ollamaStatus?.models.length} ${labels.modelsAvailable}`
-                                        : messages.noOllamaModels
-                                      : messages.ollamaNotInstalled}
-                                  </p>
-                                </div>
-                              </div>
-
-                              <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
-                                <div className="sm:min-w-[200px]">
-                                  <div className="flex items-center gap-2">
-                                    <Select
-                                      value={selectedOllamaModel || undefined}
-                                      onValueChange={setSelectedOllamaModel}
-                                      disabled={!shouldShowOllamaControls || (ollamaStatus?.models.length ?? 0) === 0}
-                                    >
-                                      <SelectTrigger className="h-11 rounded-lg border-border bg-background">
-                                        <SelectValue placeholder={labels.selectModel} />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {ollamaStatus?.models.map((model) => (
-                                          <SelectItem key={`ollama-model-${model}`} value={model}>
-                                            {model}
-                                          </SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <button
-                                          type="button"
-                                          onClick={() => void loadOllamaStatus()}
-                                          disabled={ollamaRefreshing}
-                                          className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-background transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-                                          aria-label={labels.refresh}
-                                        >
-                                          <RefreshCw
-                                            className={`h-4 w-4 ${ollamaRefreshing ? 'animate-spin' : ''}`}
-                                          />
-                                        </button>
-                                      </TooltipTrigger>
-                                      <TooltipContent>{labels.refresh}</TooltipContent>
-                                    </Tooltip>
-                                  </div>
-                                </div>
-
-                                <button
-                                  onClick={() => void launchProjectOllama(selectedProject.project_id)}
-                                  disabled={
-                                    launchingOllamaProjectId === selectedProject.project_id ||
-                                    !selectedProject.connection_ready ||
-                                    selectedProject.is_paused ||
-                                    !canLaunchOllama
-                                  }
-                                  className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 text-sm font-medium text-white transition-all hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
-                                >
-                                  {launchingOllamaProjectId === selectedProject.project_id ? (
-                                    <LoaderCircle className="h-4 w-4 animate-spin" />
-                                  ) : (
-                                    <Play className="h-4 w-4" />
-                                  )}
-                                  {labels.launch}
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* LM Studio Section */}
-                          <div className="rounded-2xl border border-border bg-card p-6 shadow-sm transition-all hover:shadow-md">
-                            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                              <div className="flex items-center gap-3">
-                                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-purple-500/10">
-                                  <Bot className="h-6 w-6 text-purple-500" />
-                                </div>
-                                <div>
-                                  <h3 className="font-semibold">{labels.launchLMStudio}</h3>
-                                  <p className="text-sm text-muted-foreground">
-                                    {messages.launchLMStudioDescription}
-                                  </p>
-                                </div>
-                              </div>
-
-                              <button
-                                onClick={() => void launchProjectLMStudio(selectedProject.project_id)}
-                                disabled={
-                                  launchingLMStudioProjectId === selectedProject.project_id ||
-                                  !selectedProject.connection_ready ||
-                                  selectedProject.is_paused
-                                }
-                                className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-border bg-background px-4 text-sm font-medium transition-all hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-                              >
-                                {launchingLMStudioProjectId === selectedProject.project_id ? (
-                                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Play className="h-4 w-4" />
-                                )}
-                                {labels.launch}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="rounded-lg bg-blue-500/5 p-4">
-                          <div className="flex items-start gap-3">
-                            <Info className="mt-0.5 h-5 w-5 text-blue-500" />
-                            <div>
-                              <p className="text-sm font-medium text-blue-500">{labels.tip}</p>
-                              <p className="mt-1 text-sm text-muted-foreground">
-                                {messages.launchProjectTip}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-                      </DialogContent>
-                    </Dialog>
-                    <Menubar className="h-auto border-0 bg-transparent p-0 shadow-none">
-                      <MenubarMenu>
-                        <MenubarTrigger className="inline-flex h-11 items-center justify-center gap-2 rounded-xl border border-border px-4 text-sm font-medium transition-colors hover:bg-accent">
-                          <MoreHorizontal className="h-4 w-4" />
-                          {labels.actions}
-                        </MenubarTrigger>
-                        <MenubarContent align="end" className="min-w-[15rem] rounded-xl">
-                          <MenubarItem
-                            disabled={busyProjectId === selectedProject.project_id}
-                            onSelect={() =>
-                              void setProjectPaused(selectedProject.project_id, !selectedProject.is_paused)
-                            }
-                          >
-                            {busyProjectId === selectedProject.project_id ? (
-                              <LoaderCircle className="h-4 w-4 animate-spin" />
-                            ) : selectedProject.is_paused ? (
-                              <Play className="h-4 w-4" />
-                            ) : (
-                              <Pause className="h-4 w-4" />
-                            )}
-                            {selectedProject.is_paused ? labels.resumeProject : labels.pauseProject}
-                          </MenubarItem>
-                          <MenubarItem onSelect={startDuplicateProject}>
-                            <Copy className="h-4 w-4" />
-                            {labels.duplicateProject}
-                          </MenubarItem>
-                          <MenubarItem onSelect={startEditProject}>
-                            <Pencil className="h-4 w-4" />
-                            {labels.edit}
-                          </MenubarItem>
-                          <MenubarItem
-                            variant="destructive"
-                            disabled={busyProjectId === selectedProject.project_id}
-                            onSelect={() => void deleteProject(selectedProject.project_id)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            {labels.delete}
-                          </MenubarItem>
-                        </MenubarContent>
-                      </MenubarMenu>
-                    </Menubar>
-                  </div>
-                  {shouldShowOllamaControls && (ollamaStatus?.models.length ?? 0) === 0 ? (
-                    <p className="text-sm text-muted-foreground">{messages.noOllamaModels}</p>
-                  ) : null}
-                </div>
-              </section>
-
-              <section>
-                <div className="rounded-2xl border border-border bg-card p-6">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-lg font-semibold">{labels.connectionEndpoint}</h3>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                      {messages.connectionDescription}
-                    </p>
-                  </div>
-                    <div
-                      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${
-                        selectedProject.connection_ready
-                          ? 'border-status-running/30 bg-status-running/12 text-status-running'
-                          : 'border-amber-500/30 bg-amber-500/10 text-amber-600'
-                      }`}
-                    >
-                      {selectedProject.connection_ready ? (
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                      ) : (
-                        <AlertCircle className="h-3.5 w-3.5" />
-                      )}
-                      {selectedProject.connection_ready ? labels.ready : labels.notSelected}
-                    </div>
-                  </div>
-
-                  <div className="mt-5 flex flex-col gap-3 rounded-xl border border-border bg-background p-4 sm:flex-row sm:items-center">
-                    <code className="flex-1 overflow-x-auto text-sm text-electric-blue">
-                      {selectedProject.connect_url}
-                    </code>
-                    <button
-                      onClick={() => void copyConnectURL()}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent"
-                    >
-                      {copied ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                      {copied ? labels.copied : labels.copyUrl}
-                    </button>
-                  </div>
-
-                  {alternativeConnectURLs.length > 0 ? (
-                    <div className="mt-3 rounded-xl border border-border bg-background">
-                      <button
-                        type="button"
-                        onClick={() => setConnectionURLsExpanded((current) => !current)}
-                        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-medium transition-colors hover:bg-accent"
-                      >
-                        <span>{messages.otherConnectionOptions}</span>
-                        <span className="inline-flex items-center gap-2 text-muted-foreground">
-                          {connectionURLsExpanded ? labels.hide : labels.showMore}
-                          {connectionURLsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                        </span>
-                      </button>
-                      {connectionURLsExpanded ? (
-                        <div className="border-t border-border px-4 py-4">
-                          <p className="text-sm text-muted-foreground">
-                            {messages.otherConnectionOptionsDescription}
-                          </p>
-                          <div className="mt-3 space-y-2">
-                            {alternativeConnectURLs.map((url) => (
-                              <code
-                                key={url}
-                                className="block overflow-x-auto rounded-lg border border-border bg-card px-3 py-2 text-xs text-electric-blue"
-                              >
-                                {url}
-                              </code>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-
-                  {!selectedProject.connection_ready ? (
-                    <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700">
-                      {messages.connectionWarning(selectedProject.token)}
-                    </div>
-                  ) : null}
-                </div>
-              </section>
-
-              <section className="rounded-2xl border border-border bg-card p-6">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-lg font-semibold">{labels.connectedKnowledgeBases}</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {messages.connectedKnowledgeBasesDescription}
-                    </p>
-                  </div>
-                  <Dialog open={connectRAGCollectionOpen} onOpenChange={setConnectRAGCollectionOpen}>
-                    <DialogTrigger asChild>
-                      <button className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90">
-                        <Plus className="h-4 w-4" />
-                        {messages.connectKnowledgeBaseTitle}
-                      </button>
-                    </DialogTrigger>
-                    <DialogContent className="sm:max-w-xl">
-                      <DialogHeader>
-                        <DialogTitle>{messages.connectKnowledgeBaseTitle}</DialogTitle>
-                        <DialogDescription>
-                          {messages.connectKnowledgeBaseDescription}
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-3">
-                        {availableRAGCollections.length === 0 ? (
-                          <div className="rounded-xl border border-dashed border-border bg-background px-4 py-6 text-sm text-muted-foreground">
-                            {messages.noAvailableCollections}
-                          </div>
-                        ) : (
-                          availableRAGCollections.map((collection) => (
-                            <div key={collection.collection_id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-background p-4">
-                              <div className="min-w-0">
-                                <div className="font-medium">{collection.name}</div>
-                                <div className="mt-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                                  {collection.collection_id} · {collection.data_type}
-                                </div>
-                              </div>
-                              <button
-                                onClick={() => void connectRAGCollectionToProject(collection.collection_id)}
-                                disabled={linkingCollectionId === collection.collection_id}
-                                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
-                              >
-                                {linkingCollectionId === collection.collection_id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                                {labels.connect}
-                              </button>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </DialogContent>
-                  </Dialog>
-                </div>
-
-                {selectedProject.rag_collections.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border bg-background px-4 py-6 text-sm text-muted-foreground">
-                    {messages.noKnowledgeBasesConnected}
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div className="rounded-xl border border-electric-blue/20 bg-electric-blue/8 p-4">
-                      <div className="flex items-center gap-2 text-sm font-medium text-electric-blue">
-                        <Database className="h-4 w-4" />
-                        {labels.mcpToolReady}
-                      </div>
-                      <p className="mt-2 text-sm text-foreground/85">
-                        {messages.mcpToolReadyIntro}<code>search_project_knowledge</code>{messages.mcpToolReadyOutro}
-                      </p>
-                      <div className="mt-3 rounded-lg border border-border bg-background p-3">
-                        <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                          {labels.toolContract}
-                        </div>
-                        <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-xs text-foreground/85">{`search_project_knowledge({
-  query: "payment gateway",
-  limit: 5,
-  collections: ["crm_gym"]
-})`}</pre>
-                      </div>
-                    </div>
-
-                    <div className="space-y-3">
-                    {selectedProject.rag_collections.map((collection) => (
-                      <div key={collection.collection_id} className="flex flex-col gap-3 rounded-xl border border-border bg-background p-4 lg:flex-row lg:items-center lg:justify-between">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <Database className="h-4 w-4 text-electric-blue" />
-                            <div className="font-medium">{collection.name}</div>
-                          </div>
-                          <div className="mt-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                            {collection.collection_id} · {collection.data_type}
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => void disconnectRAGCollectionFromProject(collection.collection_id)}
-                          disabled={busyProjectId === selectedProject.project_id}
-                          className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                          {labels.disconnect}
-                        </button>
-                      </div>
-                    ))}
-                    </div>
-                  </div>
-                )}
-              </section>
-
-              <section className="rounded-2xl border border-border bg-card p-6">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-lg font-semibold">{labels.servers}</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {messages.serverControlDescription}
-                    </p>
-                  </div>
-                  <Dialog
-                    open={addServerOpen}
-                    onOpenChange={(open) => {
-                      setAddServerOpen(open);
-                      if (!open) {
-                        setEditingServerId(null);
-                        setServerForm(emptyServerForm);
-                        setOAuthAdvancedOpen(false);
-                      }
-                    }}
-                  >
-                    <DialogTrigger asChild>
-                      <button className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90">
-                        <Plus className="h-4 w-4" />
-                        {labels.addServer}
-                      </button>
-                    </DialogTrigger>
-                    <DialogContent className="sm:max-w-xl">
-                      <DialogHeader>
-                          <DialogTitle>{editingServerId ? 'Edit MCP Server' : labels.addServer}</DialogTitle>
-                        <DialogDescription>{messages.addServerDescription}</DialogDescription>
-                      </DialogHeader>
-
-                      <form className="space-y-4" onSubmit={addServer}>
-                        <label className="block space-y-2">
-                          <span className="text-sm text-muted-foreground">{labels.serverName}</span>
-                          <input
-                            required
-                            value={serverForm.name}
-                            onChange={(event) => updateServerForm('name', event.target.value)}
-                            className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                            placeholder={messages.serverNamePlaceholder}
-                          />
-                        </label>
-
-                        <div className="overflow-hidden rounded-xl border border-border bg-card">
-                          <div className="grid grid-cols-2 gap-0">
-                            <button
-                              type="button"
-                              onClick={() => updateServerForm('transport', 'stdio')}
-                              className={`h-11 text-sm font-medium transition-colors ${
-                                serverForm.transport === 'stdio'
-                                  ? 'bg-muted text-foreground'
-                                  : 'bg-transparent text-muted-foreground hover:bg-accent/60'
-                              }`}
-                            >
-                              {labels.stdio}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => updateServerForm('transport', 'http_stream')}
-                              className={`h-11 border-l border-border text-sm font-medium transition-colors ${
-                                serverForm.transport === 'http_stream'
-                                  ? 'bg-muted text-foreground'
-                                  : 'bg-transparent text-muted-foreground hover:bg-accent/60'
-                              }`}
-                            >
-                              {labels.httpStreaming}
-                            </button>
-                          </div>
-                        </div>
-
-                        {serverForm.transport === 'stdio' ? (
-                          <div className="space-y-4">
-                            <label className="block space-y-2">
-                              <span className="text-sm text-muted-foreground">{labels.launchCommand}</span>
-                              <input
-                                required
-                                value={serverForm.command}
-                                onChange={(event) => updateServerForm('command', event.target.value)}
-                                className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                                placeholder={messages.commandPlaceholder}
-                              />
-                            </label>
-
-                            <div className="space-y-2 rounded-xl border border-border bg-background p-4">
-                              <div className="text-sm text-muted-foreground">{labels.arguments}</div>
-                              <div className="space-y-2">
-                                {serverForm.args.map((arg, index) => (
-                                  <div key={`arg-${index}`} className="flex items-center gap-2">
-                                    <input
-                                      value={arg}
-                                      onChange={(event) =>
-                                        updateStringListField('args', index, event.target.value)
-                                      }
-                                      className="h-10 flex-1 rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                                      placeholder={messages.argumentPlaceholder}
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => removeStringListField('args', index)}
-                                      className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => addStringListField('args')}
-                                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-muted px-4 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                              >
-                                <Plus className="h-4 w-4" />
-                                {labels.addArgument}
-                              </button>
-                            </div>
-
-                            <div className="space-y-2 rounded-xl border border-border bg-background p-4">
-                              <div className="text-sm text-muted-foreground">{labels.environmentVariables}</div>
-                              <div className="space-y-2">
-                                {serverForm.env_vars.map((pair, index) => (
-                                  <div key={`env-${index}`} className="grid grid-cols-[1fr_1fr_auto] gap-2">
-                                    <input
-                                      value={pair.key}
-                                      onChange={(event) =>
-                                        updateKeyValueField('env_vars', index, 'key', event.target.value)
-                                      }
-                                      className="h-10 rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                                      placeholder={labels.key}
-                                    />
-                                    <input
-                                      type={isSecretLikeName(pair.key) ? 'password' : 'text'}
-                                      value={pair.value}
-                                      onChange={(event) =>
-                                        updateKeyValueField('env_vars', index, 'value', event.target.value)
-                                      }
-                                      className="h-10 rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                                      placeholder={labels.value}
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => removeKeyValueField('env_vars', index)}
-                                      className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => addKeyValueField('env_vars')}
-                                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-muted px-4 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                              >
-                                <Plus className="h-4 w-4" />
-                                {labels.addEnvironmentVariable}
-                              </button>
-                            </div>
-
-                            <div className="space-y-2 rounded-xl border border-border bg-background p-4">
-                              <div className="text-sm text-muted-foreground">{labels.environmentVariablePassthrough}</div>
-                              <div className="space-y-2">
-                                {serverForm.env_passthrough.map((value, index) => (
-                                  <div key={`env-pass-${index}`} className="flex items-center gap-2">
-                                    <input
-                                      value={value}
-                                      onChange={(event) =>
-                                        updateStringListField('env_passthrough', index, event.target.value)
-                                      }
-                                      className="h-10 flex-1 rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                                      placeholder={messages.envPassthroughPlaceholder}
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => removeStringListField('env_passthrough', index)}
-                                      className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => addStringListField('env_passthrough')}
-                                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-muted px-4 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                              >
-                                <Plus className="h-4 w-4" />
-                                {labels.addVariable}
-                              </button>
-                            </div>
-
-                            <label className="block space-y-2">
-                              <span className="text-sm text-muted-foreground">{labels.workingDirectory}</span>
-                              <input
-                                value={serverForm.working_dir}
-                                onChange={(event) => updateServerForm('working_dir', event.target.value)}
-                                className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                                placeholder={messages.workingDirectoryPlaceholder}
-                              />
-                            </label>
-
-                            {editingServerIntegration?.catalog_item_id === 'filesystem' ? (
-                              <div className="space-y-2 rounded-xl border border-electric-blue/20 bg-electric-blue/8 p-4">
-                                <div className="text-sm font-medium text-electric-blue">Shared Folder</div>
-                                <p className="text-sm text-muted-foreground">
-                                  Filesystem MCP uses this folder path as its main accessible directory.
-                                </p>
-                                <input
-                                  value={serverForm.args[serverForm.args.length - 1] ?? ''}
-                                  onChange={(event) => updateServerLastArg(event.target.value)}
-                                  className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                                  placeholder="/Users/artur/Desktop/Projects/my/embedservice"
-                                />
-                              </div>
-                            ) : null}
-
-                            <label className="flex items-center gap-3 rounded-md border border-border bg-background px-3 py-3 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={serverForm.auto_start}
-                                onChange={(event) => updateServerForm('auto_start', event.target.checked)}
-                                className="h-4 w-4 rounded border-border"
-                              />
-                              {labels.autoStart}
-                            </label>
-                          </div>
-                        ) : (
-                          <div className="space-y-4">
-                            <label className="block space-y-2">
-                              <span className="text-sm text-muted-foreground">{labels.url}</span>
-                              <input
-                                required
-                                value={serverForm.url}
-                                onChange={(event) => updateServerForm('url', event.target.value)}
-                                className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                                placeholder={messages.urlPlaceholder}
-                              />
-                            </label>
-
-                            <label className="block space-y-2">
-                              <span className="text-sm text-muted-foreground">{labels.bearerTokenEnvironmentVariable}</span>
-                              <input
-                                value={serverForm.bearer_token_env_var}
-                                onChange={(event) =>
-                                  updateServerForm('bearer_token_env_var', event.target.value)
-                                }
-                                className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                                placeholder={messages.bearerTokenPlaceholder}
-                              />
-                            </label>
-
-                            <div className="space-y-3 rounded-xl border border-border bg-background p-4">
-                              <div className="text-sm text-muted-foreground">Authentication</div>
-                              <div className="rounded-lg border border-electric-blue/20 bg-electric-blue/8 px-3 py-3 text-sm text-muted-foreground">
-                                Custom remote servers now default to direct URL, bearer env, and headers. OAuth-based remote integrations should be added from the Market tab.
-                              </div>
-                              {serverForm.auth_type === 'oauth2' ? (
-                                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-3 text-sm text-amber-700">
-                                  This server already uses OAuth. Save to keep the existing OAuth settings, then manage connection state from the server OAuth panel.
-                                </div>
-                              ) : null}
-                            </div>
-
-                            <div className="space-y-2 rounded-xl border border-border bg-background p-4">
-                              <div className="text-sm text-muted-foreground">{labels.headers}</div>
-                              <div className="space-y-2">
-                                {serverForm.headers.map((pair, index) => (
-                                  <div key={`header-${index}`} className="grid grid-cols-[1fr_1fr_auto] gap-2">
-                                    <input
-                                      value={pair.key}
-                                      onChange={(event) =>
-                                        updateKeyValueField('headers', index, 'key', event.target.value)
-                                      }
-                                      className="h-10 rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                                      placeholder={labels.key}
-                                    />
-                                    <input
-                                      type={isSecretLikeHeaderName(pair.key) ? 'password' : 'text'}
-                                      value={pair.value}
-                                      onChange={(event) =>
-                                        updateKeyValueField('headers', index, 'value', event.target.value)
-                                      }
-                                      className="h-10 rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                                      placeholder={labels.value}
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => removeKeyValueField('headers', index)}
-                                      className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => addKeyValueField('headers')}
-                                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-muted px-4 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                              >
-                                <Plus className="h-4 w-4" />
-                                {labels.addHeader}
-                              </button>
-                            </div>
-
-                            <div className="space-y-2 rounded-xl border border-border bg-background p-4">
-                              <div className="text-sm text-muted-foreground">{labels.headersFromEnvironmentVariables}</div>
-                              <div className="space-y-2">
-                                {serverForm.header_env_vars.map((pair, index) => (
-                                  <div key={`header-env-${index}`} className="grid grid-cols-[1fr_1fr_auto] gap-2">
-                                    <input
-                                      value={pair.key}
-                                      onChange={(event) =>
-                                        updateKeyValueField('header_env_vars', index, 'key', event.target.value)
-                                      }
-                                      className="h-10 rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                                      placeholder={labels.key}
-                                    />
-                                    <input
-                                      value={pair.value}
-                                      onChange={(event) =>
-                                        updateKeyValueField('header_env_vars', index, 'value', event.target.value)
-                                      }
-                                      className="h-10 rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                                      placeholder={labels.value}
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => removeKeyValueField('header_env_vars', index)}
-                                      className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                                    >
-                                      <Trash2 className="h-4 w-4" />
-                                    </button>
-                                  </div>
-                                ))}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => addKeyValueField('header_env_vars')}
-                                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-muted px-4 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                              >
-                                <Plus className="h-4 w-4" />
-                                {labels.addVariable}
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        <button
-                          type="submit"
-                          disabled={addingServer}
-                          className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
-                        >
-                          {addingServer ? (
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Plus className="h-4 w-4" />
-                          )}
-                          {editingServerId ? 'Save Server' : labels.addServer}
-                        </button>
-                      </form>
-                    </DialogContent>
-                  </Dialog>
-                </div>
-
-                {selectedProject.servers.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-border bg-background px-4 py-8 text-center text-muted-foreground">
-                    {messages.noServers}
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {selectedProject.servers.map((server) => {
-                      const busy = busyServerId === server.id;
-
-                      return (
-                        <div
-                          key={server.id}
-                          className="rounded-xl border border-border bg-background p-5"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <h4 className="font-semibold">{server.name}</h4>
-                                <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
-                                  {server.transport === 'http_stream' ? labels.httpStreaming : labels.stdio}
-                                </span>
-                              </div>
-
-                              <div className="mt-2 flex flex-wrap items-center gap-2">
-                                <span
-                                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-medium ${statusTone(
-                                    server.status,
-                                  )}`}
-                                >
-                                  {statusIcon(server.status)}
-                                  {server.status}
-                                </span>
-                                <span
-                                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-medium ${healthTone(
-                                    server.health_status,
-                                  )}`}
-                                >
-                                  <CheckCircle2 className="h-3.5 w-3.5" />
-                                  {labels.health}: {healthLabel(server.health_status, labels)}
-                                </span>
-
-                                {server.transport === 'stdio' && server.auto_start ? (
-                                  <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
-                                    {labels.autoStart}
-                                  </span>
-                                ) : null}
-                                {!server.is_enabled ? (
-                                  <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600">
-                                    {labels.disabled}
-                                  </span>
-                                ) : null}
-                                {(server.disabled_tool_names?.length ?? 0) > 0 ? (
-                                  <span className="rounded-full border border-electric-blue/30 bg-electric-blue/12 px-2 py-1 text-xs font-medium text-electric-blue">
-                                    {messages.disabledToolsBadge(server.disabled_tool_names.length)}
-                                  </span>
-                                ) : null}
-                                {server.transport === 'http_stream' && server.auth_type === 'oauth2' ? (
-                                  <span
-                                    className={`rounded-full border px-2 py-1 text-xs font-medium ${
-                                      server.oauth_connected
-                                        ? 'border-status-running/30 bg-status-running/12 text-status-running'
-                                        : 'border-amber-500/30 bg-amber-500/10 text-amber-700'
-                                    }`}
-                                  >
-                                    {labels.oauth}: {server.oauth_connected ? labels.connected : labels.notConnected}
-                                  </span>
-                                ) : null}
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="mt-4 space-y-2 text-sm">
-                            <div>
-                              <div className="text-muted-foreground">
-                                {server.transport === 'http_stream' ? labels.url : labels.launchCommand}
-                              </div>
-                              <code className="mt-1 block overflow-x-auto rounded-md bg-card px-3 py-2 text-xs text-electric-blue">
-                                {server.transport === 'http_stream'
-                                  ? server.url
-                                  : server.launch_command_display || server.launch_command}
-                              </code>
-                            </div>
-                            {server.transport === 'stdio' ? (
-                              <div>
-                                <div className="text-muted-foreground">{labels.workingDirectory}</div>
-                                <div className="mt-1 text-sm">
-                                  {server.working_dir || labels.notSpecified}
-                                </div>
-                              </div>
-                            ) : server.bearer_token_env_var ? (
-                              <div>
-                                <div className="text-muted-foreground">
-                                  {labels.bearerTokenEnvironmentVariable}
-                                </div>
-                                <div className="mt-1 text-sm">{server.bearer_token_env_var}</div>
-                              </div>
-                            ) : null}
-                            {server.transport === 'http_stream' && server.auth_type === 'oauth2' ? (
-                              <div>
-                                <div className="text-muted-foreground">OAuth</div>
-                                <div className="mt-1 text-sm">
-                                  {server.oauth_provider || 'custom'}
-                                  {server.oauth_connected_at
-                                    ? ` · connected ${new Date(server.oauth_connected_at).toLocaleString()}`
-                                    : ''}
-                                </div>
-                                {server.oauth_last_error ? (
-                                  <div className="mt-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                                    {server.oauth_last_error}
-                                  </div>
-                                ) : null}
-                              </div>
-                            ) : null}
-                            <div>
-                              <div className="text-muted-foreground">{labels.lastCheck}</div>
-                              <div className="mt-1 text-sm">
-                                {server.health_checked_at
-                                  ? new Date(server.health_checked_at).toLocaleString()
-                                  : labels.notSpecified}
-                              </div>
-                              {server.health_error ? (
-                                <div className="mt-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                                  {server.health_error}
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-
-                          <div className="mt-5 flex flex-wrap gap-2">
-                            {server.transport === 'stdio' ? (
-                              <button
-                                onClick={() =>
-                                  void runServerAction(
-                                    server.id,
-                                    server.status === 'Running' ? 'stop' : 'start',
-                                  )
-                                }
-                                disabled={busy || !server.is_enabled}
-                                className={`inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
-                                  server.status === 'Running'
-                                    ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                                    : 'bg-status-running text-white hover:bg-status-running/90'
-                                }`}
-                              >
-                                {busy ? (
-                                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                                ) : server.status === 'Running' ? (
-                                  <Square className="h-4 w-4" />
-                                ) : (
-                                  <Play className="h-4 w-4" />
-                                )}
-                                {server.status === 'Running' ? labels.stop : labels.start}
-                              </button>
-                            ) : null}
-
-                            <button
-                              onClick={() => void checkServerHealth(server.id)}
-                              disabled={busy}
-                              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
-                            >
-                              {busy ? (
-                                <LoaderCircle className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <CheckCircle2 className="h-4 w-4" />
-                              )}
-                              {labels.check}
-                            </button>
-
-                            {server.transport === 'http_stream' && server.auth_type === 'oauth2' ? (
-                              <button
-                                onClick={() => openAuthModal(server.id)}
-                                disabled={busy}
-                                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
-                              >
-                                {busy ? (
-                                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Info className="h-4 w-4" />
-                                )}
-                                {labels.oauth}
-                              </button>
-                            ) : null}
-
-                            <button
-                              onClick={() => void openServerTools(server)}
-                              disabled={serverToolsLoadingId === server.id}
-                              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
-                            >
-                              {serverToolsLoadingId === server.id ? (
-                                <LoaderCircle className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Settings2 className="h-4 w-4" />
-                              )}
-                              {labels.manageTools}
-                            </button>
-
-                            {server.transport === 'stdio' ? (
-                              <button
-                                onClick={() => void inspectServer(server)}
-                                disabled={inspectingServerId === server.id}
-                                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
-                              >
-                                {inspectingServerId === server.id ? (
-                                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Info className="h-4 w-4" />
-                                )}
-                                {labels.info}
-                              </button>
-                            ) : null}
-
-                            <button
-                              onClick={() => startEditServer(server)}
-                              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent"
-                            >
-                              <Pencil className="h-4 w-4" />
-                              Edit
-                            </button>
-
-                            <button
-                              onClick={() => void setServerEnabled(server.id, !server.is_enabled)}
-                              disabled={busy}
-                              className={`inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
-                                server.is_enabled
-                                  ? 'border border-amber-500/30 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20'
-                                  : 'border border-border bg-card text-foreground hover:bg-accent'
-                              }`}
-                            >
-                              {busy ? (
-                                <LoaderCircle className="h-4 w-4 animate-spin" />
-                              ) : server.is_enabled ? (
-                                <Pause className="h-4 w-4" />
-                              ) : (
-                                <Play className="h-4 w-4" />
-                              )}
-                              {server.is_enabled ? labels.disableServer : labels.enableServer}
-                            </button>
-
-                            <button
-                              onClick={() => void deleteServer(server.id)}
-                              disabled={busy}
-                              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-destructive/30 px-4 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-70"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </section>
-
-              <Dialog open={inspectOpen} onOpenChange={setInspectOpen}>
-                <DialogContent className="sm:max-w-5xl">
-                  <DialogHeader>
-                    <DialogTitle>
-                      {labels.serverInfo}
-                      {inspectionServerName ? ` · ${inspectionServerName}` : ''}
-                    </DialogTitle>
-                    <DialogDescription>{messages.inspectDescription}</DialogDescription>
-                  </DialogHeader>
-
-                  {inspectingServerId ? (
-                    <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-4 py-5 text-sm text-muted-foreground">
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                      {labels.inspectServer}
-                    </div>
-                  ) : inspectionError ? (
-                    <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-                      {inspectionError}
-                    </div>
-                  ) : inspection ? (
-                    <div className="space-y-5">
-                      <section className="grid gap-4 lg:grid-cols-3">
-                        <div className="rounded-xl border border-border bg-background p-4">
-                          <div className="text-sm text-muted-foreground">{labels.name}</div>
-                          <div className="mt-1 font-medium">
-                            {inspection.server_info.title || inspection.server_info.name || inspectionServerName}
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-border bg-background p-4">
-                          <div className="text-sm text-muted-foreground">{labels.protocolVersion}</div>
-                          <div className="mt-1 font-medium">{inspection.protocol_version || labels.notSpecified}</div>
-                        </div>
-                        <div className="rounded-xl border border-border bg-background p-4">
-                          <div className="text-sm text-muted-foreground">{labels.version}</div>
-                          <div className="mt-1 font-medium">{inspection.server_info.version || labels.notSpecified}</div>
-                        </div>
-                      </section>
-
-                      <section className="rounded-xl border border-border bg-background p-4">
-                        <h4 className="font-semibold">{labels.capabilities}</h4>
-                        {(inspection.capabilities ?? []).length > 0 ? (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {(inspection.capabilities ?? []).map((capability) => (
-                              <span
-                                key={capability}
-                                className="rounded-full border border-electric-blue/30 bg-electric-blue/12 px-2 py-1 text-xs font-medium text-electric-blue"
-                              >
-                                {capability}
-                              </span>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="mt-3 text-sm text-muted-foreground">{labels.noActivity}</div>
-                        )}
-                        {inspection.instructions ? (
-                          <div className="mt-4">
-                            <div className="text-sm text-muted-foreground">{labels.instructions}</div>
-                            <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-card px-3 py-3 text-sm text-foreground/85">
-                              {inspection.instructions}
-                            </pre>
-                          </div>
-                        ) : null}
-                      </section>
-
-                      <section className="rounded-xl border border-border bg-background p-4">
-                        <h4 className="font-semibold">{labels.tools}</h4>
-                        {(inspection.tools ?? []).length === 0 ? (
-                          <div className="mt-3 text-sm text-muted-foreground">{labels.noTools}</div>
-                        ) : (
-                          <div className="mt-3 space-y-3">
-                            {(inspection.tools ?? []).map((tool) => (
-                              <div key={tool.name} className="rounded-lg border border-border bg-card p-4">
-                                <div className="font-medium">{tool.title || tool.name}</div>
-                                {tool.description ? (
-                                  <div className="mt-1 text-sm text-muted-foreground">{tool.description}</div>
-                                ) : null}
-                                {tool.input_schema ? (
-                                  <div className="mt-3">
-                                    <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                                      inputSchema
-                                    </div>
-                                    <pre className="mt-2 overflow-x-auto rounded-lg bg-background px-3 py-3 text-xs text-foreground/85">
-                                      {formatSchema(tool.input_schema)}
-                                    </pre>
-                                  </div>
-                                ) : null}
-                                {tool.output_schema ? (
-                                  <div className="mt-3">
-                                    <div className="text-xs uppercase tracking-[0.18em] text-muted-foreground">
-                                      outputSchema
-                                    </div>
-                                    <pre className="mt-2 overflow-x-auto rounded-lg bg-background px-3 py-3 text-xs text-foreground/85">
-                                      {formatSchema(tool.output_schema)}
-                                    </pre>
-                                  </div>
-                                ) : null}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </section>
-
-                      <section className="grid gap-5 xl:grid-cols-2">
-                        <div className="rounded-xl border border-border bg-background p-4">
-                          <h4 className="font-semibold">{labels.resources}</h4>
-                          {(inspection.resources ?? []).length === 0 ? (
-                            <div className="mt-3 text-sm text-muted-foreground">{labels.noResources}</div>
-                          ) : (
-                            <div className="mt-3 space-y-3">
-                              {(inspection.resources ?? []).map((resource) => (
-                                <div key={`${resource.uri}-${resource.name}`} className="rounded-lg border border-border bg-card p-4">
-                                  <div className="font-medium">{resource.title || resource.name}</div>
-                                  {resource.description ? (
-                                    <div className="mt-1 text-sm text-muted-foreground">{resource.description}</div>
-                                  ) : null}
-                                  {resource.uri ? (
-                                    <code className="mt-2 block overflow-x-auto text-xs text-electric-blue">
-                                      {resource.uri}
-                                    </code>
-                                  ) : null}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="rounded-xl border border-border bg-background p-4">
-                          <h4 className="font-semibold">{labels.prompts}</h4>
-                          {(inspection.prompts ?? []).length === 0 ? (
-                            <div className="mt-3 text-sm text-muted-foreground">{labels.noPrompts}</div>
-                          ) : (
-                            <div className="mt-3 space-y-3">
-                              {(inspection.prompts ?? []).map((prompt) => (
-                                <div key={prompt.name} className="rounded-lg border border-border bg-card p-4">
-                                  <div className="font-medium">{prompt.title || prompt.name}</div>
-                                  {prompt.description ? (
-                                    <div className="mt-1 text-sm text-muted-foreground">{prompt.description}</div>
-                                  ) : null}
-                                  {(prompt.arguments ?? []).length > 0 ? (
-                                    <div className="mt-3 space-y-2">
-                                      {(prompt.arguments ?? []).map((argument) => (
-                                        <div
-                                          key={`${prompt.name}-${argument.name}`}
-                                          className="rounded-md bg-background px-3 py-2 text-sm"
-                                        >
-                                          <div className="font-medium">
-                                            {argument.name}
-                                            {argument.required ? ' *' : ''}
-                                          </div>
-                                          {argument.description ? (
-                                            <div className="mt-1 text-muted-foreground">{argument.description}</div>
-                                          ) : null}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  ) : null}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      </section>
-
-                      <section className="rounded-xl border border-border bg-background p-4">
-                        <h4 className="font-semibold">{labels.readme}</h4>
-                        {inspection.readme_path ? (
-                          <div className="mt-2 text-sm text-muted-foreground">
-                            {inspection.readme_path}
-                          </div>
-                        ) : null}
-                        {inspection.readme ? (
-                          <pre className="mt-3 overflow-x-auto whitespace-pre-wrap rounded-lg bg-card px-3 py-3 text-sm text-foreground/85">
-                            {inspection.readme}
-                          </pre>
-                        ) : (
-                          <div className="mt-3 text-sm text-muted-foreground">{labels.noReadme}</div>
-                        )}
-                      </section>
-                    </div>
-                  ) : null}
-                </DialogContent>
-              </Dialog>
-
-              <Dialog
-                open={serverToolsOpen}
-                onOpenChange={(open) => {
-                  setServerToolsOpen(open);
-                  if (!open) {
-                    setServerToolsLoadingId(null);
-                    setServerToolsSavingName(null);
-                    setServerToolsServerId(null);
-                    setServerToolsServerName('');
-                    setServerTools([]);
-                    setServerToolsError(null);
-                  }
-                }}
-              >
-                <DialogContent className="sm:max-w-4xl">
-                  <DialogHeader>
-                    <DialogTitle>
-                      {labels.manageTools}
-                      {serverToolsServerName ? ` · ${serverToolsServerName}` : ''}
-                    </DialogTitle>
-                    <DialogDescription>{messages.manageToolsDescription}</DialogDescription>
-                  </DialogHeader>
-
-                  {serverToolsLoadingId ? (
-                    <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-4 py-5 text-sm text-muted-foreground">
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                      {labels.tools}
-                    </div>
-                  ) : serverToolsError ? (
-                    <div className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-                      {serverToolsError}
-                    </div>
-                  ) : serverTools.length === 0 ? (
-                    <div className="rounded-xl border border-border bg-background p-4 text-sm text-muted-foreground">
-                      {messages.noServerTools}
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {serverTools.map((tool) => (
-                        <div key={tool.name} className="rounded-xl border border-border bg-background p-4">
-                          <div className="flex items-start justify-between gap-4">
-                            <div className="min-w-0 flex-1">
-                              <div className="font-medium">{tool.title || tool.name}</div>
-                              <code className="mt-1 block overflow-x-auto text-xs text-electric-blue">
-                                {tool.name}
-                              </code>
-                              {tool.description ? (
-                                <div className="mt-2 text-sm text-muted-foreground">{tool.description}</div>
-                              ) : null}
-                            </div>
-                            <label className="flex items-center gap-3 rounded-md border border-border bg-card px-3 py-2 text-sm">
-                              <input
-                                type="checkbox"
-                                checked={tool.enabled}
-                                disabled={serverToolsSavingName === tool.name}
-                                onChange={(event) =>
-                                  void setServerToolEnabled(tool.name, event.target.checked)
-                                }
-                                className="h-4 w-4 rounded border-border"
-                              />
-                              {serverToolsSavingName === tool.name ? (
-                                <LoaderCircle className="h-4 w-4 animate-spin" />
-                              ) : null}
-                              {tool.enabled ? labels.enabled : labels.disabled}
-                            </label>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </DialogContent>
-              </Dialog>
-
-              <Dialog
-                open={authOpen}
-                onOpenChange={(open) => {
-                  setAuthOpen(open);
-                  if (!open) {
-                    setAuthServerId(null);
-                  }
-                }}
-              >
-                <DialogContent className="sm:max-w-3xl">
-                  <DialogHeader>
-                    <DialogTitle>
-                      {labels.oauth}
-                      {authServer ? ` · ${authServer.name}` : ''}
-                    </DialogTitle>
-                    <DialogDescription>
-                      Manage OAuth connection settings and current authorization state for this remote MCP server.
-                    </DialogDescription>
-                  </DialogHeader>
-
-                  {authServer ? (
-                    <div className="space-y-5">
-                      <section className="grid gap-4 sm:grid-cols-3">
-                        <div className="rounded-xl border border-border bg-background p-4">
-                          <div className="text-sm text-muted-foreground">Provider</div>
-                          <div className="mt-1 font-medium">{authServer.oauth_provider || 'custom'}</div>
-                        </div>
-                        <div className="rounded-xl border border-border bg-background p-4">
-                          <div className="text-sm text-muted-foreground">{labels.oauth}</div>
-                          <div className="mt-1 font-medium">
-                            {authServer.oauth_connected ? labels.connected : labels.notConnected}
-                          </div>
-                        </div>
-                        <div className="rounded-xl border border-border bg-background p-4">
-                          <div className="text-sm text-muted-foreground">{labels.lastCheck}</div>
-                          <div className="mt-1 font-medium">
-                            {authServer.oauth_connected_at
-                              ? new Date(authServer.oauth_connected_at).toLocaleString()
-                              : labels.notSpecified}
-                          </div>
-                        </div>
-                      </section>
-
-                      <section className="rounded-xl border border-border bg-background p-4">
-                        <div className="text-sm text-muted-foreground">Callback URL</div>
-                        <code className="mt-2 block overflow-x-auto rounded-lg bg-card px-3 py-3 text-xs text-electric-blue">
-                          {window.location.origin}/oauth/callback
-                        </code>
-                      </section>
-
-                      <section className="grid gap-5 lg:grid-cols-2">
-                        <div className="rounded-xl border border-border bg-background p-4">
-                          <div className="text-sm text-muted-foreground">Authorize URL</div>
-                          <code className="mt-2 block overflow-x-auto rounded-lg bg-card px-3 py-3 text-xs text-electric-blue">
-                            {authServer.oauth_authorize_url || labels.notSpecified}
-                          </code>
-                        </div>
-                        <div className="rounded-xl border border-border bg-background p-4">
-                          <div className="text-sm text-muted-foreground">Token URL</div>
-                          <code className="mt-2 block overflow-x-auto rounded-lg bg-card px-3 py-3 text-xs text-electric-blue">
-                            {authServer.oauth_token_url || labels.notSpecified}
-                          </code>
-                        </div>
-                      </section>
-
-                      <section className="rounded-xl border border-border bg-background p-4">
-                        <div className="text-sm text-muted-foreground">Scopes</div>
-                        {(authServer.oauth_scopes ?? []).length > 0 ? (
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {(authServer.oauth_scopes ?? []).map((scope) => (
-                              <span
-                                key={scope}
-                                className="rounded-full border border-electric-blue/30 bg-electric-blue/12 px-2 py-1 text-xs font-medium text-electric-blue"
-                              >
-                                {scope}
-                              </span>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="mt-3 text-sm text-muted-foreground">{labels.notSpecified}</div>
-                        )}
-                      </section>
-
-                      {authServer.oauth_last_error ? (
-                        <section className="rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-                          {authServer.oauth_last_error}
-                        </section>
-                      ) : null}
-
-                      <section className="flex flex-wrap gap-3">
-                        <button
-                          onClick={() => void connectOAuth(authServer.id)}
-                          disabled={busyServerId === authServer.id}
-                          className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
-                        >
-                          {busyServerId === authServer.id ? (
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Play className="h-4 w-4" />
-                          )}
-                          {authServer.oauth_connected ? `Reconnect ${labels.oauth}` : `Connect ${labels.oauth}`}
-                        </button>
-
-                        <button
-                          onClick={() => void disconnectOAuth(authServer.id)}
-                          disabled={busyServerId === authServer.id || !authServer.oauth_connected}
-                          className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
-                        >
-                          {busyServerId === authServer.id ? (
-                            <LoaderCircle className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Pause className="h-4 w-4" />
-                          )}
-                          {`Disconnect ${labels.oauth}`}
-                        </button>
-                      </section>
-                    </div>
-                  ) : null}
-                </DialogContent>
-              </Dialog>
-            </div>
+            <ProjectsView
+              labels={labels}
+              messages={messages}
+              selectedProject={selectedProject}
+              selectedProjectHealthyCount={selectedProjectHealthyCount}
+              launchProjectOpen={launchProjectOpen}
+              setLaunchProjectOpen={setLaunchProjectOpen}
+              shouldShowOllamaControls={shouldShowOllamaControls}
+              ollamaStatus={ollamaStatus}
+              selectedOllamaModel={selectedOllamaModel}
+              setSelectedOllamaModel={setSelectedOllamaModel}
+              loadOllamaStatus={loadOllamaStatus}
+              ollamaRefreshing={ollamaRefreshing}
+              launchProjectOllama={launchProjectOllama}
+              launchingOllamaProjectId={launchingOllamaProjectId}
+              canLaunchOllama={canLaunchOllama}
+              launchProjectLMStudio={launchProjectLMStudio}
+              launchingLMStudioProjectId={launchingLMStudioProjectId}
+              OllamaIcon={OllamaIcon}
+              alternativeConnectURLs={alternativeConnectURLs}
+              connectionURLsExpanded={connectionURLsExpanded}
+              setConnectionURLsExpanded={setConnectionURLsExpanded}
+              copyConnectURL={copyConnectURL}
+              copied={copied}
+              busyProjectId={busyProjectId}
+              setProjectPaused={setProjectPaused}
+              startDuplicateProject={startDuplicateProject}
+              startEditProject={startEditProject}
+              deleteProject={deleteProject}
+              connectRAGCollectionOpen={connectRAGCollectionOpen}
+              setConnectRAGCollectionOpen={setConnectRAGCollectionOpen}
+              availableRAGCollections={availableRAGCollections}
+              connectRAGCollectionToProject={connectRAGCollectionToProject}
+              linkingCollectionId={linkingCollectionId}
+              disconnectRAGCollectionFromProject={disconnectRAGCollectionFromProject}
+              addServerOpen={addServerOpen}
+              setAddServerOpen={setAddServerOpen}
+              editingServerId={editingServerId}
+              resetServerEditor={() => {
+                setEditingServerId(null);
+                setServerForm(emptyServerForm);
+                setOAuthAdvancedOpen(false);
+              }}
+              serverForm={serverForm}
+              updateServerForm={updateServerForm}
+              updateStringListField={updateStringListField}
+              removeStringListField={removeStringListField}
+              addStringListField={addStringListField}
+              updateKeyValueField={updateKeyValueField}
+              removeKeyValueField={removeKeyValueField}
+              addKeyValueField={addKeyValueField}
+              updateServerLastArg={updateServerLastArg}
+              editingServerIntegrationCatalogItemId={editingServerIntegration?.catalog_item_id ?? null}
+              addingServer={addingServer}
+              addServer={addServer}
+              busyServerId={busyServerId}
+              checkServerHealth={checkServerHealth}
+              runServerAction={runServerAction}
+              openAuthModal={openAuthModal}
+              openServerTools={openServerTools}
+              serverToolsLoadingId={serverToolsLoadingId}
+              inspectServer={inspectServer}
+              inspectingServerId={inspectingServerId}
+              startEditServer={startEditServer}
+              setServerEnabled={setServerEnabled}
+              deleteServer={deleteServer}
+              inspectOpen={inspectOpen}
+              setInspectOpen={setInspectOpen}
+              inspectionServerName={inspectionServerName}
+              inspectionError={inspectionError}
+              inspection={inspection}
+              formatSchema={formatSchema}
+              serverToolsOpen={serverToolsOpen}
+              setServerToolsOpen={setServerToolsOpen}
+              resetServerTools={() => {
+                setServerToolsLoadingId(null);
+                setServerToolsSavingName(null);
+                setServerToolsServerId(null);
+                setServerToolsServerName('');
+                setServerTools([]);
+                setServerToolsError(null);
+              }}
+              serverToolsServerName={serverToolsServerName}
+              serverToolsError={serverToolsError}
+              serverTools={serverTools}
+              serverToolsSavingName={serverToolsSavingName}
+              setServerToolEnabled={setServerToolEnabled}
+              authOpen={authOpen}
+              setAuthOpen={setAuthOpen}
+              resetAuthServer={() => setAuthServerId(null)}
+              authServer={authServer}
+              connectOAuth={connectOAuth}
+              disconnectOAuth={disconnectOAuth}
+            />
           )}
-        </main>
-      </div>
-    </div>
+      </Suspense>
+    </AppShell>
   );
 }

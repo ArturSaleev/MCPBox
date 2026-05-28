@@ -13,7 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/models"
 )
 
 type lmStudioLaunchResponse struct {

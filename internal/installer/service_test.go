@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/models"
 )
 
 type memoryStore struct {

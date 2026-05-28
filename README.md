@@ -141,6 +141,8 @@ Default port: `38180`
 - [README-ru.md](./README-ru.md) - Russian user guide
 - [DEVELOPER.md](./DEVELOPER.md) - developer guide, API notes, and architecture
 - [DEVELOPER-ru.md](./DEVELOPER-ru.md) - Russian developer guide
+- [PRO-DEVELOPMENT.md](./PRO-DEVELOPMENT.md) - recommended Free / Pro repository split and build workflow
+- [examples/mcpboxpro-template](./examples/mcpboxpro-template) - starter scaffold for the private Pro repository
 
 ## Notes
 

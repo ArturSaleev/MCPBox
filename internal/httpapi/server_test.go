@@ -13,14 +13,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
-	"MCPBox/internal/installer"
-	"MCPBox/internal/models"
-	"MCPBox/internal/orchestrator"
-	"MCPBox/internal/storage"
+	"github.com/ArturSaleev/MCPBox/internal/installer"
+	"github.com/ArturSaleev/MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/orchestrator"
+	"github.com/ArturSaleev/MCPBox/internal/storage"
 )
 
 func TestDisplayLaunchCommandMasksSensitiveArgs(t *testing.T) {
@@ -95,7 +96,7 @@ func TestProjectEndpointsExposeConnectURLForConfiguredServers(t *testing.T) {
 	}
 
 	got := payload[0]
-	if got.ConnectURL != "http://mcpbox.local:38180/mcp/"+project.Token {
+	if got.ConnectURL != "http://mcpbox.local:38180/mcp" {
 		t.Fatalf("ConnectURL = %q", got.ConnectURL)
 	}
 	if len(got.ConnectURLs) == 0 {
@@ -103,6 +104,9 @@ func TestProjectEndpointsExposeConnectURLForConfiguredServers(t *testing.T) {
 	}
 	if got.ConnectURLs[0] != got.ConnectURL {
 		t.Fatalf("ConnectURLs[0] = %q, want %q", got.ConnectURLs[0], got.ConnectURL)
+	}
+	if !slices.Contains(got.ConnectURLs, "http://mcpbox.local:38180/mcp/"+project.Token) {
+		t.Fatalf("legacy token URL missing from ConnectURLs: %#v", got.ConnectURLs)
 	}
 	if got.ConnectionReady {
 		t.Fatal("ConnectionReady = true, want false for stopped stdio servers")
@@ -1484,7 +1488,7 @@ func TestLaunchProjectOllamaCreatesConfigAndOpensTerminal(t *testing.T) {
 		t.Fatalf("ReadFile(%q) error = %v", payload.ConfigPath, err)
 	}
 	config := string(configBytes)
-	if !strings.Contains(config, "url: http://mcpbox.local:38180/mcp/"+project.Token) {
+	if !strings.Contains(config, "url: http://mcpbox.local:38180/mcp") {
 		t.Fatalf("config = %q", config)
 	}
 }
@@ -1712,7 +1716,7 @@ func TestLaunchProjectLMStudioBuildsDeeplinkAndLaunches(t *testing.T) {
 	if err := json.Unmarshal(configBytes, &config); err != nil {
 		t.Fatalf("json.Unmarshal(config) error = %v", err)
 	}
-	if config["url"] != "http://mcpbox.local:38180/mcp/"+project.Token {
+	if config["url"] != "http://mcpbox.local:38180/mcp" {
 		t.Fatalf("config url = %q", config["url"])
 	}
 }
@@ -2153,6 +2157,7 @@ func TestCatalogPackageInstallAndListEndpoints(t *testing.T) {
 		store,
 		orchestrator.NewRegistry(context.Background()),
 		installer.NewService(store, filepath.Join(t.TempDir(), "packages")),
+		Options{},
 	)
 
 	syncBody := bytes.NewBufferString(`{"url":"` + manifestServer.URL + `"}`)
@@ -2259,6 +2264,7 @@ func TestCatalogPackageAddToProjectEndpoint(t *testing.T) {
 		store,
 		orchestrator.NewRegistry(context.Background()),
 		installer.NewService(store, filepath.Join(t.TempDir(), "packages")),
+		Options{},
 	)
 
 	syncBody := bytes.NewBufferString(`{"url":"` + manifestServer.URL + `"}`)
@@ -2369,6 +2375,7 @@ func TestFilesystemPackageAddToProjectPassesRootPathArgument(t *testing.T) {
 		store,
 		orchestrator.NewRegistry(context.Background()),
 		installer.NewService(store, filepath.Join(t.TempDir(), "packages")),
+		Options{},
 	)
 
 	syncBody := bytes.NewBufferString(`{"url":"` + manifestServer.URL + `"}`)

@@ -482,8 +482,8 @@ export const dictionaries: Record<Language, Dictionary> = {
         'Create the first workspace on the left and it will become the control center for its MCP servers.',
       overviewFallbackDescription: 'Workspace group for MCP clients and tools.',
       connectionDescription:
-        'All clients in this workspace connect through the project token and can access all enabled MCP servers in the project.',
-      connectionWarning: (token: string) => `To use /mcp/${token}, add and enable at least one MCP server or connect a knowledge base.`,
+        'Use the project endpoint with Authorization: Bearer <project-token>. Clients connected through this endpoint can access all enabled MCP servers in the project.',
+      connectionWarning: (_token: string) => 'To use this endpoint, add and enable at least one MCP server or connect a knowledge base.',
       addServerDescription:
         'Add one or more MCP servers to expose them through the shared project endpoint.',
       serverNamePlaceholder: 'Filesystem Server',
@@ -625,7 +625,7 @@ export const dictionaries: Record<Language, Dictionary> = {
         '. Any model connected through the project endpoint can call it to search across all connected knowledge bases.',
       otherConnectionOptions: 'Other connection options',
       otherConnectionOptionsDescription:
-        'Use these addresses for LAN access or when the default local URL is not the one you need.',
+        'Use these addresses for LAN access, legacy token-in-URL clients, or when the default local URL is not the one you need.',
       duplicateProjectDescription:
         'Create a full copy of this project with a new name, token, servers, integrations, package links, and connected knowledge bases.',
       duplicateProjectNamePlaceholder: 'Client Workspace Copy',
@@ -814,8 +814,8 @@ export const dictionaries: Record<Language, Dictionary> = {
         'Создай первый workspace слева, и он станет центром управления своими MCP-серверами.',
       overviewFallbackDescription: 'Логическая группа для MCP-клиентов и инструментов.',
       connectionDescription:
-        'Все клиенты этого workspace подключаются через project token и получают доступ ко всем включённым MCP-серверам проекта.',
-      connectionWarning: (token: string) => `Чтобы использовать /mcp/${token}, добавьте и включите хотя бы один MCP-сервер или подключите базу знаний.`,
+        'Используйте endpoint проекта с Authorization: Bearer <project-token>. Все клиенты через этот endpoint получают доступ ко всем включённым MCP-серверам проекта.',
+      connectionWarning: (_token: string) => 'Чтобы использовать этот endpoint, добавьте и включите хотя бы один MCP-сервер или подключите базу знаний.',
       addServerDescription:
         'Добавьте один или несколько MCP-серверов, чтобы опубликовать их через общий endpoint проекта.',
       serverNamePlaceholder: 'Filesystem Server',
@@ -960,7 +960,7 @@ export const dictionaries: Record<Language, Dictionary> = {
         '. Любая модель, подключенная через endpoint проекта, может вызывать его для поиска по всем подключенным базам знаний.',
       otherConnectionOptions: 'Другие варианты подключения',
       otherConnectionOptionsDescription:
-        'Используйте эти адреса для подключения по локальной сети или если нужен не основной локальный URL.',
+        'Используйте эти адреса для подключения по локальной сети, для legacy-клиентов с токеном в URL или если нужен не основной локальный URL.',
       duplicateProjectDescription:
         'Создать полную копию этого проекта с новым именем, token, серверами, интеграциями, package links и подключёнными базами знаний.',
       duplicateProjectNamePlaceholder: 'Копия Client Workspace',

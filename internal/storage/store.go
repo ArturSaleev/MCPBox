@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/models"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -17,6 +17,13 @@ import (
 
 type Store struct {
 	db *gorm.DB
+}
+
+func (s *Store) DB() *gorm.DB {
+	if s == nil {
+		return nil
+	}
+	return s.db
 }
 
 func (s *Store) Close() error {

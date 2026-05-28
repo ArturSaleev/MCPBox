@@ -23,24 +23,27 @@ import (
 	"sync"
 	"time"
 
-	"MCPBox/internal/installer"
-	"MCPBox/internal/models"
-	"MCPBox/internal/orchestrator"
-	"MCPBox/internal/storage"
+	"github.com/ArturSaleev/MCPBox/internal/installer"
+	"github.com/ArturSaleev/MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/orchestrator"
+	"github.com/ArturSaleev/MCPBox/internal/storage"
 )
 
 type Server struct {
-	store              *storage.Store
-	registry           *orchestrator.Registry
-	installer          *installer.Service
-	terminalLauncher   func(cwd, shellCommand string) error
-	urlLauncher        func(target string) error
-	mux                *http.ServeMux
-	sessionMu          sync.RWMutex
-	sessions           map[string]connectSession
-	oauthMu            sync.RWMutex
-	oauth              map[string]oauthSession
-	initializedServers map[uint]bool
+	store               *storage.Store
+	registry            *orchestrator.Registry
+	installer           *installer.Service
+	editionID           string
+	editionName         string
+	editionCapabilities []string
+	terminalLauncher    func(cwd, shellCommand string) error
+	urlLauncher         func(target string) error
+	mux                 *http.ServeMux
+	sessionMu           sync.RWMutex
+	sessions            map[string]connectSession
+	oauthMu             sync.RWMutex
+	oauth               map[string]oauthSession
+	initializedServers  map[uint]bool
 }
 
 type connectSession struct {
@@ -263,24 +266,45 @@ type serverToolSettingsRequest struct {
 	DisabledTools []string `json:"disabled_tools"`
 }
 
-func NewServer(store *storage.Store, registry *orchestrator.Registry) *Server {
-	return NewServerWithInstaller(store, registry, nil)
+type Options struct {
+	EditionID           string
+	EditionName         string
+	EditionCapabilities []string
+	HTTPRegistrars      []func(*http.ServeMux)
 }
 
-func NewServerWithInstaller(store *storage.Store, registry *orchestrator.Registry, packageInstaller *installer.Service) *Server {
+func NewServer(store *storage.Store, registry *orchestrator.Registry) *Server {
+	return NewServerWithInstaller(store, registry, nil, Options{})
+}
+
+func NewServerWithInstaller(store *storage.Store, registry *orchestrator.Registry, packageInstaller *installer.Service, options Options) *Server {
 	s := &Server{
-		store:              store,
-		registry:           registry,
-		installer:          packageInstaller,
-		terminalLauncher:   launchTerminalSession,
-		urlLauncher:        launchExternalURL,
-		mux:                http.NewServeMux(),
-		sessions:           make(map[string]connectSession),
-		oauth:              make(map[string]oauthSession),
-		initializedServers: make(map[uint]bool),
+		store:               store,
+		registry:            registry,
+		installer:           packageInstaller,
+		editionID:           strings.TrimSpace(options.EditionID),
+		editionName:         strings.TrimSpace(options.EditionName),
+		editionCapabilities: slices.Clone(options.EditionCapabilities),
+		terminalLauncher:    launchTerminalSession,
+		urlLauncher:         launchExternalURL,
+		mux:                 http.NewServeMux(),
+		sessions:            make(map[string]connectSession),
+		oauth:               make(map[string]oauthSession),
+		initializedServers:  make(map[uint]bool),
+	}
+	if s.editionID == "" {
+		s.editionID = "free"
+	}
+	if s.editionName == "" {
+		s.editionName = "MCPBox"
 	}
 
 	s.registerRoutes()
+	for _, registrar := range options.HTTPRegistrars {
+		if registrar != nil {
+			registrar(s.mux)
+		}
+	}
 	return s
 }
 
@@ -290,6 +314,7 @@ func (s *Server) Handler() http.Handler {
 
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
+	s.mux.HandleFunc("GET /api/meta", s.handleMeta)
 	s.mux.HandleFunc("GET /api/logs", s.handleListLogs)
 	s.mux.HandleFunc("GET /api/logs/metrics", s.handleLogMetrics)
 	s.mux.HandleFunc("GET /api/ollama/status", s.handleOllamaStatus)
@@ -321,6 +346,14 @@ func (s *Server) registerRoutes() {
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleMeta(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"edition_id":   s.editionID,
+		"edition_name": s.editionName,
+		"capabilities": slices.Clone(s.editionCapabilities),
+	})
 }
 
 func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
@@ -1026,6 +1059,9 @@ func (s *Server) handleServerToolsUpdate(w http.ResponseWriter, r *http.Request,
 func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	token := extractProjectToken(r.URL.Path)
 	if token == "" || token == "." {
+		token = bearerTokenFromRequest(r)
+	}
+	if token == "" || token == "." {
 		http.NotFound(w, r)
 		return
 	}
@@ -1580,13 +1616,12 @@ func (s *Server) connectURL(r *http.Request, token string) string {
 }
 
 func (s *Server) connectURLs(r *http.Request, token string) []string {
-	requestPath := "/mcp/" + token
 	scheme, host, port := requestAddressParts(r)
 
-	urls := make([]string, 0, 8)
+	urls := make([]string, 0, 16)
 	seen := make(map[string]struct{})
 
-	appendCandidate := func(candidateHost string) {
+	appendCandidate := func(candidateHost, requestPath string) {
 		candidateHost = strings.TrimSpace(candidateHost)
 		if candidateHost == "" {
 			return
@@ -1600,25 +1635,30 @@ func (s *Server) connectURLs(r *http.Request, token string) []string {
 		urls = append(urls, target)
 	}
 
-	appendCandidate(host)
-	appendCandidate("127.0.0.1")
-	appendCandidate("localhost")
+	appendForPath := func(requestPath string) {
+		appendCandidate(host, requestPath)
+		appendCandidate("127.0.0.1", requestPath)
+		appendCandidate("localhost", requestPath)
 
-	if hostname, err := os.Hostname(); err == nil {
-		appendCandidate(hostname)
+		if hostname, err := os.Hostname(); err == nil {
+			appendCandidate(hostname, requestPath)
+		}
+
+		interfaceHosts := make([]string, 0, 8)
+		for _, iface := range networkIPv4Hosts() {
+			interfaceHosts = append(interfaceHosts, iface)
+		}
+		slices.Sort(interfaceHosts)
+		for _, iface := range interfaceHosts {
+			appendCandidate(iface, requestPath)
+		}
 	}
 
-	interfaceHosts := make([]string, 0, 8)
-	for _, iface := range networkIPv4Hosts() {
-		interfaceHosts = append(interfaceHosts, iface)
-	}
-	slices.Sort(interfaceHosts)
-	for _, iface := range interfaceHosts {
-		appendCandidate(iface)
-	}
+	// appendForPath("/mcp")
+	appendForPath("/mcp/" + token)
 
 	if len(urls) == 0 {
-		urls = append(urls, requestPath)
+		urls = append(urls, "/mcp")
 	}
 
 	return urls
@@ -3104,5 +3144,16 @@ func extractProjectToken(requestPath string) string {
 		}
 	}
 
+	return ""
+}
+
+func bearerTokenFromRequest(r *http.Request) string {
+	raw := strings.TrimSpace(r.Header.Get("Authorization"))
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(raw), "bearer ") {
+		return strings.TrimSpace(raw[7:])
+	}
 	return ""
 }

@@ -1,0 +1,57 @@
+package app
+
+import (
+	"context"
+	"net/http"
+
+	"gorm.io/gorm"
+)
+
+// Edition describes one distributable MCPBox flavor such as Free or Pro.
+type Edition struct {
+	ID             string
+	Name           string
+	BinaryName     string
+	Capabilities   []string
+	StartupHooks   []StartupHook
+	HTTPRegistrars []HTTPRegistrar
+}
+
+// RuntimeContext exposes safe shared runtime handles for edition extensions.
+type RuntimeContext struct {
+	Edition  Edition
+	DB       *gorm.DB
+	LogAudit func(ctx context.Context, entry AuditEntry) error
+}
+
+type AuditEntry struct {
+	ProjectID *uint
+	ServerID  *uint
+	Action    string
+	Actor     string
+	Detail    string
+}
+
+// StartupHook lets an edition perform migrations or service initialization.
+type StartupHook func(ctx context.Context, runtime *RuntimeContext) error
+
+// HTTPRegistrar lets a caller extend the shared HTTP server without forking it.
+type HTTPRegistrar func(runtime *RuntimeContext, mux *http.ServeMux)
+
+// FreeEdition returns the public MCPBox edition metadata.
+func FreeEdition() Edition {
+	return Edition{
+		ID:         "free",
+		Name:       "MCPBox",
+		BinaryName: "MCPBox",
+		Capabilities: []string{
+			"projects",
+			"market",
+			"rag",
+			"ollama",
+			"lmstudio",
+			"audit_logs",
+			"performance_metrics",
+		},
+	}
+}

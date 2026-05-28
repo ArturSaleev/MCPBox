@@ -13,7 +13,7 @@ import (
 	"strings"
 	"unicode/utf16"
 
-	"MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/models"
 )
 
 var execLookPath = exec.LookPath

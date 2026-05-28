@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"MCPBox/internal/models"
-	"MCPBox/internal/orchestrator"
-	"MCPBox/internal/storage"
+	"github.com/ArturSaleev/MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/orchestrator"
+	"github.com/ArturSaleev/MCPBox/internal/storage"
 )
 
 type catalogManifest struct {

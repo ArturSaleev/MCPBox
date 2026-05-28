@@ -1,4 +1,4 @@
-module MCPBox
+module github.com/ArturSaleev/MCPBox
 
 go 1.26.0
 

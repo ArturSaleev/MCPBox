@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"MCPBox/internal/models"
-	"MCPBox/internal/rag"
+	"github.com/ArturSaleev/MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/rag"
 	"github.com/google/uuid"
 )
 
