@@ -272,13 +272,14 @@ func (s *Store) CreateProject(ctx context.Context, project *models.Project) erro
 	return s.db.WithContext(ctx).Create(project).Error
 }
 
-func (s *Store) UpdateProject(ctx context.Context, projectID uint, name, description, rootPath string) error {
+func (s *Store) UpdateProject(ctx context.Context, projectID uint, name, description, rootPath, prompt string) error {
 	return s.db.WithContext(ctx).Model(&models.Project{}).
 		Where("id = ?", projectID).
 		Updates(map[string]any{
 			"name":        name,
 			"description": description,
 			"root_path":   rootPath,
+			"prompt":      prompt,
 		}).Error
 }
 

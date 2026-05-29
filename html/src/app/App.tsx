@@ -100,6 +100,7 @@ type ProjectStatus = {
   rag_collections: RAGCollection[];
   installed_integrations: InstalledIntegration[];
   package_instances?: ProjectPackageInstance[];
+  prompt: string;
 };
 
 type RAGCollection = {
@@ -597,6 +598,7 @@ export default function App() {
   const [launchProjectOpen, setLaunchProjectOpen] = useState(false);
   const [duplicateProjectOpen, setDuplicateProjectOpen] = useState(false);
   const [editingProjectId, setEditingProjectId] = useState<number | null>(null);
+  const [updatingPrompt, setUpdatingPrompt] = useState(false);
   const [duplicatingProjectId, setDuplicatingProjectId] = useState<number | null>(null);
   const [duplicateProjectName, setDuplicateProjectName] = useState('');
   const [addingServer, setAddingServer] = useState(false);
@@ -2093,6 +2095,42 @@ export default function App() {
     }
   }
 
+  async function updateProjectPrompt(prompt: string) {
+    if (!selectedProject) {
+      return;
+    }
+    setUpdatingPrompt(true);
+    setActionError(null);
+
+    try {
+      const updatedProject = await apiRequest<ProjectStatus>(
+        `/api/projects/${selectedProject.project_id}`,
+        messages.requestFailed,
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            name: selectedProject.name,
+            description: selectedProject.description,
+            root_path: selectedProject.root_path,
+            prompt,
+          }),
+        },
+      );
+
+      setProjects((current) =>
+        current.map((project) =>
+          project.project_id === updatedProject.project_id ? updatedProject : project,
+        ),
+      );
+    } catch (submitError) {
+      setActionError(
+        submitError instanceof Error ? submitError.message : messages.createProjectError,
+      );
+    } finally {
+      setUpdatingPrompt(false);
+    }
+  }
+
   async function addServer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedProject) {
@@ -3323,6 +3361,8 @@ export default function App() {
               authServer={authServer}
               connectOAuth={connectOAuth}
               disconnectOAuth={disconnectOAuth}
+              updateProjectPrompt={updateProjectPrompt}
+              updatingPrompt={updatingPrompt}
             />
           )}
       </Suspense>

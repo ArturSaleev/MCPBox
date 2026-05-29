@@ -10,6 +10,9 @@ export type Dictionary = {
     duplicateProject: string;
     name: string;
     description: string;
+    prompt: string;
+    save: string;
+    saving: string;
     projectOverview: string;
     servers: string;
     running: string;
@@ -318,6 +321,9 @@ export const dictionaries: Record<Language, Dictionary> = {
       duplicateProject: 'Duplicate project',
       name: 'Name',
       description: 'Description',
+      prompt: 'Prompt',
+      save: 'Save',
+      saving: 'Saving...',
       projectOverview: 'Project Overview',
       servers: 'Servers',
       running: 'Running',
@@ -650,6 +656,9 @@ export const dictionaries: Record<Language, Dictionary> = {
       duplicateProject: 'Дублировать проект',
       name: 'Название',
       description: 'Описание',
+      prompt: 'Промпт',
+      save: 'Сохранить',
+      saving: 'Сохранение...',
       projectOverview: 'Обзор проекта',
       servers: 'Серверы',
       running: 'Запущено',

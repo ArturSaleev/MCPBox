@@ -97,6 +97,7 @@ type projectKnowledgeSearchResultItem struct {
 }
 
 const projectKnowledgeSearchToolName = "search_project_knowledge"
+const projectPromptToolName = "get_project_env_and_rules"
 
 type listResourcesResult struct {
 	Resources  []orchestrator.InspectionItem `json:"resources"`
@@ -253,6 +254,8 @@ func (s *Server) dispatchProjectJSONRPC(
 		if err != nil {
 			return nil, false, err
 		}
+		// Add prompt tool at the beginning to encourage LLM to call it first
+		tools = append([]aggregateTool{s.projectPromptAggregateTool()}, tools...)
 		if len(project.RAGCollections) > 0 {
 			tools = append(tools, s.projectKnowledgeAggregateTool())
 		}
@@ -286,6 +289,24 @@ func (s *Server) dispatchProjectJSONRPC(
 			if err != nil {
 				return nil, false, err
 			}
+			return mustMarshal(projectResponseEnvelope{
+				JSONRPC: "2.0",
+				ID:      request.ID,
+				Result:  result,
+			}), true, nil
+		}
+		if params.Name == projectPromptToolName {
+			result := map[string]any{
+				"content": []map[string]any{
+					{
+						"type": "text",
+						"text": project.Prompt,
+					},
+				},
+			}
+			s.logAudit(ctx, &project.ID, nil, "tool_call_project_prompt", "mcp-client", mustJSON(map[string]any{
+				"tool": projectPromptToolName,
+			}))
 			return mustMarshal(projectResponseEnvelope{
 				JSONRPC: "2.0",
 				ID:      request.ID,
@@ -676,6 +697,21 @@ func (s *Server) projectKnowledgeAggregateTool() aggregateTool {
 			}`),
 		},
 		Alias: projectKnowledgeSearchToolName,
+	}
+}
+
+func (s *Server) projectPromptAggregateTool() aggregateTool {
+	return aggregateTool{
+		Origin: orchestrator.InspectionTool{
+			Name:        projectPromptToolName,
+			Title:       "Get Project Environment and Rules",
+			Description: "ОБЯЗАТЕЛЬНО К ВЫЗОВУ ПРИ СТАРТЕ СЕССИИ. Возвращает глобальный контекст проекта, роли пользователей, ограничения и требуемый тон общения модели.",
+			InputSchema: json.RawMessage(`{
+				"type":"object",
+				"properties":{}
+			}`),
+		},
+		Alias: projectPromptToolName,
 	}
 }
 

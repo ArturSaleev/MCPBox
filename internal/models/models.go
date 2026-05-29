@@ -20,6 +20,7 @@ type Project struct {
 	RootPath              string                   `gorm:"size:1024" json:"root_path"`
 	Token                 string                   `gorm:"size:64;uniqueIndex;not null" json:"token"`
 	IsPaused              bool                     `gorm:"not null;default:false" json:"is_paused"`
+	Prompt                string                   `gorm:"type:text" json:"prompt"`
 	Servers               []MCPServer              `json:"servers,omitempty"`
 	RAGCollections        []RAGCollection          `gorm:"many2many:project_rag_collections;" json:"rag_collections,omitempty"`
 	InstalledIntegrations []InstalledIntegration   `json:"installed_integrations,omitempty"`

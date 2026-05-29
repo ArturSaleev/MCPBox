@@ -73,6 +73,7 @@ type updateProjectRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	RootPath    string `json:"root_path"`
+	Prompt      string `json:"prompt"`
 }
 
 type duplicateProjectRequest struct {
@@ -194,6 +195,7 @@ type projectStatusResponse struct {
 	Servers               []serverStatusRecord           `json:"servers"`
 	RAGCollections        []ragCollectionResponse        `json:"rag_collections"`
 	InstalledIntegrations []installedIntegrationResponse `json:"installed_integrations"`
+	Prompt                string                         `json:"prompt"`
 }
 
 type serverStatusRecord struct {
@@ -587,6 +589,7 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 		name,
 		strings.TrimSpace(req.Description),
 		strings.TrimSpace(req.RootPath),
+		strings.TrimSpace(req.Prompt),
 	); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -1316,6 +1319,7 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 		Servers:               make([]serverStatusRecord, 0, len(project.Servers)),
 		RAGCollections:        make([]ragCollectionResponse, 0, len(project.RAGCollections)),
 		InstalledIntegrations: mapInstalledIntegrations(project.InstalledIntegrations),
+		Prompt:                project.Prompt,
 	}
 
 	for _, collection := range project.RAGCollections {

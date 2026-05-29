@@ -64,6 +64,7 @@ type ProjectStatus = {
   connect_url: string;
   servers: ServerStatus[];
   rag_collections: RAGCollection[];
+  prompt: string;
 };
 
 type ServerFormState = {
@@ -242,6 +243,8 @@ type ProjectsViewProps = {
   authServer: AuthServer | null;
   connectOAuth: (serverId: number) => void | Promise<void>;
   disconnectOAuth: (serverId: number) => void | Promise<void>;
+  updateProjectPrompt: (prompt: string) => void | Promise<void>;
+  updatingPrompt: boolean;
 };
 
 export function ProjectsView({
@@ -326,6 +329,8 @@ export function ProjectsView({
   authServer,
   connectOAuth,
   disconnectOAuth,
+  updateProjectPrompt,
+  updatingPrompt,
 }: ProjectsViewProps) {
   if (!selectedProject) {
     return (
@@ -370,6 +375,8 @@ export function ProjectsView({
         startDuplicateProject={startDuplicateProject}
         startEditProject={startEditProject}
         deleteProject={deleteProject}
+        updateProjectPrompt={updateProjectPrompt}
+        updatingPrompt={updatingPrompt}
       />
 
       <ProjectKnowledgePanel
