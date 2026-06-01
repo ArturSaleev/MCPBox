@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"io/fs"
 	"net/http"
 
 	"gorm.io/gorm"
@@ -13,6 +14,11 @@ type Edition struct {
 	Name           string
 	BinaryName     string
 	Capabilities   []string
+	UIFS           fs.FS
+	AdminHost      string
+	AdminPort      int
+	MCPHost        string
+	MCPPort        int
 	StartupHooks   []StartupHook
 	HTTPRegistrars []HTTPRegistrar
 }
@@ -49,6 +55,7 @@ func FreeEdition() Edition {
 			"market",
 			"rag",
 			"ollama",
+			"llamacpp",
 			"lmstudio",
 			"audit_logs",
 			"performance_metrics",

@@ -1,11 +1,9 @@
-import { FormEvent, Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { Toaster, toast } from 'sonner';
 import {
   Bot,
   Database,
   FolderKanban,
-  LogOut,
-  Shield,
   ShoppingBag,
   TextSearch,
 } from 'lucide-react';
@@ -18,6 +16,30 @@ import {
 } from './i18n';
 import logo from '../styles/logo.png';
 import { AppShell } from './components/AppShell';
+import type {
+  ProjectStatus,
+  ServerStatus,
+  RAGCollection,
+  RAGSearchResult,
+  AuditLog,
+  PerformanceMetricsResponse,
+  MetricsWindow,
+  EditionMeta,
+  ServerInspection,
+  ServerToolStatus,
+  KeyValuePair,
+  LlamaCppLaunchResponse,
+  LlamaCppStatus,
+  OllamaStatus,
+  OllamaLaunchResponse,
+  ProjectFormState,
+  ServerFormState,
+} from './types';
+import { useAuth } from './hooks/useAuth';
+import { useLlamaCpp } from './hooks/useLlamaCpp';
+import { useOllama } from './hooks/useOllama';
+import { useServerTools } from './hooks/useServerTools';
+import { apiRequest } from './utils/api';
 import { ProjectsSidebar } from './components/ProjectsSidebar';
 import type {
   CatalogItem,
@@ -46,107 +68,6 @@ const ProjectsView = lazy(async () => {
   return { default: module.ProjectsView };
 });
 
-const ProAccessView = lazy(async () => {
-  const module = await import('./components/ProAccessView');
-  return { default: module.ProAccessView };
-});
-
-type ServerStatus = {
-  id: number;
-  name: string;
-  transport: 'stdio' | 'http_stream' | string;
-  launch_command: string;
-  launch_command_display: string;
-  command: string;
-  args: string[];
-  env_vars: KeyValuePair[];
-  env_passthrough: string[];
-  working_dir: string;
-  url: string;
-  bearer_token_env_var: string;
-  headers: KeyValuePair[];
-  header_env_vars: KeyValuePair[];
-  auth_type: 'none' | 'oauth2' | string;
-  oauth_provider: string;
-  oauth_authorize_url: string;
-  oauth_token_url: string;
-  oauth_refresh_url: string;
-  oauth_client_id: string;
-  oauth_client_secret: string;
-  oauth_scopes: string[];
-  disabled_tool_names: string[];
-  oauth_connected: boolean;
-  oauth_connected_at: string;
-  oauth_last_error: string;
-  auto_start: boolean;
-  status: 'Running' | 'Stopped' | 'Remote' | string;
-  health_status: 'healthy' | 'failed' | 'unknown' | string;
-  health_error: string;
-  health_checked_at: string;
-  is_enabled: boolean;
-};
-
-type ProjectStatus = {
-  project_id: number;
-  name: string;
-  description: string;
-  root_path: string;
-  token: string;
-  is_paused: boolean;
-  connect_url: string;
-  connect_urls: string[];
-  connection_ready: boolean;
-  servers: ServerStatus[];
-  rag_collections: RAGCollection[];
-  installed_integrations: InstalledIntegration[];
-  package_instances?: ProjectPackageInstance[];
-  prompt: string;
-};
-
-type RAGCollection = {
-  id: number;
-  collection_id: string;
-  name: string;
-  data_type: string;
-  source_path: string;
-  auto_reindex: boolean;
-  index_path: string;
-};
-
-type RAGSearchResult = {
-  id: string;
-  file_path: string;
-  section?: string;
-  content: string;
-};
-
-type InstalledIntegration = {
-  id: number;
-  project_id: number;
-  catalog_item_id: string;
-  server_id: number | null;
-  name: string;
-  transport: string;
-  status: string;
-  enabled: boolean;
-  version: string;
-  config: Record<string, unknown>;
-  last_synced_at: string;
-  created_at: string;
-  updated_at: string;
-};
-
-type ProjectPackageInstance = {
-  id: number;
-  project_id: number;
-  installed_package_id: number;
-  server_id: number | null;
-  catalog_item_id: string;
-  name: string;
-  status: string;
-  config_json: string;
-};
-
 type CatalogResponse = {
   settings: CatalogSettings;
   items: CatalogItem[];
@@ -174,280 +95,9 @@ type LMStudioLaunchResponse = {
   deeplink: string;
 };
 
-type AuditLog = {
-  id: number;
-  project_id: number | null;
-  server_id: number | null;
-  action: string;
-  actor: string;
-  detail: string;
-  created_at: string;
-};
-
-type MetricsWindow = '5m' | '1h' | '24h';
-
-type PerformanceSummary = {
-  request_count: number;
-  error_count: number;
-  error_rate: number;
-  avg_latency_ms: number;
-  p95_latency_ms: number;
-  traffic_in: number;
-  traffic_out: number;
-};
-
-type PerformanceTrendBucket = {
-  timestamp: string;
-  request_count: number;
-  error_count: number;
-  avg_latency_ms: number;
-  p95_latency_ms: number;
-  traffic_in: number;
-  traffic_out: number;
-};
-
-type PerformanceServerMetricRecord = {
-  server_id: number;
-  request_count: number;
-  error_count: number;
-  error_rate: number;
-  avg_latency_ms: number;
-  p95_latency_ms: number;
-  request_bytes: number;
-  response_bytes: number;
-  total_traffic: number;
-};
-
-type PerformanceFailureRecord = {
-  id: number;
-  project_id: number | null;
-  server_id: number | null;
-  operation: string;
-  transport: string;
-  latency_ms: number;
-  request_bytes: number;
-  response_bytes: number;
-  error_detail: string;
-  created_at: string;
-};
-
-type PerformanceMetricsResponse = {
-  window: MetricsWindow;
-  summary: PerformanceSummary;
-  trends: PerformanceTrendBucket[];
-  top_slow_servers: PerformanceServerMetricRecord[];
-  top_error_servers: PerformanceServerMetricRecord[];
-  top_traffic_servers: PerformanceServerMetricRecord[];
-  recent_failures: PerformanceFailureRecord[];
-};
-
-type ApiError = {
-  error: string;
-};
-
-type EditionMeta = {
-  edition_id: string;
-  edition_name: string;
-  capabilities: string[];
-};
-
-type ProPrincipal = {
-  name: string;
-  scopes: string[];
-  roles: string[];
-  user_id?: number;
-  session_id?: number;
-  auth_method?: string;
-  is_bootstrap: boolean;
-};
-
-type ProTokenRecord = {
-  id: number;
-  name: string;
-  scopes: string[];
-  expires_at?: string;
-  last_used_at?: string;
-  revoked_at?: string;
-  created_at: string;
-};
-
-type CreateProTokenResponse = {
-  token: string;
-  record: ProTokenRecord;
-};
-
-type ProUserRecord = {
-  id: number;
-  email: string;
-  display_name: string;
-  auth_provider: string;
-  external_id: string;
-  is_bootstrap: boolean;
-  roles: string[];
-  scopes: string[];
-  last_login_at?: string;
-  disabled_at?: string;
-  created_at: string;
-};
-
-type ProRoleRecord = {
-  id: number;
-  name: string;
-  display_name: string;
-  description: string;
-  scopes: string[];
-  is_system: boolean;
-  created_at: string;
-};
-
-type ProSessionRecord = {
-  id: number;
-  user_id: number;
-  user_name: string;
-  label: string;
-  auth_method: string;
-  roles: string[];
-  scopes: string[];
-  expires_at?: string;
-  last_used_at?: string;
-  revoked_at?: string;
-  created_at: string;
-};
-
-type CreateProUserResponse = ProUserRecord;
-type UpdateProUserResponse = ProUserRecord;
-type DisableProUserResponse = ProUserRecord;
-type EnableProUserResponse = ProUserRecord;
-
-type CreateProSessionResponse = {
-  token: string;
-  record: ProSessionRecord | null;
-};
-
-type ProLocalLoginResponse = {
-  token: string;
-  user: ProUserRecord;
-  session: ProSessionRecord | null;
-};
-
-type ProSSOConfig = {
-  enabled: boolean;
-  provider_name?: string;
-  issuer_url?: string;
-  redirect_url?: string;
-  start_url?: string;
-  allowed_hosted_domain?: string;
-  default_role?: string;
-  session_days?: number;
-  auto_create_users?: boolean;
-  scopes?: string[];
-};
-
-type ProScopePreset = {
-  id: 'reader' | 'operator' | 'admin';
-  label: string;
-  scopes: string[];
-  description: string;
-};
-
-type LogsFilterMode = 'all' | 'pro';
-
-type OllamaLaunchResponse = {
-  project_id: number;
-  model: string;
-  config_path: string;
-  command_preview: string;
-};
-
-type OllamaStatus = {
-  installed: boolean;
-  models: string[];
-  default_model: string;
-};
-
-type ServerInspection = {
-  protocol_version: string;
-  server_info: {
-    name: string;
-    title: string;
-    version: string;
-  };
-  instructions: string;
-  capabilities: string[];
-  tools: Array<{
-    name: string;
-    title: string;
-    description: string;
-    input_schema?: unknown;
-    output_schema?: unknown;
-  }>;
-  resources: Array<{
-    name: string;
-    title: string;
-    description: string;
-    uri: string;
-    mime_type: string;
-  }>;
-  prompts: Array<{
-    name: string;
-    title: string;
-    description: string;
-    arguments: Array<{
-      name: string;
-      description: string;
-      required: boolean;
-    }>;
-  }>;
-  readme_path: string;
-  readme: string;
-};
-
-type ServerToolStatus = {
-  name: string;
-  title: string;
-  description: string;
-  input_schema?: unknown;
-  output_schema?: unknown;
-  enabled: boolean;
-};
-
 const legacyCatalogSourceURL = 'https://webeasy.kz/mcpbox/catalog.json';
 const defaultCatalogSourceURL = 'https://mcpbox.sh/catalog.json';
-const proAuthStorageKey = 'mcpbox-pro-auth-token';
 
-type ProjectFormState = {
-  name: string;
-  description: string;
-  root_path: string;
-};
-
-type ServerFormState = {
-  name: string;
-  transport: 'stdio' | 'http_stream';
-  command: string;
-  args: string[];
-  env_vars: KeyValuePair[];
-  env_passthrough: string[];
-  working_dir: string;
-  url: string;
-  bearer_token_env_var: string;
-  headers: KeyValuePair[];
-  header_env_vars: KeyValuePair[];
-  auth_type: 'none' | 'oauth2';
-  oauth_provider: string;
-  oauth_authorize_url: string;
-  oauth_token_url: string;
-  oauth_refresh_url: string;
-  oauth_client_id: string;
-  oauth_client_secret: string;
-  oauth_scopes: string[];
-  auto_start: boolean;
-};
-
-type KeyValuePair = {
-  key: string;
-  value: string;
-};
 
 function normalizeCatalogSourceURL(url: string) {
   const trimmed = url.trim();
@@ -492,56 +142,6 @@ const emptyRAGCollectionForm = {
   auto_reindex: false,
 };
 
-async function apiRequest<T>(
-  input: RequestInfo,
-  requestFailedMessage: (status: number) => string,
-  init?: RequestInit,
-): Promise<T> {
-  const response = await fetch(input, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-    ...init,
-  });
-
-  if (!response.ok) {
-    let message = requestFailedMessage(response.status);
-    try {
-      const payload = (await response.json()) as ApiError;
-      if (payload?.error) {
-        message = payload.error;
-      }
-    } catch {
-      // Ignore JSON parsing errors and keep fallback message.
-    }
-
-    throw new Error(message);
-  }
-
-  return (await response.json()) as T;
-}
-
-async function proAPIRequest<T>(
-  token: string,
-  input: RequestInfo,
-  requestFailedMessage: (status: number) => string,
-  init?: RequestInit,
-): Promise<T> {
-  const trimmedToken = token.trim();
-  if (!trimmedToken) {
-    throw new Error('Missing Pro admin token');
-  }
-
-  return apiRequest<T>(input, requestFailedMessage, {
-    ...init,
-    headers: {
-      Authorization: `Bearer ${trimmedToken}`,
-      ...(init?.headers ?? {}),
-    },
-  });
-}
-
 function formatSchema(schema: unknown) {
   if (!schema) {
     return '';
@@ -554,13 +154,6 @@ function formatSchema(schema: unknown) {
   }
 }
 
-function hasProScope(principal: ProPrincipal | null, scope: string) {
-  if (!principal) {
-    return false;
-  }
-  return principal.scopes.includes('pro:admin') || principal.scopes.includes(scope);
-}
-
 function OllamaIcon({ className }: { className?: string }) {
   return (
     <span
@@ -571,8 +164,14 @@ function OllamaIcon({ className }: { className?: string }) {
   );
 }
 
+function modelNameFromPath(modelPath: string) {
+  const normalized = modelPath.trim().replace(/\\/g, '/');
+  const fileName = normalized.split('/').pop() ?? normalized;
+  return fileName.replace(/\.gguf$/i, '');
+}
+
 export default function App() {
-  const [view, setView] = useState<'projects' | 'knowledge' | 'market' | 'logs' | 'pro'>('projects');
+  const [view, setView] = useState<'projects' | 'knowledge' | 'market' | 'logs'>('projects');
   const [language, setLanguage] = useState<Language>(detectInitialLanguage);
   const [editionMeta, setEditionMeta] = useState<EditionMeta>({
     edition_id: 'free',
@@ -584,7 +183,6 @@ export default function App() {
   const [logMetrics, setLogMetrics] = useState<PerformanceMetricsResponse | null>(null);
   const [selectedLogsProjectId, setSelectedLogsProjectId] = useState<number | null>(null);
   const [metricsWindow, setMetricsWindow] = useState<MetricsWindow>('1h');
-  const [logsFilterMode, setLogsFilterMode] = useState<LogsFilterMode>('all');
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [projectForm, setProjectForm] = useState<ProjectFormState>(emptyProjectForm);
   const [serverForm, setServerForm] = useState<ServerFormState>(emptyServerForm);
@@ -601,10 +199,52 @@ export default function App() {
   const [updatingPrompt, setUpdatingPrompt] = useState(false);
   const [duplicatingProjectId, setDuplicatingProjectId] = useState<number | null>(null);
   const [duplicateProjectName, setDuplicateProjectName] = useState('');
-  const [addingServer, setAddingServer] = useState(false);
-  const [addServerOpen, setAddServerOpen] = useState(false);
   const [, setOAuthAdvancedOpen] = useState(false);
-  const [editingServerId, setEditingServerId] = useState<number | null>(null);
+
+  // Server tools hook
+  const {
+    addingServer,
+    setAddingServer,
+    addServerOpen,
+    setAddServerOpen,
+    editingServerId,
+    setEditingServerId,
+    busyServerId,
+    setBusyServerId,
+    inspectOpen,
+    setInspectOpen,
+    inspectingServerId,
+    setInspectingServerId,
+    inspection,
+    setInspection,
+    inspectionServerName,
+    setInspectionServerName,
+    inspectionError,
+    setInspectionError,
+    serverToolsOpen,
+    setServerToolsOpen,
+    serverToolsLoadingId,
+    setServerToolsLoadingId,
+    serverToolsSavingName,
+    setServerToolsSavingName,
+    serverToolsServerId,
+    setServerToolsServerId,
+    serverToolsServerName,
+    setServerToolsServerName,
+    serverTools,
+    setServerTools,
+    serverToolsError,
+    setServerToolsError,
+    addServer: hookAddServer,
+    runServerAction: hookRunServerAction,
+    setServerEnabled: hookSetServerEnabled,
+    inspectServer: hookInspectServer,
+    openServerTools: hookOpenServerTools,
+    setServerToolEnabled: hookSetServerToolEnabled,
+  } = useServerTools(
+    { requestFailed: 'Request failed', serverStarted: 'Server started', serverStopped: 'Server stopped', serverEnabled: 'Server enabled', serverDisabled: 'Server disabled' },
+    () => loadProjects()
+  );
   const [editingRAGCollectionId, setEditingRAGCollectionId] = useState<string | null>(null);
   const [createRAGCollectionOpen, setCreateRAGCollectionOpen] = useState(false);
   const [connectRAGCollectionOpen, setConnectRAGCollectionOpen] = useState(false);
@@ -623,9 +263,11 @@ export default function App() {
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [catalogSettings, setCatalogSettings] = useState<CatalogSettings | null>(null);
   const [installedPackages, setInstalledPackages] = useState<InstalledPackage[]>([]);
-  const [ollamaStatus, setOllamaStatus] = useState<OllamaStatus | null>(null);
-  const [ollamaRefreshing, setOllamaRefreshing] = useState(false);
-  const [selectedOllamaModel, setSelectedOllamaModel] = useState('');
+
+  // Ollama hook
+  const { ollamaStatus, setOllamaStatus, ollamaRefreshing, setOllamaRefreshing, selectedOllamaModel, setSelectedOllamaModel, loadOllamaStatus: hookLoadOllamaStatus } = useOllama({ requestFailed: 'Request failed' });
+  const { llamaCppStatus, setLlamaCppStatus, llamaCppRefreshing, setLlamaCppRefreshing, loadLlamaCppStatus: hookLoadLlamaCppStatus } = useLlamaCpp({ requestFailed: 'Request failed' });
+
   const [catalogURL, setCatalogURL] = useState(defaultCatalogSourceURL);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogSyncing, setCatalogSyncing] = useState(false);
@@ -638,62 +280,19 @@ export default function App() {
   const [uninstallingCatalogItemId, setUninstallingCatalogItemId] = useState<string | null>(null);
   const [busyProjectId, setBusyProjectId] = useState<number | null>(null);
   const [launchingOllamaProjectId, setLaunchingOllamaProjectId] = useState<number | null>(null);
+  const [launchingLlamaCppProjectId, setLaunchingLlamaCppProjectId] = useState<number | null>(null);
   const [launchingLMStudioProjectId, setLaunchingLMStudioProjectId] = useState<number | null>(null);
-  const [busyServerId, setBusyServerId] = useState<number | null>(null);
-  const [inspectOpen, setInspectOpen] = useState(false);
-  const [inspectingServerId, setInspectingServerId] = useState<number | null>(null);
-  const [inspection, setInspection] = useState<ServerInspection | null>(null);
-  const [inspectionServerName, setInspectionServerName] = useState('');
-  const [inspectionError, setInspectionError] = useState<string | null>(null);
-  const [serverToolsOpen, setServerToolsOpen] = useState(false);
-  const [serverToolsLoadingId, setServerToolsLoadingId] = useState<number | null>(null);
-  const [serverToolsSavingName, setServerToolsSavingName] = useState<string | null>(null);
-  const [serverToolsServerId, setServerToolsServerId] = useState<number | null>(null);
-  const [serverToolsServerName, setServerToolsServerName] = useState('');
-  const [serverTools, setServerTools] = useState<ServerToolStatus[]>([]);
-  const [serverToolsError, setServerToolsError] = useState<string | null>(null);
-  const [authOpen, setAuthOpen] = useState(false);
-  const [authServerId, setAuthServerId] = useState<number | null>(null);
-  const [proAuthToken, setProAuthToken] = useState('');
-  const [proPrincipal, setProPrincipal] = useState<ProPrincipal | null>(null);
-  const [proTokens, setProTokens] = useState<ProTokenRecord[]>([]);
-  const [proUsers, setProUsers] = useState<ProUserRecord[]>([]);
-  const [proRoles, setProRoles] = useState<ProRoleRecord[]>([]);
-  const [proSessions, setProSessions] = useState<ProSessionRecord[]>([]);
-  const [proSSOConfig, setProSSOConfig] = useState<ProSSOConfig | null>(null);
-  const [proLoading, setProLoading] = useState(false);
-  const [proLocalLoginLoading, setProLocalLoginLoading] = useState(false);
-  const [proAuthBootstrapping, setProAuthBootstrapping] = useState(false);
-  const [proCreateOpen, setProCreateOpen] = useState(false);
-  const [proCreatingToken, setProCreatingToken] = useState(false);
-  const [proRevokingTokenId, setProRevokingTokenId] = useState<number | null>(null);
-  const [proCreateUserOpen, setProCreateUserOpen] = useState(false);
-  const [proCreatingUser, setProCreatingUser] = useState(false);
-  const [proEditUserOpen, setProEditUserOpen] = useState(false);
-  const [proUpdatingUserRoles, setProUpdatingUserRoles] = useState(false);
-  const [proDisablingUserId, setProDisablingUserId] = useState<number | null>(null);
-  const [proEnablingUserId, setProEnablingUserId] = useState<number | null>(null);
-  const [proDeletingUserId, setProDeletingUserId] = useState<number | null>(null);
-  const [proSessionsFilterUserId, setProSessionsFilterUserId] = useState('all');
-  const [proEditingUserId, setProEditingUserId] = useState<string>('');
-  const [proEditingUserName, setProEditingUserName] = useState('');
-  const [proEditingUserRoles, setProEditingUserRoles] = useState('reader');
-  const [proCreateSessionOpen, setProCreateSessionOpen] = useState(false);
-  const [proCreatingSession, setProCreatingSession] = useState(false);
-  const [proRevokingSessionId, setProRevokingSessionId] = useState<number | null>(null);
-  const [proNewTokenName, setProNewTokenName] = useState('');
-  const [proLoginEmail, setProLoginEmail] = useState('');
-  const [proLoginPassword, setProLoginPassword] = useState('');
-  const [proNewTokenScopes, setProNewTokenScopes] = useState('pro:read, pro:write');
-  const [proNewTokenExpiresDays, setProNewTokenExpiresDays] = useState('30');
-  const [proCreatedTokenValue, setProCreatedTokenValue] = useState<string | null>(null);
-  const [proNewUserName, setProNewUserName] = useState('');
-  const [proNewUserEmail, setProNewUserEmail] = useState('');
-  const [proNewUserRoles, setProNewUserRoles] = useState('reader');
-  const [proNewSessionUserId, setProNewSessionUserId] = useState('');
-  const [proNewSessionLabel, setProNewSessionLabel] = useState('');
-  const [proNewSessionExpiresDays, setProNewSessionExpiresDays] = useState('30');
-  const [proCreatedSessionToken, setProCreatedSessionToken] = useState<string | null>(null);
+  const [stoppingLlamaCpp, setStoppingLlamaCpp] = useState(false);
+  const [selectedLlamaCppModelPath, setSelectedLlamaCppModelPath] = useState('');
+  const [selectedLlamaCppModelName, setSelectedLlamaCppModelName] = useState('');
+
+  // Auth hook
+  const { authOpen, setAuthOpen, authServerId, setAuthServerId, resetAuthServer } = useAuth();
+
+  const authServer: ServerStatus | null = authServerId !== null
+    ? projects.flatMap((p) => p.servers).find((s) => s.id === authServerId) ?? null
+    : null;
+
   const [copied, setCopied] = useState(false);
   const [connectionURLsExpanded, setConnectionURLsExpanded] = useState(false);
   const logsViewportRef = useRef<HTMLDivElement | null>(null);
@@ -705,226 +304,6 @@ export default function App() {
     { value: 'en', label: labels.english },
     { value: 'ru', label: labels.russian },
   ];
-  const proCopy =
-    language === 'ru'
-      ? {
-          nav: 'Pro',
-          title: 'MCPBox Pro',
-          subtitle: 'Токены агентов и защищенный Pro API',
-          signInSSO: 'Войти через SSO',
-          localLogin: 'Войти по email и паролю',
-          password: 'Пароль',
-          login: 'Войти',
-          loginHint: 'Локальный admin создаётся из консоли командой `admin create`. После входа MCPBox Pro выдаёт внутреннюю сессию.',
-          signOut: 'Выйти',
-          ssoAvailable: 'SSO доступен',
-          ssoIssuer: 'Issuer',
-          ssoRedirectURL: 'Redirect URL',
-          ssoScopes: 'Scopes',
-          ssoDomainHint: 'Разрешённый домен',
-          ssoDefaultRole: 'Роль по умолчанию',
-          ssoSessionDays: 'Сессия (дней)',
-          ssoAutoCreate: 'Автосоздание пользователей',
-          ssoEnabledLabel: 'Включено',
-          ssoDisabledLabel: 'Выключено',
-          connectedAs: 'Подключено как',
-          scopes: 'Скоупы',
-          createToken: 'Создать токен',
-          createTokenHint: 'Operator может создавать Reader/Operator токены. Admin нужен для admin токенов и revoke.',
-          tokenName: 'Название токена',
-          tokenNamePlaceholder: 'CI agent',
-          tokenScopes: 'Scopes',
-          tokenScopesPlaceholder: 'pro:read, pro:write',
-          expiresDays: 'Срок (дней)',
-          expiryPolicy: 'Срок жизни',
-          expiryHint: '0 означает бессрочно. Можно выбрать preset или ввести своё число дней.',
-          noExpiry: 'Бессрочно',
-          oneDay: '1 день',
-          sevenDays: '7 дней',
-          thirtyDays: '30 дней',
-          ninetyDays: '90 дней',
-          oneYear: '365 дней',
-          activeTokens: 'Активные токены',
-          noTokens: 'Токенов пока нет. Создай первый токен ниже.',
-          revoke: 'Отозвать',
-          adminOnly: 'Только для admin',
-          oneTimeSecret: 'Показывается только один раз',
-          copyToken: 'Скопировать токен',
-          authHint: 'Pro endpoints защищены bearer token. Значение хранится только в localStorage этого браузера.',
-          verifyFailed: 'Не удалось проверить Pro token',
-          loadTokensFailed: 'Не удалось загрузить токены',
-          createFailed: 'Не удалось создать токен',
-          revokeFailed: 'Не удалось отозвать токен',
-          users: 'Пользователи',
-          rolesTitle: 'Роли',
-          sessionsTitle: 'Сессии',
-          noUsers: 'Пользователей пока нет.',
-          noSessions: 'Сессий пока нет.',
-          createUser: 'Создать пользователя',
-          editUserRoles: 'Изменить роли',
-          disableUser: 'Отключить',
-          enableUser: 'Включить',
-          deleteUser: 'Удалить',
-          createSession: 'Создать сессию',
-          displayName: 'Имя',
-          email: 'Email',
-          roleNames: 'Роли',
-          sessionLabel: 'Название сессии',
-          issueSession: 'Выпустить сессию',
-          createdSessionToken: 'Session token',
-          currentSession: 'Текущая сессия',
-          revokeCurrentSession: 'Завершить текущую сессию',
-          authMethod: 'Метод доступа',
-          rolesLabel: 'Роли',
-          userId: 'Пользователь',
-          sessionId: 'Сессия',
-          allUsers: 'Все пользователи',
-          sessionsFilter: 'Фильтр сессий',
-          createUserFailed: 'Не удалось создать пользователя',
-          updateUserRolesFailed: 'Не удалось обновить роли пользователя',
-          disableUserFailed: 'Не удалось отключить пользователя',
-          enableUserFailed: 'Не удалось включить пользователя',
-          deleteUserFailed: 'Не удалось удалить пользователя',
-          disableUserConfirm: 'Отключить пользователя? Все его активные сессии будут отозваны.',
-          enableUserConfirm: 'Включить пользователя снова?',
-          deleteUserConfirm: 'Удалить пользователя? Это удалит его роли и отзовёт активные сессии.',
-          createSessionFailed: 'Не удалось создать сессию',
-          revokeSessionFailed: 'Не удалось отозвать сессию',
-          revokeCurrentSessionConfirm: 'Завершить текущую активную сессию? После этого потребуется войти заново.',
-          me: 'Текущий доступ',
-          statusReady: 'Готово',
-          notConnected: 'Не подключено',
-        }
-      : {
-          nav: 'Pro',
-          title: 'MCPBox Pro',
-          subtitle: 'Agent tokens and protected Pro API',
-          signInSSO: 'Sign in with SSO',
-          localLogin: 'Sign in with email and password',
-          password: 'Password',
-          login: 'Sign in',
-          loginHint: 'The first local admin is created from the CLI with `admin create`. MCPBox Pro then issues its own internal session.',
-          signOut: 'Sign out',
-          ssoAvailable: 'SSO available',
-          ssoIssuer: 'Issuer',
-          ssoRedirectURL: 'Redirect URL',
-          ssoScopes: 'Scopes',
-          ssoDomainHint: 'Allowed domain',
-          ssoDefaultRole: 'Default role',
-          ssoSessionDays: 'Session days',
-          ssoAutoCreate: 'Auto-create users',
-          ssoEnabledLabel: 'Enabled',
-          ssoDisabledLabel: 'Disabled',
-          connectedAs: 'Connected as',
-          scopes: 'Scopes',
-          createToken: 'Create token',
-          createTokenHint: 'Operator can create Reader/Operator tokens. Admin is required for admin tokens and revoke.',
-          tokenName: 'Token name',
-          tokenNamePlaceholder: 'CI agent',
-          tokenScopes: 'Scopes',
-          tokenScopesPlaceholder: 'pro:read, pro:write',
-          expiresDays: 'Expires (days)',
-          expiryPolicy: 'Lifetime',
-          expiryHint: '0 means no expiry. You can choose a preset or enter a custom number of days.',
-          noExpiry: 'No expiry',
-          oneDay: '1 day',
-          sevenDays: '7 days',
-          thirtyDays: '30 days',
-          ninetyDays: '90 days',
-          oneYear: '365 days',
-          activeTokens: 'Active tokens',
-          noTokens: 'No tokens yet. Create the first token below.',
-          revoke: 'Revoke',
-          adminOnly: 'Admin only',
-          oneTimeSecret: 'Shown only once',
-          copyToken: 'Copy token',
-          authHint: 'Pro endpoints are protected by bearer token. The value is stored only in this browser localStorage.',
-          verifyFailed: 'Failed to verify Pro token',
-          loadTokensFailed: 'Failed to load tokens',
-          createFailed: 'Failed to create token',
-          revokeFailed: 'Failed to revoke token',
-          users: 'Users',
-          rolesTitle: 'Roles',
-          sessionsTitle: 'Sessions',
-          noUsers: 'No users yet.',
-          noSessions: 'No sessions yet.',
-          createUser: 'Create user',
-          editUserRoles: 'Edit roles',
-          disableUser: 'Disable',
-          enableUser: 'Enable',
-          deleteUser: 'Delete',
-          createSession: 'Create session',
-          displayName: 'Display name',
-          email: 'Email',
-          roleNames: 'Roles',
-          sessionLabel: 'Session label',
-          issueSession: 'Issue session',
-          createdSessionToken: 'Session token',
-          currentSession: 'Current session',
-          revokeCurrentSession: 'Revoke current session',
-          authMethod: 'Auth method',
-          rolesLabel: 'Roles',
-          userId: 'User',
-          sessionId: 'Session',
-          allUsers: 'All users',
-          sessionsFilter: 'Session filter',
-          createUserFailed: 'Failed to create user',
-          updateUserRolesFailed: 'Failed to update user roles',
-          disableUserFailed: 'Failed to disable user',
-          enableUserFailed: 'Failed to enable user',
-          deleteUserFailed: 'Failed to delete user',
-          disableUserConfirm: 'Disable this user? All active sessions will be revoked.',
-          enableUserConfirm: 'Enable this user again?',
-          deleteUserConfirm: 'Delete this user? This removes role links and revokes active sessions.',
-          createSessionFailed: 'Failed to create session',
-          revokeSessionFailed: 'Failed to revoke session',
-          revokeCurrentSessionConfirm: 'Revoke the current active session? You will need to sign in again after that.',
-          me: 'Current access',
-          statusReady: 'Ready',
-          notConnected: 'Not connected',
-        };
-  const proScopePresets: ProScopePreset[] =
-    language === 'ru'
-      ? [
-          {
-            id: 'reader',
-            label: 'Reader',
-            scopes: ['pro:read'],
-            description: 'Только просмотр Pro API и token activity',
-          },
-          {
-            id: 'operator',
-            label: 'Operator',
-            scopes: ['pro:read', 'pro:write'],
-            description: 'Рабочие операции без полного admin-доступа',
-          },
-          {
-            id: 'admin',
-            label: 'Admin',
-            scopes: ['pro:admin'],
-            description: 'Полный доступ ко всем Pro операциям',
-          },
-        ]
-      : [
-          {
-            id: 'reader',
-            label: 'Reader',
-            scopes: ['pro:read'],
-            description: 'Read-only access to Pro API and token activity',
-          },
-          {
-            id: 'operator',
-            label: 'Operator',
-            scopes: ['pro:read', 'pro:write'],
-            description: 'Operational access without full admin rights',
-          },
-          {
-            id: 'admin',
-            label: 'Admin',
-            scopes: ['pro:admin'],
-            description: 'Full access to all Pro operations',
-          },
-        ];
   const viewLoadingFallback = (
     <div className="flex min-h-[40vh] items-center justify-center rounded-2xl border border-border bg-card/50">
       <div className="text-sm text-muted-foreground">{messages.loadingProjects}</div>
@@ -935,17 +314,11 @@ export default function App() {
     { value: '1h', label: labels.lastHour },
     { value: '24h', label: labels.last24Hours },
   ];
-  const hasProAccess =
-    editionMeta.edition_id === 'pro' ||
-    editionMeta.capabilities.includes('auth') ||
-    editionMeta.capabilities.includes('agent_tokens');
-  const isProEdition = editionMeta.edition_id === 'pro';
   const navigationItems = [
     { id: 'projects' as const, label: labels.projects, icon: FolderKanban },
     { id: 'knowledge' as const, label: labels.knowledgeBase, icon: Database },
     { id: 'market' as const, label: labels.market, icon: ShoppingBag },
     { id: 'logs' as const, label: labels.logs, icon: TextSearch },
-    ...(hasProAccess ? [{ id: 'pro' as const, label: proCopy.nav, icon: Shield }] : []),
   ];
 
   const selectedProject =
@@ -980,8 +353,6 @@ export default function App() {
         .map((integration) => [integration.server_id as number, integration] as const),
     ),
   );
-  const authServer =
-    selectedProject?.servers.find((server) => server.id === authServerId) ?? null;
   const connectedRAGCollectionIDs = new Set(
     (selectedProject?.rag_collections ?? []).map((collection) => collection.collection_id),
   );
@@ -1003,63 +374,23 @@ export default function App() {
     root_path: project.root_path,
   }));
   const shouldShowOllamaControls = ollamaStatus?.installed ?? false;
+  const shouldShowLlamaCppControls = llamaCppStatus?.installed ?? false;
   const canLaunchOllama =
     !!selectedOllamaModel &&
     (ollamaStatus?.models.length ?? 0) > 0;
+  const canLaunchLlamaCpp =
+    !!llamaCppStatus?.installed &&
+    !!(
+      selectedLlamaCppModelPath.trim() ||
+      selectedProject?.llama_cpp_model_path?.trim() ||
+      llamaCppStatus?.model_path?.trim()
+    );
   const requestTrendValues = logMetrics?.trends.map((entry) => entry.request_count) ?? [];
   const errorTrendValues = logMetrics?.trends.map((entry) => entry.error_count) ?? [];
   const avgLatencyTrendValues = logMetrics?.trends.map((entry) => entry.avg_latency_ms) ?? [];
   const p95LatencyTrendValues = logMetrics?.trends.map((entry) => entry.p95_latency_ms) ?? [];
-  const proAuditActions = new Set([
-    'token_created',
-    'token_revoked',
-    'token_used',
-    'session_created',
-    'session_used',
-    'session_revoked',
-    'user_created',
-    'user_roles_updated',
-    'user_enabled',
-    'user_disabled',
-    'user_deleted',
-    'local_login',
-    'sso_login',
-  ]);
-  const proActivityCopy =
-    language === 'ru'
-      ? {
-          title: 'Pro activity',
-          subtitle: 'События токенов, сессий и защищенного Pro API',
-          all: 'Вся активность',
-          proOnly: 'Только Pro auth',
-          created: 'Создано',
-          used: 'Использовано',
-          revoked: 'Отозвано',
-          empty: 'Pro auth activity пока нет.',
-        }
-      : {
-          title: 'Pro activity',
-          subtitle: 'Agent token, session, and protected Pro API events',
-          all: 'All activity',
-          proOnly: 'Pro auth only',
-          created: 'Created',
-          used: 'Used',
-          revoked: 'Revoked',
-          empty: 'No Pro auth activity yet.',
-        };
-  const proActivityLogs = logs.filter((entry) => proAuditActions.has(entry.action));
-  const visibleLogs =
-    logsFilterMode === 'pro' ? proActivityLogs : logs;
-  const proCreatedCount = proActivityLogs.filter((entry) => entry.action === 'token_created' || entry.action === 'session_created').length;
-  const proUsedCount = proActivityLogs.filter((entry) => entry.action === 'token_used' || entry.action === 'session_used' || entry.action === 'local_login' || entry.action === 'sso_login').length;
-  const proRevokedCount = proActivityLogs.filter((entry) => entry.action === 'token_revoked' || entry.action === 'session_revoked').length;
-  const canWritePro = hasProScope(proPrincipal, 'pro:write');
-  const canAdminPro = hasProScope(proPrincipal, 'pro:admin');
-  const proAuthLocked = isProEdition && !proPrincipal;
-  const activeView = proAuthLocked ? 'pro' : view;
-  const visibleNavigationItems = proAuthLocked
-    ? navigationItems.filter((item) => item.id === 'pro')
-    : navigationItems;
+  const visibleLogs = logs;
+  const activeView = view;
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1069,37 +400,6 @@ export default function App() {
     window.localStorage.setItem(languageStorageKey, language);
     document.documentElement.lang = language;
   }, [language]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    setProAuthToken(window.localStorage.getItem(proAuthStorageKey) ?? '');
-
-    const url = new URL(window.location.href);
-    const sessionToken = url.searchParams.get('pro_session_token');
-    const ssoError = url.searchParams.get('pro_sso_error');
-    const targetView = url.searchParams.get('pro_view');
-    if (sessionToken) {
-      updateAndPersistProAuthToken(sessionToken);
-      if (targetView === 'pro') {
-        setView('pro');
-      }
-      url.searchParams.delete('pro_session_token');
-      url.searchParams.delete('pro_view');
-      window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
-    }
-    if (ssoError) {
-      if (targetView === 'pro') {
-        setView('pro');
-      }
-      toast.error(ssoError);
-      url.searchParams.delete('pro_sso_error');
-      url.searchParams.delete('pro_view');
-      window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
-    }
-  }, []);
 
   useEffect(() => {
     setConnectionURLsExpanded(false);
@@ -1159,38 +459,9 @@ export default function App() {
       loadCatalog(true),
       loadInstalledPackages(),
       loadOllamaStatus(),
+      loadLlamaCppStatus(),
     ]);
   }, []);
-
-  useEffect(() => {
-    if (!hasProAccess || activeView !== 'pro' || !proAuthToken.trim() || proPrincipal) {
-      return;
-    }
-
-    void loadProSession();
-  }, [hasProAccess, activeView, proAuthToken, proPrincipal]);
-
-  useEffect(() => {
-    if (!hasProAccess) {
-      setProSSOConfig(null);
-      return;
-    }
-
-    void (async () => {
-      try {
-        const config = await apiRequest<ProSSOConfig>('/api/pro/sso/config', messages.requestFailed);
-        setProSSOConfig(config);
-      } catch {
-        setProSSOConfig(null);
-      }
-    })();
-  }, [hasProAccess]);
-
-  useEffect(() => {
-    if (!hasProAccess && view === 'pro') {
-      setView('projects');
-    }
-  }, [hasProAccess, view]);
 
   useEffect(() => {
     if (!ollamaStatus?.installed) {
@@ -1209,11 +480,33 @@ export default function App() {
   }, [ollamaStatus, selectedOllamaModel]);
 
   useEffect(() => {
+    if (!selectedProject) {
+      return;
+    }
+
+    setSelectedLlamaCppModelPath(selectedProject.llama_cpp_model_path || llamaCppStatus?.model_path || '');
+    setSelectedLlamaCppModelName(
+      selectedProject.llama_cpp_model_name ||
+      modelNameFromPath(selectedProject.llama_cpp_model_path || '') ||
+      llamaCppStatus?.model_name ||
+      modelNameFromPath(llamaCppStatus?.model_path || ''),
+    );
+  }, [selectedProject?.project_id, selectedProject?.llama_cpp_model_path, selectedProject?.llama_cpp_model_name, llamaCppStatus?.model_path, llamaCppStatus?.model_name]);
+
+  useEffect(() => {
     if (view === 'logs') {
       void loadLogs();
       void loadLogMetrics();
     }
   }, [view, selectedLogsProjectId, metricsWindow]);
+
+  useEffect(() => {
+    if (!launchProjectOpen) {
+      return;
+    }
+
+    void Promise.all([loadOllamaStatus({ silent: true }), loadLlamaCppStatus({ silent: true })]);
+  }, [launchProjectOpen]);
 
   useEffect(() => {
     const previousView = previousViewRef.current;
@@ -1406,23 +699,8 @@ export default function App() {
     }
   }
 
-  async function loadOllamaStatus(options?: { silent?: boolean }) {
-    if (!options?.silent) {
-      setOllamaRefreshing(true);
-    }
-
-    try {
-      const nextStatus = await apiRequest<OllamaStatus>(
-        '/api/ollama/status',
-        messages.requestFailed,
-      );
-      setOllamaStatus(nextStatus);
-    } catch {
-      setOllamaStatus(null);
-    } finally {
-      setOllamaRefreshing(false);
-    }
-  }
+  const loadOllamaStatus = hookLoadOllamaStatus;
+  const loadLlamaCppStatus = hookLoadLlamaCppStatus;
 
   async function loadInstalledPackages() {
     try {
@@ -1434,435 +712,6 @@ export default function App() {
     } catch (loadError) {
       setActionError(loadError instanceof Error ? loadError.message : messages.loadPackagesError);
     }
-  }
-
-  async function loadProSession(tokenOverride?: string) {
-    const activeToken = (tokenOverride ?? proAuthToken).trim();
-    if (!activeToken) {
-      setProPrincipal(null);
-      setProTokens([]);
-      setProUsers([]);
-      setProRoles([]);
-      setProSessions([]);
-      return;
-    }
-
-    setProLoading(true);
-    try {
-      const [principal, tokens, users, roles, sessions] = await Promise.all([
-        proAPIRequest<ProPrincipal>(activeToken, '/api/pro/auth/me', messages.requestFailed),
-        proAPIRequest<ProTokenRecord[]>(activeToken, '/api/pro/tokens', messages.requestFailed),
-        proAPIRequest<ProUserRecord[]>(activeToken, '/api/pro/users', messages.requestFailed),
-        proAPIRequest<ProRoleRecord[]>(activeToken, '/api/pro/roles', messages.requestFailed),
-        proAPIRequest<ProSessionRecord[]>(activeToken, '/api/pro/sessions', messages.requestFailed),
-      ]);
-      setProPrincipal(principal);
-      setProTokens(tokens);
-      setProUsers(users);
-      setProRoles(roles);
-      setProSessions(sessions);
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(proAuthStorageKey, activeToken);
-      }
-    } catch (loadError) {
-      resetProAccess(false);
-      toast.error(loadError instanceof Error ? loadError.message : proCopy.loadTokensFailed);
-    } finally {
-      setProLoading(false);
-    }
-  }
-
-  function resetProAccess(clearToken = false) {
-    setProPrincipal(null);
-    setProTokens([]);
-    setProUsers([]);
-    setProRoles([]);
-    setProSessions([]);
-    setProCreatedTokenValue(null);
-    setProCreatedSessionToken(null);
-    setProLoginPassword('');
-    setProAuthBootstrapping(false);
-    if (clearToken) {
-      updateAndPersistProAuthToken('');
-    }
-  }
-
-  async function connectProToken() {
-    if (!proAuthToken.trim()) {
-      toast.error(proCopy.verifyFailed);
-      return;
-    }
-
-    setProLoading(true);
-    try {
-      const principal = await proAPIRequest<ProPrincipal>(
-        proAuthToken,
-        '/api/pro/auth/me',
-        messages.requestFailed,
-      );
-      setProPrincipal(principal);
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(proAuthStorageKey, proAuthToken.trim());
-      }
-      await loadProSession(proAuthToken);
-    } catch (verifyError) {
-      toast.error(verifyError instanceof Error ? verifyError.message : proCopy.verifyFailed);
-    } finally {
-      setProLoading(false);
-    }
-  }
-
-  async function loginProLocal(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
-    setProLocalLoginLoading(true);
-    setProAuthBootstrapping(true);
-    try {
-      const payload = await apiRequest<ProLocalLoginResponse>('/api/pro/login', messages.requestFailed, {
-        method: 'POST',
-        body: JSON.stringify({
-          email: proLoginEmail,
-          password: proLoginPassword,
-          expires_in_days: 30,
-        }),
-      });
-      setProPrincipal({
-        name: payload.user.display_name,
-        scopes: payload.user.scopes,
-        roles: payload.user.roles,
-        user_id: payload.user.id,
-        session_id: payload.session?.id,
-        auth_method: payload.session?.auth_method ?? 'local_password',
-        is_bootstrap: payload.user.is_bootstrap,
-      });
-      updateAndPersistProAuthToken(payload.token);
-      setProLoginPassword('');
-      setView('pro');
-      await loadProSession(payload.token);
-    } catch (loginError) {
-      setProPrincipal(null);
-      toast.error(loginError instanceof Error ? loginError.message : proCopy.verifyFailed);
-    } finally {
-      setProAuthBootstrapping(false);
-      setProLocalLoginLoading(false);
-    }
-  }
-
-  function startProSSOSignIn() {
-    if (typeof window === 'undefined' || !proSSOConfig?.enabled || !proSSOConfig.start_url) {
-      return;
-    }
-    const url = new URL(proSSOConfig.start_url, window.location.origin);
-    url.searchParams.set('return_to', '/?pro_view=pro');
-    window.location.assign(url.toString());
-  }
-
-  async function createProToken(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!proAuthToken.trim()) {
-      toast.error(proCopy.verifyFailed);
-      return;
-    }
-
-    setProCreatingToken(true);
-    try {
-      const payload = await proAPIRequest<CreateProTokenResponse>(
-        proAuthToken,
-        '/api/pro/tokens',
-        messages.requestFailed,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            name: proNewTokenName,
-            scopes: proNewTokenScopes
-              .split(',')
-              .map((scope) => scope.trim())
-              .filter(Boolean),
-            expires_in_days: Number(proNewTokenExpiresDays || '0'),
-          }),
-        },
-      );
-      setProCreatedTokenValue(payload.token);
-      setProCreateOpen(false);
-      setProNewTokenName('');
-      setProNewTokenScopes('pro:read, pro:write');
-      setProNewTokenExpiresDays('30');
-      await loadProSession();
-    } catch (createError) {
-      toast.error(createError instanceof Error ? createError.message : proCopy.createFailed);
-    } finally {
-      setProCreatingToken(false);
-    }
-  }
-
-  async function revokeProToken(tokenId: number) {
-    if (!proAuthToken.trim()) {
-      toast.error(proCopy.verifyFailed);
-      return;
-    }
-
-    setProRevokingTokenId(tokenId);
-    try {
-      await proAPIRequest(
-        proAuthToken,
-        `/api/pro/tokens/${tokenId}`,
-        messages.requestFailed,
-        { method: 'DELETE' },
-      );
-      await loadProSession();
-    } catch (revokeError) {
-      toast.error(revokeError instanceof Error ? revokeError.message : proCopy.revokeFailed);
-    } finally {
-      setProRevokingTokenId(null);
-    }
-  }
-
-  async function createProUser(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!proAuthToken.trim()) {
-      toast.error(proCopy.verifyFailed);
-      return;
-    }
-
-    setProCreatingUser(true);
-    try {
-      await proAPIRequest<CreateProUserResponse>(
-        proAuthToken,
-        '/api/pro/users',
-        messages.requestFailed,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            display_name: proNewUserName,
-            email: proNewUserEmail,
-            role_names: proNewUserRoles
-              .split(',')
-              .map((role) => role.trim())
-              .filter(Boolean),
-          }),
-        },
-      );
-      setProCreateUserOpen(false);
-      setProNewUserName('');
-      setProNewUserEmail('');
-      setProNewUserRoles('reader');
-      await loadProSession();
-    } catch (createError) {
-      toast.error(createError instanceof Error ? createError.message : proCopy.createUserFailed);
-    } finally {
-      setProCreatingUser(false);
-    }
-  }
-
-  function startEditProUser(user: ProUserRecord) {
-    setProEditingUserId(String(user.id));
-    setProEditingUserName(user.display_name);
-    setProEditingUserRoles(user.roles.join(', '));
-    setProEditUserOpen(true);
-  }
-
-  async function updateProUserRoles(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!proAuthToken.trim()) {
-      toast.error(proCopy.verifyFailed);
-      return;
-    }
-
-    setProUpdatingUserRoles(true);
-    try {
-      await proAPIRequest<UpdateProUserResponse>(
-        proAuthToken,
-        `/api/pro/users/${Number(proEditingUserId || '0')}`,
-        messages.requestFailed,
-        {
-          method: 'PUT',
-          body: JSON.stringify({
-            role_names: proEditingUserRoles
-              .split(',')
-              .map((role) => role.trim())
-              .filter(Boolean),
-          }),
-        },
-      );
-      setProEditUserOpen(false);
-      setProEditingUserId('');
-      setProEditingUserName('');
-      setProEditingUserRoles('reader');
-      await loadProSession();
-    } catch (updateError) {
-      toast.error(updateError instanceof Error ? updateError.message : proCopy.updateUserRolesFailed);
-    } finally {
-      setProUpdatingUserRoles(false);
-    }
-  }
-
-  async function disableProUser(user: ProUserRecord) {
-    if (!proAuthToken.trim()) {
-      toast.error(proCopy.verifyFailed);
-      return;
-    }
-    if (!window.confirm(proCopy.disableUserConfirm)) {
-      return;
-    }
-
-    setProDisablingUserId(user.id);
-    try {
-      await proAPIRequest<DisableProUserResponse>(
-        proAuthToken,
-        `/api/pro/users/${user.id}/disable`,
-        messages.requestFailed,
-        { method: 'POST' },
-      );
-      if (proPrincipal?.user_id === user.id) {
-        setProCreatedSessionToken(null);
-      }
-      await loadProSession();
-    } catch (disableError) {
-      toast.error(disableError instanceof Error ? disableError.message : proCopy.disableUserFailed);
-    } finally {
-      setProDisablingUserId(null);
-    }
-  }
-
-  async function enableProUser(user: ProUserRecord) {
-    if (!proAuthToken.trim()) {
-      toast.error(proCopy.verifyFailed);
-      return;
-    }
-    if (!window.confirm(proCopy.enableUserConfirm)) {
-      return;
-    }
-
-    setProEnablingUserId(user.id);
-    try {
-      await proAPIRequest<EnableProUserResponse>(
-        proAuthToken,
-        `/api/pro/users/${user.id}/enable`,
-        messages.requestFailed,
-        { method: 'POST' },
-      );
-      await loadProSession();
-    } catch (enableError) {
-      toast.error(enableError instanceof Error ? enableError.message : proCopy.enableUserFailed);
-    } finally {
-      setProEnablingUserId(null);
-    }
-  }
-
-  async function deleteProUser(user: ProUserRecord) {
-    if (!proAuthToken.trim()) {
-      toast.error(proCopy.verifyFailed);
-      return;
-    }
-    if (!window.confirm(proCopy.deleteUserConfirm)) {
-      return;
-    }
-
-    setProDeletingUserId(user.id);
-    try {
-      await proAPIRequest(
-        proAuthToken,
-        `/api/pro/users/${user.id}`,
-        messages.requestFailed,
-        { method: 'DELETE' },
-      );
-      if (proEditingUserId === String(user.id)) {
-        setProEditUserOpen(false);
-        setProEditingUserId('');
-        setProEditingUserName('');
-        setProEditingUserRoles('reader');
-      }
-      if (proSessionsFilterUserId === String(user.id)) {
-        setProSessionsFilterUserId('all');
-      }
-      await loadProSession();
-    } catch (deleteError) {
-      toast.error(deleteError instanceof Error ? deleteError.message : proCopy.deleteUserFailed);
-    } finally {
-      setProDeletingUserId(null);
-    }
-  }
-
-  async function createProSession(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!proAuthToken.trim()) {
-      toast.error(proCopy.verifyFailed);
-      return;
-    }
-
-    setProCreatingSession(true);
-    try {
-      const payload = await proAPIRequest<CreateProSessionResponse>(
-        proAuthToken,
-        '/api/pro/sessions',
-        messages.requestFailed,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            user_id: Number(proNewSessionUserId || '0'),
-            label: proNewSessionLabel,
-            auth_method: 'local',
-            expires_in_days: Number(proNewSessionExpiresDays || '0'),
-          }),
-        },
-      );
-      setProCreatedSessionToken(payload.token);
-      setProCreateSessionOpen(false);
-      setProNewSessionUserId('');
-      setProNewSessionLabel('');
-      setProNewSessionExpiresDays('30');
-      await loadProSession();
-    } catch (createError) {
-      toast.error(createError instanceof Error ? createError.message : proCopy.createSessionFailed);
-    } finally {
-      setProCreatingSession(false);
-    }
-  }
-
-  async function revokeProSession(sessionId: number) {
-    if (!proAuthToken.trim()) {
-      toast.error(proCopy.verifyFailed);
-      return;
-    }
-
-    const isCurrentSession = proPrincipal?.session_id === sessionId;
-    setProRevokingSessionId(sessionId);
-    try {
-      await proAPIRequest(
-        proAuthToken,
-        `/api/pro/sessions/${sessionId}`,
-        messages.requestFailed,
-        { method: 'DELETE' },
-      );
-      if (isCurrentSession) {
-        resetProAccess(true);
-        return;
-      }
-      await loadProSession();
-    } catch (revokeError) {
-      toast.error(revokeError instanceof Error ? revokeError.message : proCopy.revokeSessionFailed);
-    } finally {
-      setProRevokingSessionId(null);
-    }
-  }
-
-  async function revokeCurrentProSession() {
-    if (!proPrincipal?.session_id) {
-      return;
-    }
-    if (!window.confirm(proCopy.revokeCurrentSessionConfirm)) {
-      return;
-    }
-    await revokeProSession(proPrincipal.session_id);
-  }
-
-  async function signOutPro() {
-    if (proPrincipal?.session_id) {
-      await revokeCurrentProSession();
-      return;
-    }
-    resetProAccess(true);
-    setView('projects');
   }
 
   async function syncCatalog() {
@@ -2035,9 +884,9 @@ export default function App() {
     }
   }
 
-  function projectNameFromLog(projectId: number | null) {
+  function projectNameFromLog(projectId: number | null): string {
     if (!projectId) {
-      return null;
+      return messages.projectTag(0);
     }
 
     return (
@@ -2046,9 +895,9 @@ export default function App() {
     );
   }
 
-  function serverNameFromLog(serverId: number | null) {
+  function serverNameFromLog(serverId: number | null): string {
     if (!serverId) {
-      return null;
+      return messages.serverTag(0);
     }
 
     return serverNamesById[serverId] ?? messages.serverTag(serverId);
@@ -2295,6 +1144,53 @@ export default function App() {
     }
   }
 
+  async function launchProjectLlamaCpp(projectId: number) {
+    setLaunchingLlamaCppProjectId(projectId);
+    setActionError(null);
+
+    try {
+      await apiRequest<LlamaCppLaunchResponse>(
+        `/api/projects/${projectId}/launch-llamacpp`,
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            model_path: selectedLlamaCppModelPath.trim(),
+            model_name: selectedLlamaCppModelName.trim(),
+          }),
+        },
+      );
+      await Promise.all([loadProjects(), loadLlamaCppStatus()]);
+      setLaunchProjectOpen(false);
+    } catch (submitError) {
+      setActionError(
+        submitError instanceof Error ? submitError.message : messages.launchLlamaCppError,
+      );
+    } finally {
+      setLaunchingLlamaCppProjectId(null);
+    }
+  }
+
+  async function stopLlamaCppServer() {
+    setStoppingLlamaCpp(true);
+    setActionError(null);
+
+    try {
+      await apiRequest<LlamaCppStatus>(
+        '/api/llamacpp/stop',
+        messages.requestFailed,
+        { method: 'POST' },
+      );
+      await loadLlamaCppStatus();
+    } catch (submitError) {
+      setActionError(
+        submitError instanceof Error ? submitError.message : messages.launchLlamaCppError,
+      );
+    } finally {
+      setStoppingLlamaCpp(false);
+    }
+  }
+
   async function launchProjectLMStudio(projectId: number) {
     setLaunchingLMStudioProjectId(projectId);
     setActionError(null);
@@ -2329,13 +1225,6 @@ export default function App() {
 
   async function copyToClipboard(value: string) {
     await navigator.clipboard.writeText(value);
-  }
-
-  function updateAndPersistProAuthToken(value: string) {
-    setProAuthToken(value);
-    if (typeof window !== 'undefined') {
-      window.localStorage.setItem(proAuthStorageKey, value);
-    }
   }
 
   async function setServerEnabled(serverId: number, enabled: boolean) {
@@ -3000,30 +1889,19 @@ export default function App() {
     <AppShell
       logoSrc={logo}
       labels={labels}
-      navigationItems={visibleNavigationItems}
+      navigationItems={navigationItems}
       view={activeView}
       setView={setView}
-      immersive={proAuthLocked}
-      footer={
-        !proAuthLocked && proPrincipal ? (
-          <button
-            onClick={() => void signOutPro()}
-            aria-label={proCopy.signOut}
-            className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-transparent bg-card text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-destructive"
-          >
-            <LogOut className="h-5 w-5" />
-          </button>
-        ) : null
-      }
+      immersive={false}
       sidebar={
-        activeView === 'projects' && !proAuthLocked ? (
+        activeView === 'projects' ? (
           <ProjectsSidebar
             labels={labels}
             messages={messages}
             language={language}
             languageOptions={languageOptions}
             setLanguage={setLanguage}
-            onRefresh={() => Promise.all([loadProjects(), loadOllamaStatus()])}
+            onRefresh={async () => { await Promise.all([loadProjects(), loadOllamaStatus(), loadLlamaCppStatus()]); }}
             refreshing={refreshing}
             projects={projects}
             loading={loading}
@@ -3077,14 +1955,7 @@ export default function App() {
               errorTrendValues={errorTrendValues}
               avgLatencyTrendValues={avgLatencyTrendValues}
               p95LatencyTrendValues={p95LatencyTrendValues}
-              hasProAccess={hasProAccess}
-              logsFilterMode={logsFilterMode}
-              setLogsFilterMode={setLogsFilterMode}
-              proActivityCopy={proActivityCopy}
               visibleLogs={visibleLogs}
-              proCreatedCount={proCreatedCount}
-              proUsedCount={proUsedCount}
-              proRevokedCount={proRevokedCount}
               logsViewportRef={logsViewportRef}
               projectNameFromLog={projectNameFromLog}
               serverNameFromLog={serverNameFromLog}
@@ -3154,119 +2025,6 @@ export default function App() {
               onPerformCatalogInstall={performCatalogInstall}
               onActionError={setActionError}
             />
-          ) : activeView === 'pro' ? (
-            <ProAccessView
-              logoSrc={logo}
-              editionName={editionMeta.edition_name}
-              proCopy={proCopy}
-              proPrincipal={proPrincipal}
-              proLoading={proLoading}
-              proLocalLoginLoading={proLocalLoginLoading}
-              proLoginEmail={proLoginEmail}
-              proLoginPassword={proLoginPassword}
-              proSSOEnabled={!!proSSOConfig?.enabled}
-              proSSOProviderName={proSSOConfig?.provider_name}
-              proSSOIssuerURL={proSSOConfig?.issuer_url}
-              proSSORedirectURL={proSSOConfig?.redirect_url}
-              proSSOScopes={proSSOConfig?.scopes}
-              proSSOHostedDomain={proSSOConfig?.allowed_hosted_domain}
-              proSSODefaultRole={proSSOConfig?.default_role}
-              proSSOSessionDays={proSSOConfig?.session_days}
-              proSSOAutoCreateUsers={proSSOConfig?.auto_create_users}
-              proCreateOpen={proCreateOpen}
-              proCreatingToken={proCreatingToken}
-              proRevokingTokenId={proRevokingTokenId}
-              proNewTokenName={proNewTokenName}
-              proNewTokenScopes={proNewTokenScopes}
-              proNewTokenExpiresDays={proNewTokenExpiresDays}
-              proCreatedTokenValue={proCreatedTokenValue}
-              proCreatedSessionToken={proCreatedSessionToken}
-              proTokens={proTokens}
-              proUsers={proUsers}
-              proRoles={proRoles}
-              proSessions={proSessions}
-              proScopePresets={proScopePresets}
-              canWritePro={canWritePro}
-              canAdminPro={canAdminPro}
-              proCreateUserOpen={proCreateUserOpen}
-              proCreatingUser={proCreatingUser}
-              proEditUserOpen={proEditUserOpen}
-              proUpdatingUserRoles={proUpdatingUserRoles}
-              proDisablingUserId={proDisablingUserId}
-              proEnablingUserId={proEnablingUserId}
-              proDeletingUserId={proDeletingUserId}
-              proSessionsFilterUserId={proSessionsFilterUserId}
-              proEditingUserId={proEditingUserId}
-              proEditingUserName={proEditingUserName}
-              proEditingUserRoles={proEditingUserRoles}
-              proCreateSessionOpen={proCreateSessionOpen}
-              proCreatingSession={proCreatingSession}
-              proRevokingSessionId={proRevokingSessionId}
-              proNewUserName={proNewUserName}
-              proNewUserEmail={proNewUserEmail}
-              proNewUserRoles={proNewUserRoles}
-              proNewSessionUserId={proNewSessionUserId}
-              proNewSessionLabel={proNewSessionLabel}
-              proNewSessionExpiresDays={proNewSessionExpiresDays}
-              onSetProCreateOpen={(open) => {
-                setProCreateOpen(open);
-                if (!open) {
-                  setProCreatedTokenValue(null);
-                }
-              }}
-              onSetProCreateUserOpen={(open) => {
-                setProCreateUserOpen(open);
-                if (!open) {
-                  setProNewUserName('');
-                  setProNewUserEmail('');
-                  setProNewUserRoles('reader');
-                }
-              }}
-              onSetProEditUserOpen={(open) => {
-                setProEditUserOpen(open);
-                if (!open) {
-                  setProEditingUserId('');
-                  setProEditingUserName('');
-                  setProEditingUserRoles('reader');
-                }
-              }}
-              onSetProCreateSessionOpen={(open) => {
-                setProCreateSessionOpen(open);
-                if (!open) {
-                  setProCreatedSessionToken(null);
-                  setProNewSessionUserId('');
-                  setProNewSessionLabel('');
-                  setProNewSessionExpiresDays('30');
-                }
-              }}
-              onSetProLoginEmail={setProLoginEmail}
-              onSetProLoginPassword={setProLoginPassword}
-              onSetProNewTokenName={setProNewTokenName}
-              onSetProNewTokenScopes={setProNewTokenScopes}
-              onSetProNewTokenExpiresDays={setProNewTokenExpiresDays}
-              onSetProNewUserName={setProNewUserName}
-              onSetProNewUserEmail={setProNewUserEmail}
-              onSetProNewUserRoles={setProNewUserRoles}
-              onSetProEditingUserRoles={setProEditingUserRoles}
-              onSetProSessionsFilterUserId={setProSessionsFilterUserId}
-              onSetProNewSessionUserId={setProNewSessionUserId}
-              onSetProNewSessionLabel={setProNewSessionLabel}
-              onSetProNewSessionExpiresDays={setProNewSessionExpiresDays}
-              onLoginProLocal={loginProLocal}
-              onStartProSSOSignIn={startProSSOSignIn}
-              onCreateProToken={createProToken}
-              onCreateProUser={createProUser}
-              onStartEditProUser={startEditProUser}
-              onUpdateProUserRoles={updateProUserRoles}
-              onDisableProUser={disableProUser}
-              onEnableProUser={enableProUser}
-              onDeleteProUser={deleteProUser}
-              onCreateProSession={createProSession}
-              onRevokeCurrentProSession={revokeCurrentProSession}
-              onCopyToken={copyToClipboard}
-              onRevokeProToken={revokeProToken}
-              onRevokeProSession={revokeProSession}
-            />
           ) : (
             <ProjectsView
               labels={labels}
@@ -3276,14 +2034,27 @@ export default function App() {
               launchProjectOpen={launchProjectOpen}
               setLaunchProjectOpen={setLaunchProjectOpen}
               shouldShowOllamaControls={shouldShowOllamaControls}
+              shouldShowLlamaCppControls={shouldShowLlamaCppControls}
               ollamaStatus={ollamaStatus}
+              llamaCppStatus={llamaCppStatus}
+              selectedLlamaCppModelPath={selectedLlamaCppModelPath}
+              setSelectedLlamaCppModelPath={setSelectedLlamaCppModelPath}
+              selectedLlamaCppModelName={selectedLlamaCppModelName}
+              setSelectedLlamaCppModelName={setSelectedLlamaCppModelName}
               selectedOllamaModel={selectedOllamaModel}
               setSelectedOllamaModel={setSelectedOllamaModel}
               loadOllamaStatus={loadOllamaStatus}
+              loadLlamaCppStatus={loadLlamaCppStatus}
               ollamaRefreshing={ollamaRefreshing}
+              llamaCppRefreshing={llamaCppRefreshing}
               launchProjectOllama={launchProjectOllama}
+              launchProjectLlamaCpp={launchProjectLlamaCpp}
+              stopLlamaCppServer={stopLlamaCppServer}
               launchingOllamaProjectId={launchingOllamaProjectId}
+              launchingLlamaCppProjectId={launchingLlamaCppProjectId}
+              stoppingLlamaCpp={stoppingLlamaCpp}
               canLaunchOllama={canLaunchOllama}
+              canLaunchLlamaCpp={canLaunchLlamaCpp}
               launchProjectLMStudio={launchProjectLMStudio}
               launchingLMStudioProjectId={launchingLMStudioProjectId}
               OllamaIcon={OllamaIcon}

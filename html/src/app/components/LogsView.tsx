@@ -78,8 +78,6 @@ type PerformanceMetricsResponse = {
   recent_failures: PerformanceFailureRecord[];
 };
 
-type LogsFilterMode = 'all' | 'pro';
-
 type KnowledgeSearchAuditDetail = {
   collections?: string[];
   query?: string;
@@ -89,17 +87,6 @@ type KnowledgeSearchAuditDetail = {
 type ProjectOption = {
   project_id: number;
   name: string;
-};
-
-type ProActivityCopy = {
-  title: string;
-  subtitle: string;
-  all: string;
-  proOnly: string;
-  created: string;
-  used: string;
-  revoked: string;
-  empty: string;
 };
 
 type LogsViewProps = {
@@ -120,14 +107,7 @@ type LogsViewProps = {
   errorTrendValues: number[];
   avgLatencyTrendValues: number[];
   p95LatencyTrendValues: number[];
-  hasProAccess: boolean;
-  logsFilterMode: LogsFilterMode;
-  setLogsFilterMode: (value: LogsFilterMode) => void;
-  proActivityCopy: ProActivityCopy;
   visibleLogs: AuditLog[];
-  proCreatedCount: number;
-  proUsedCount: number;
-  proRevokedCount: number;
   logsViewportRef: RefObject<HTMLDivElement | null>;
   projectNameFromLog: (projectID: number) => string;
   serverNameFromLog: (serverID: number) => string;
@@ -139,131 +119,10 @@ function formatAuditAction(action: string) {
   if (action === 'tool_call_project_knowledge_search') {
     return 'tool_call -> search_project_knowledge';
   }
-  if (action === 'token_created') {
-    return 'pro_auth -> token_created';
-  }
-  if (action === 'token_revoked') {
-    return 'pro_auth -> token_revoked';
-  }
-  if (action === 'token_used') {
-    return 'pro_auth -> token_used';
-  }
-  if (action === 'session_created') {
-    return 'pro_auth -> session_created';
-  }
-  if (action === 'session_used') {
-    return 'pro_auth -> session_used';
-  }
-  if (action === 'session_revoked') {
-    return 'pro_auth -> session_revoked';
-  }
-  if (action === 'user_created') {
-    return 'pro_auth -> user_created';
-  }
-  if (action === 'user_roles_updated') {
-    return 'pro_auth -> user_roles_updated';
-  }
-  if (action === 'user_disabled') {
-    return 'pro_auth -> user_disabled';
-  }
-  if (action === 'user_enabled') {
-    return 'pro_auth -> user_enabled';
-  }
-  if (action === 'user_deleted') {
-    return 'pro_auth -> user_deleted';
-  }
-  if (action === 'local_login') {
-    return 'pro_auth -> local_login';
-  }
-  if (action === 'sso_login') {
-    return 'pro_auth -> sso_login';
-  }
   return action;
 }
 
 function formatAuditDetail(entry: AuditLog) {
-  if (
-    entry.action === 'token_created' ||
-    entry.action === 'token_revoked' ||
-    entry.action === 'token_used' ||
-    entry.action === 'session_created' ||
-    entry.action === 'session_used' ||
-    entry.action === 'session_revoked' ||
-    entry.action === 'user_created' ||
-    entry.action === 'user_roles_updated' ||
-    entry.action === 'user_enabled' ||
-    entry.action === 'user_disabled' ||
-    entry.action === 'user_deleted' ||
-    entry.action === 'local_login' ||
-    entry.action === 'sso_login'
-  ) {
-    try {
-      const parsed = JSON.parse(entry.detail) as {
-        token_id?: number;
-        session_id?: number;
-        user_id?: number;
-        user_name?: string;
-        display_name?: string;
-        email?: string;
-        name?: string;
-        principal?: string;
-        scopes?: string[] | string;
-        roles?: string[] | string;
-        auth_method?: string;
-        expires_at?: string;
-        bootstrap?: boolean;
-      };
-
-      const parts: string[] = [];
-      if (typeof parsed.token_id === 'number') {
-        parts.push(`token #${parsed.token_id}`);
-      }
-      if (typeof parsed.session_id === 'number') {
-        parts.push(`session #${parsed.session_id}`);
-      }
-      if (typeof parsed.user_id === 'number') {
-        parts.push(`user #${parsed.user_id}`);
-      }
-      if (parsed.user_name) {
-        parts.push(`user_name="${parsed.user_name}"`);
-      }
-      if (parsed.display_name) {
-        parts.push(`display_name="${parsed.display_name}"`);
-      }
-      if (parsed.email) {
-        parts.push(`email="${parsed.email}"`);
-      }
-      if (parsed.name) {
-        parts.push(`name="${parsed.name}"`);
-      }
-      if (parsed.principal) {
-        parts.push(`principal="${parsed.principal}"`);
-      }
-      if (Array.isArray(parsed.scopes) && parsed.scopes.length > 0) {
-        parts.push(`scopes=[${parsed.scopes.join(', ')}]`);
-      } else if (typeof parsed.scopes === 'string' && parsed.scopes.trim() !== '') {
-        parts.push(`scopes=${parsed.scopes}`);
-      }
-      if (Array.isArray(parsed.roles) && parsed.roles.length > 0) {
-        parts.push(`roles=[${parsed.roles.join(', ')}]`);
-      } else if (typeof parsed.roles === 'string' && parsed.roles.trim() !== '') {
-        parts.push(`roles=${parsed.roles}`);
-      }
-      if (parsed.auth_method) {
-        parts.push(`auth_method=${parsed.auth_method}`);
-      }
-      if (parsed.expires_at) {
-        parts.push(`expires_at=${parsed.expires_at}`);
-      }
-      if (parsed.bootstrap) {
-        parts.push('bootstrap=true');
-      }
-      return parts.join(' ');
-    } catch {
-      return entry.detail;
-    }
-  }
-
   if (entry.action !== 'tool_call_project_knowledge_search') {
     return entry.detail;
   }
@@ -405,14 +264,7 @@ export function LogsView({
   errorTrendValues,
   avgLatencyTrendValues,
   p95LatencyTrendValues,
-  hasProAccess,
-  logsFilterMode,
-  setLogsFilterMode,
-  proActivityCopy,
   visibleLogs,
-  proCreatedCount,
-  proUsedCount,
-  proRevokedCount,
   logsViewportRef,
   projectNameFromLog,
   serverNameFromLog,
@@ -551,60 +403,11 @@ export function LogsView({
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {hasProAccess ? (
-                <div className="inline-flex rounded-full border border-border bg-card p-1 text-xs">
-                  <button
-                    onClick={() => setLogsFilterMode('all')}
-                    className={`rounded-full px-3 py-1 transition-colors ${
-                      logsFilterMode === 'all'
-                        ? 'bg-electric-blue text-white'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {proActivityCopy.all}
-                  </button>
-                  <button
-                    onClick={() => setLogsFilterMode('pro')}
-                    className={`rounded-full px-3 py-1 transition-colors ${
-                      logsFilterMode === 'pro'
-                        ? 'bg-electric-blue text-white'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {proActivityCopy.proOnly}
-                  </button>
-                </div>
-              ) : null}
               <div className="rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
                 {visibleLogs.length} {labels.requests}
               </div>
             </div>
           </div>
-
-          {hasProAccess ? (
-            <div className="mb-4 rounded-xl border border-border bg-background p-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <div className="font-medium">{proActivityCopy.title}</div>
-                  <div className="text-sm text-muted-foreground">{proActivityCopy.subtitle}</div>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-3">
-                  <div className="rounded-lg border border-border bg-card px-3 py-2 text-sm">
-                    <div className="text-muted-foreground">{proActivityCopy.created}</div>
-                    <div className="mt-1 text-lg font-semibold">{proCreatedCount}</div>
-                  </div>
-                  <div className="rounded-lg border border-border bg-card px-3 py-2 text-sm">
-                    <div className="text-muted-foreground">{proActivityCopy.used}</div>
-                    <div className="mt-1 text-lg font-semibold">{proUsedCount}</div>
-                  </div>
-                  <div className="rounded-lg border border-border bg-card px-3 py-2 text-sm">
-                    <div className="text-muted-foreground">{proActivityCopy.revoked}</div>
-                    <div className="mt-1 text-lg font-semibold">{proRevokedCount}</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          ) : null}
 
           {logsLoading ? (
             <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-4 py-5 text-sm text-muted-foreground">
@@ -613,7 +416,7 @@ export function LogsView({
             </div>
           ) : visibleLogs.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-background px-4 py-8 text-center text-muted-foreground">
-              {logsFilterMode === 'pro' ? proActivityCopy.empty : messages.noLogs}
+              {messages.noLogs}
             </div>
           ) : (
             <div className="overflow-hidden rounded-xl border border-border bg-[#0b0f14]">

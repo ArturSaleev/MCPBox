@@ -60,6 +60,8 @@ type ProjectStatus = {
   description: string;
   token: string;
   is_paused: boolean;
+  llama_cpp_model_path: string;
+  llama_cpp_model_name: string;
   connection_ready: boolean;
   connect_url: string;
   servers: ServerStatus[];
@@ -160,14 +162,36 @@ type ProjectsViewProps = {
   launchProjectOpen: boolean;
   setLaunchProjectOpen: (open: boolean) => void;
   shouldShowOllamaControls: boolean;
+  shouldShowLlamaCppControls: boolean;
   ollamaStatus: OllamaStatus;
+  llamaCppStatus: {
+    configured: boolean;
+    model_name: string;
+    model_path: string;
+    server_url: string;
+    running: boolean;
+    managed: boolean;
+    active_model_path: string;
+    active_model_name: string;
+  } | null;
+  selectedLlamaCppModelPath: string;
+  setSelectedLlamaCppModelPath: (value: string) => void;
+  selectedLlamaCppModelName: string;
+  setSelectedLlamaCppModelName: (value: string) => void;
   selectedOllamaModel: string;
   setSelectedOllamaModel: (value: string) => void;
   loadOllamaStatus: () => void | Promise<void>;
+  loadLlamaCppStatus: () => void | Promise<void>;
   ollamaRefreshing: boolean;
+  llamaCppRefreshing: boolean;
   launchProjectOllama: (projectId: number) => void | Promise<void>;
+  launchProjectLlamaCpp: (projectId: number) => void | Promise<void>;
+  stopLlamaCppServer: () => void | Promise<void>;
   launchingOllamaProjectId: number | null;
+  launchingLlamaCppProjectId: number | null;
+  stoppingLlamaCpp: boolean;
   canLaunchOllama: boolean;
+  canLaunchLlamaCpp: boolean;
   launchProjectLMStudio: (projectId: number) => void | Promise<void>;
   launchingLMStudioProjectId: number | null;
   OllamaIcon: (props: { className?: string }) => JSX.Element;
@@ -255,14 +279,27 @@ export function ProjectsView({
   launchProjectOpen,
   setLaunchProjectOpen,
   shouldShowOllamaControls,
+  shouldShowLlamaCppControls,
   ollamaStatus,
+  llamaCppStatus,
+  selectedLlamaCppModelPath,
+  setSelectedLlamaCppModelPath,
+  selectedLlamaCppModelName,
+  setSelectedLlamaCppModelName,
   selectedOllamaModel,
   setSelectedOllamaModel,
   loadOllamaStatus,
+  loadLlamaCppStatus,
   ollamaRefreshing,
+  llamaCppRefreshing,
   launchProjectOllama,
+  launchProjectLlamaCpp,
+  stopLlamaCppServer,
   launchingOllamaProjectId,
+  launchingLlamaCppProjectId,
+  stoppingLlamaCpp,
   canLaunchOllama,
+  canLaunchLlamaCpp,
   launchProjectLMStudio,
   launchingLMStudioProjectId,
   OllamaIcon,
@@ -354,14 +391,27 @@ export function ProjectsView({
         launchProjectOpen={launchProjectOpen}
         setLaunchProjectOpen={setLaunchProjectOpen}
         shouldShowOllamaControls={shouldShowOllamaControls}
+        shouldShowLlamaCppControls={shouldShowLlamaCppControls}
         ollamaStatus={ollamaStatus}
+        llamaCppStatus={llamaCppStatus}
+        selectedLlamaCppModelPath={selectedLlamaCppModelPath}
+        setSelectedLlamaCppModelPath={setSelectedLlamaCppModelPath}
+        selectedLlamaCppModelName={selectedLlamaCppModelName}
+        setSelectedLlamaCppModelName={setSelectedLlamaCppModelName}
         selectedOllamaModel={selectedOllamaModel}
         setSelectedOllamaModel={setSelectedOllamaModel}
         loadOllamaStatus={loadOllamaStatus}
+        loadLlamaCppStatus={loadLlamaCppStatus}
         ollamaRefreshing={ollamaRefreshing}
+        llamaCppRefreshing={llamaCppRefreshing}
         launchProjectOllama={launchProjectOllama}
+        launchProjectLlamaCpp={launchProjectLlamaCpp}
+        stopLlamaCppServer={stopLlamaCppServer}
         launchingOllamaProjectId={launchingOllamaProjectId}
+        launchingLlamaCppProjectId={launchingLlamaCppProjectId}
+        stoppingLlamaCpp={stoppingLlamaCpp}
         canLaunchOllama={canLaunchOllama}
+        canLaunchLlamaCpp={canLaunchLlamaCpp}
         launchProjectLMStudio={launchProjectLMStudio}
         launchingLMStudioProjectId={launchingLMStudioProjectId}
         OllamaIcon={OllamaIcon}

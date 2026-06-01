@@ -21,6 +21,8 @@ type Project struct {
 	Token                 string                   `gorm:"size:64;uniqueIndex;not null" json:"token"`
 	IsPaused              bool                     `gorm:"not null;default:false" json:"is_paused"`
 	Prompt                string                   `gorm:"type:text" json:"prompt"`
+	LlamaCppModelPath     string                   `gorm:"size:2048" json:"llama_cpp_model_path"`
+	LlamaCppModelName     string                   `gorm:"size:255" json:"llama_cpp_model_name"`
 	Servers               []MCPServer              `json:"servers,omitempty"`
 	RAGCollections        []RAGCollection          `gorm:"many2many:project_rag_collections;" json:"rag_collections,omitempty"`
 	InstalledIntegrations []InstalledIntegration   `json:"installed_integrations,omitempty"`

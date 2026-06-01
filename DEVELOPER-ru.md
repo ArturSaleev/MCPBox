@@ -76,7 +76,6 @@ MCPBox - это control plane на Go для MCP-серверов.
 - коллекции хранятся на диске и ищутся через Bleve
 - внешняя векторная база не требуется
 - pipeline генерации embeddings на этом этапе тоже не нужен
-- будущие возможности `Pro` вынесены в отдельный документ [PRO-ROADMAP-ru.md](./PRO-ROADMAP-ru.md)
 
 ### Frontend
 

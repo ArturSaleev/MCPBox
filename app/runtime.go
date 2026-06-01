@@ -19,6 +19,8 @@ import (
 
 	"github.com/ArturSaleev/MCPBox/internal/httpapi"
 	"github.com/ArturSaleev/MCPBox/internal/installer"
+	"github.com/ArturSaleev/MCPBox/internal/llamacpphost"
+	"github.com/ArturSaleev/MCPBox/internal/mcphostbridge"
 	"github.com/ArturSaleev/MCPBox/internal/models"
 	"github.com/ArturSaleev/MCPBox/internal/ollamahost"
 	"github.com/ArturSaleev/MCPBox/internal/orchestrator"
@@ -28,6 +30,13 @@ import (
 
 const DefaultPort = 38180
 const ragAutoReindexInterval = 10 * time.Minute
+
+type listenConfig struct {
+	adminHost string
+	adminPort int
+	mcpHost   string
+	mcpPort   int
+}
 
 type Options struct {
 	Edition  Edition
@@ -44,9 +53,15 @@ func Run(options Options) error {
 	if len(os.Args) > 1 && os.Args[1] == "ollama-chat" {
 		return ollamahost.Run(context.Background(), os.Args[2:])
 	}
+	if len(os.Args) > 1 && os.Args[1] == "llamacpp-chat" {
+		return llamacpphost.Run(context.Background(), os.Args[2:])
+	}
+	if len(os.Args) > 1 && os.Args[1] == "project-http-stdio" {
+		return mcphostbridge.Run(context.Background(), os.Args[2:])
+	}
 
 	options = normalizeOptions(options)
-	port := resolvePort()
+	listen := resolveListenConfig(options.Edition)
 	rootCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -99,12 +114,52 @@ func Run(options Options) error {
 		EditionID:           options.Edition.ID,
 		EditionName:         options.Edition.Name,
 		EditionCapabilities: slices.Clone(options.Edition.Capabilities),
+		ConnectHost:         listen.mcpHost,
+		ConnectPort:         listen.mcpPort,
+		UIFS:                options.Edition.UIFS,
 		HTTPRegistrars:      toHTTPRegistrars(runtimeContext, options.Edition.HTTPRegistrars),
 	})
-	httpServer := &http.Server{
-		Addr:              fmt.Sprintf(":%d", port),
-		Handler:           api.Handler(),
+
+	adminAddr := joinListenAddress(listen.adminHost, listen.adminPort)
+	mcpAddr := joinListenAddress(listen.mcpHost, listen.mcpPort)
+
+	adminServer := &http.Server{
+		Addr:              adminAddr,
+		Handler:           api.AdminHandler(),
 		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	mcpHandler := api.ConnectHandler()
+	if adminAddr == mcpAddr {
+		mcpHandler = api.Handler()
+	}
+
+	mcpServer := &http.Server{
+		Addr:              mcpAddr,
+		Handler:           mcpHandler,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	servers := make([]*http.Server, 0, 2)
+	listeners := make([]net.Listener, 0, 2)
+
+	adminListener, err := net.Listen("tcp", adminServer.Addr)
+	if err != nil {
+		return fmt.Errorf("admin listen failed: %w", err)
+	}
+	listeners = append(listeners, adminListener)
+	servers = append(servers, adminServer)
+
+	if adminAddr == mcpAddr {
+		mcpServer = adminServer
+	} else {
+		mcpListener, err := net.Listen("tcp", mcpServer.Addr)
+		if err != nil {
+			_ = adminListener.Close()
+			return fmt.Errorf("mcp listen failed: %w", err)
+		}
+		listeners = append(listeners, mcpListener)
+		servers = append(servers, mcpServer)
 	}
 
 	go func() {
@@ -113,29 +168,43 @@ func Run(options Options) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		if err := httpServer.Shutdown(shutdownCtx); err != nil {
-			log.Printf("http shutdown error: %v", err)
+		for _, server := range servers {
+			if err := server.Shutdown(shutdownCtx); err != nil {
+				log.Printf("http shutdown error for %s: %v", server.Addr, err)
+			}
 		}
 	}()
 
-	listener, err := net.Listen("tcp", httpServer.Addr)
-	if err != nil {
-		return fmt.Errorf("http listen failed: %w", err)
-	}
-
 	go func() {
-		url := fmt.Sprintf("http://127.0.0.1:%d/", port)
+		url := fmt.Sprintf("http://127.0.0.1:%d/", listen.adminPort)
 		if err := openBrowser(url); err != nil {
 			log.Printf("open browser error: %v", err)
 		}
 	}()
 
-	for _, address := range listenAddresses(port) {
-		log.Printf("%s UI: %s", options.Edition.Name, address)
+	for _, address := range listenAddresses(listen.adminHost, listen.adminPort, true) {
+		log.Printf("%s admin UI: %s", options.Edition.Name, address)
+	}
+	for _, address := range listenAddresses(listen.mcpHost, listen.mcpPort, false) {
+		log.Printf("%s MCP endpoint: %s", options.Edition.Name, address)
 	}
 
-	if err := httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
-		return fmt.Errorf("http server failed: %w", err)
+	serveErrCh := make(chan error, len(listeners))
+	for idx, listener := range listeners {
+		server := servers[idx]
+		go func(server *http.Server, listener net.Listener) {
+			if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+				serveErrCh <- fmt.Errorf("%s serve failed: %w", listener.Addr().String(), err)
+				return
+			}
+			serveErrCh <- nil
+		}(server, listener)
+	}
+
+	for range listeners {
+		if err := <-serveErrCh; err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -258,24 +327,25 @@ func writeSystemAuditLog(store *storage.Store, action, detail string) {
 	}
 }
 
-func resolvePort() int {
-	portFlag := flag.Int("port", 0, "TCP port for the MCPBox HTTP server")
+func resolveListenConfig(edition Edition) listenConfig {
+	hostFlag := flag.String("host", "", "host for the MCPBox admin UI and API listener")
+	portFlag := flag.Int("port", 0, "TCP port for the MCPBox admin UI and API listener")
+	mcpHostFlag := flag.String("mcp-host", "", "host for the MCPBox MCP listener")
+	mcpPortFlag := flag.Int("mcp-port", 0, "TCP port for the MCPBox MCP listener")
 	flag.Parse()
 
-	if *portFlag > 0 {
-		return mustBeValidPort(*portFlag, "flag")
+	config := listenConfig{
+		adminHost: firstNonEmpty(strings.TrimSpace(*hostFlag), strings.TrimSpace(os.Getenv("MCPBOX_HOST")), strings.TrimSpace(edition.AdminHost), "127.0.0.1"),
+		adminPort: firstValidPort(*portFlag, os.Getenv("MCPBOX_PORT"), edition.AdminPort, DefaultPort, "MCPBOX_PORT"),
+		mcpHost:   firstNonEmpty(strings.TrimSpace(*mcpHostFlag), strings.TrimSpace(os.Getenv("MCPBOX_MCP_HOST")), strings.TrimSpace(edition.MCPHost), "0.0.0.0"),
+		mcpPort:   firstValidPort(*mcpPortFlag, os.Getenv("MCPBOX_MCP_PORT"), edition.MCPPort, 0, "MCPBOX_MCP_PORT"),
 	}
 
-	if raw := os.Getenv("MCPBOX_PORT"); raw != "" {
-		port, err := strconv.Atoi(raw)
-		if err != nil {
-			log.Fatalf("invalid MCPBOX_PORT value %q", raw)
-		}
-
-		return mustBeValidPort(port, "MCPBOX_PORT")
+	if config.mcpPort == 0 {
+		config.mcpPort = config.adminPort
 	}
 
-	return DefaultPort
+	return config
 }
 
 func mustBeValidPort(port int, source string) int {
@@ -301,18 +371,43 @@ func openBrowser(target string) error {
 	return cmd.Start()
 }
 
-func listenAddresses(port int) []string {
-	addresses := []string{
-		fmt.Sprintf("http://127.0.0.1:%d/", port),
+func listenAddresses(host string, port int, localOnly bool) []string {
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	addresses := []string{}
+	seen := map[string]struct{}{}
+
+	appendAddress := func(candidateHost string) {
+		candidateHost = strings.Trim(strings.TrimSpace(candidateHost), "[]")
+		if candidateHost == "" {
+			return
+		}
+
+		address := fmt.Sprintf("http://%s:%d/", candidateHost, port)
+		if strings.Contains(candidateHost, ":") {
+			address = fmt.Sprintf("http://[%s]:%d/", candidateHost, port)
+		}
+		if _, ok := seen[address]; ok {
+			return
+		}
+		seen[address] = struct{}{}
+		addresses = append(addresses, address)
+	}
+
+	switch {
+	case host == "", host == "0.0.0.0", host == "::":
+		appendAddress("127.0.0.1")
+	default:
+		appendAddress(host)
+	}
+
+	if localOnly {
+		slices.Sort(addresses)
+		return addresses
 	}
 
 	ifaces, err := net.InterfaceAddrs()
 	if err != nil {
 		return addresses
-	}
-
-	seen := map[string]struct{}{
-		addresses[0]: {},
 	}
 
 	for _, iface := range ifaces {
@@ -326,21 +421,57 @@ func listenAddresses(port int) []string {
 			continue
 		}
 
-		ip = ip.To4()
-		if ip == nil {
+		if ipv4 := ip.To4(); ipv4 != nil {
+			appendAddress(ipv4.String())
 			continue
 		}
 
-		address := fmt.Sprintf("http://%s:%d/", ip.String(), port)
-		if _, ok := seen[address]; ok {
-			continue
-		}
-		seen[address] = struct{}{}
-		addresses = append(addresses, address)
+		appendAddress(ip.String())
 	}
 
 	slices.Sort(addresses)
 	return addresses
+}
+
+func joinListenAddress(host string, port int) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return fmt.Sprintf(":%d", port)
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func firstValidPort(flagValue int, envValue string, editionValue int, fallback int, envName string) int {
+	if flagValue > 0 {
+		return mustBeValidPort(flagValue, "flag")
+	}
+
+	if raw := strings.TrimSpace(envValue); raw != "" {
+		port, err := strconv.Atoi(raw)
+		if err != nil {
+			log.Fatalf("invalid %s value %q", envName, raw)
+		}
+		return mustBeValidPort(port, envName)
+	}
+
+	if editionValue > 0 {
+		return mustBeValidPort(editionValue, "edition")
+	}
+
+	if fallback > 0 {
+		return mustBeValidPort(fallback, "default")
+	}
+
+	return 0
 }
 
 func startupServersForProjects(projects []models.Project) []models.MCPServer {

@@ -55,8 +55,12 @@ export type Dictionary = {
     refresh: string;
     launchProject: string;
     launchOllama: string;
+    launchLlamaCpp: string;
     launchLMStudio: string;
     ollamaModel: string;
+    llamaCppModel: string;
+    llamaCppModelPath: string;
+    llamaCppModelName: string;
     pauseProject: string;
     resumeProject: string;
     paused: string;
@@ -255,6 +259,7 @@ export type Dictionary = {
     systemDependencyRequired: (name: string) => string;
     envSchemaDescription: string;
     launchOllamaError: string;
+    launchLlamaCppError: string;
     launchLMStudioError: string;
     noOllamaModels: string;
     knowledgeBaseHeroTitle: string;
@@ -304,6 +309,9 @@ export type Dictionary = {
     disabledToolsBadge: (count: number) => string;
     launchProjectDescription: string;
     ollamaNotInstalled: string;
+    llamaCppNotInstalled: string;
+    llamaCppNotConfigured: string;
+    llamaCppFilePickerHint: string;
   };
 };
 
@@ -366,8 +374,12 @@ export const dictionaries: Record<Language, Dictionary> = {
       refresh: 'Refresh',
       launchProject: 'Launch',
       launchOllama: 'Launch Ollama',
+      launchLlamaCpp: 'Launch llama.cpp',
       launchLMStudio: 'Add to LM Studio',
       ollamaModel: 'Ollama model',
+      llamaCppModel: 'llama.cpp model',
+      llamaCppModelPath: 'Model path',
+      llamaCppModelName: 'Model name',
       pauseProject: 'Pause project',
       resumeProject: 'Resume project',
       paused: 'Paused',
@@ -580,6 +592,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       systemDependencyRequired: (name: string) => `${name} required`,
       envSchemaDescription: 'These values will be passed to the server process as environment variables.',
       launchOllamaError: 'Failed to launch Ollama terminal.',
+      launchLlamaCppError: 'Failed to launch llama.cpp terminal.',
       launchLMStudioError: 'Failed to open LM Studio.',
       noOllamaModels: 'No local Ollama models found.',
       knowledgeBaseHeroTitle: 'Global Knowledge Collections',
@@ -644,6 +657,9 @@ export const dictionaries: Record<Language, Dictionary> = {
       launchProjectDescription:
         'Choose how you want to start working with this project locally.',
       ollamaNotInstalled: 'Ollama is not installed or not available in PATH.',
+      llamaCppNotInstalled: 'llama-server is not installed or not available in PATH.',
+      llamaCppNotConfigured: 'Set MCPBOX_LLAMACPP_MODEL to a local GGUF file to enable llama.cpp launch.',
+      llamaCppFilePickerHint: 'The chosen .gguf path will override MCPBOX_LLAMACPP_MODEL for this launch.',
     },
   },
   ru: {
@@ -701,8 +717,12 @@ export const dictionaries: Record<Language, Dictionary> = {
       refresh: 'Обновить',
       launchProject: 'Запустить',
       launchOllama: 'Запустить Ollama',
+      launchLlamaCpp: 'Запустить llama.cpp',
       launchLMStudio: 'Добавить в LM Studio',
       ollamaModel: 'Модель Ollama',
+      llamaCppModel: 'Модель llama.cpp',
+      llamaCppModelPath: 'Путь к модели',
+      llamaCppModelName: 'Имя модели',
       pauseProject: 'Приостановить проект',
       resumeProject: 'Возобновить проект',
       paused: 'Приостановлен',
@@ -918,6 +938,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       systemDependencyRequired: (name: string) => `Нужен ${name}`,
       envSchemaDescription: 'Эти значения будут переданы процессу сервера как переменные окружения.',
       launchOllamaError: 'Не удалось запустить терминал Ollama.',
+      launchLlamaCppError: 'Не удалось запустить терминал llama.cpp.',
       launchLMStudioError: 'Не удалось открыть LM Studio.',
       noOllamaModels: 'Локальные модели Ollama не найдены.',
       knowledgeBaseHeroTitle: 'Глобальные коллекции знаний',
@@ -982,6 +1003,9 @@ export const dictionaries: Record<Language, Dictionary> = {
       launchProjectDescription:
         'Выберите, как вы хотите запускать этот проект локально.',
       ollamaNotInstalled: 'Ollama не установлена или недоступна в PATH.',
+      llamaCppNotInstalled: 'llama-server не установлен или недоступен в PATH.',
+      llamaCppNotConfigured: 'Укажите MCPBOX_LLAMACPP_MODEL на локальный GGUF-файл, чтобы включить запуск llama.cpp.',
+      llamaCppFilePickerHint: 'Выбранный путь к .gguf переопределит MCPBOX_LLAMACPP_MODEL только для этого запуска.',
     },
   },
 };

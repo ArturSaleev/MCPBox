@@ -10,6 +10,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from './ui/dialog';
+import { Input } from './ui/input';
 import {
   Select,
   SelectContent,
@@ -28,6 +29,8 @@ type ProjectLaunchPanelProps = {
     description: string;
     token: string;
     is_paused: boolean;
+    llama_cpp_model_path: string;
+    llama_cpp_model_name: string;
     connection_ready: boolean;
     connect_url: string;
     servers: Array<{ status: string }>;
@@ -38,14 +41,36 @@ type ProjectLaunchPanelProps = {
   launchProjectOpen: boolean;
   setLaunchProjectOpen: (open: boolean) => void;
   shouldShowOllamaControls: boolean;
+  shouldShowLlamaCppControls: boolean;
   ollamaStatus: { models: string[] } | null;
+  llamaCppStatus: {
+    configured: boolean;
+    model_name: string;
+    model_path: string;
+    server_url: string;
+    running: boolean;
+    managed: boolean;
+    active_model_path: string;
+    active_model_name: string;
+  } | null;
+  selectedLlamaCppModelPath: string;
+  setSelectedLlamaCppModelPath: (value: string) => void;
+  selectedLlamaCppModelName: string;
+  setSelectedLlamaCppModelName: (value: string) => void;
   selectedOllamaModel: string;
   setSelectedOllamaModel: (value: string) => void;
   loadOllamaStatus: () => void | Promise<void>;
+  loadLlamaCppStatus: () => void | Promise<void>;
   ollamaRefreshing: boolean;
+  llamaCppRefreshing: boolean;
   launchProjectOllama: (projectId: number) => void | Promise<void>;
+  launchProjectLlamaCpp: (projectId: number) => void | Promise<void>;
+  stopLlamaCppServer: () => void | Promise<void>;
   launchingOllamaProjectId: number | null;
+  launchingLlamaCppProjectId: number | null;
+  stoppingLlamaCpp: boolean;
   canLaunchOllama: boolean;
+  canLaunchLlamaCpp: boolean;
   launchProjectLMStudio: (projectId: number) => void | Promise<void>;
   launchingLMStudioProjectId: number | null;
   OllamaIcon: (props: { className?: string }) => JSX.Element;
@@ -71,14 +96,27 @@ export function ProjectLaunchPanel({
   launchProjectOpen,
   setLaunchProjectOpen,
   shouldShowOllamaControls,
+  shouldShowLlamaCppControls,
   ollamaStatus,
+  llamaCppStatus,
+  selectedLlamaCppModelPath,
+  setSelectedLlamaCppModelPath,
+  selectedLlamaCppModelName,
+  setSelectedLlamaCppModelName,
   selectedOllamaModel,
   setSelectedOllamaModel,
   loadOllamaStatus,
+  loadLlamaCppStatus,
   ollamaRefreshing,
+  llamaCppRefreshing,
   launchProjectOllama,
+  launchProjectLlamaCpp,
+  stopLlamaCppServer,
   launchingOllamaProjectId,
+  launchingLlamaCppProjectId,
+  stoppingLlamaCpp,
   canLaunchOllama,
+  canLaunchLlamaCpp,
   launchProjectLMStudio,
   launchingLMStudioProjectId,
   OllamaIcon,
@@ -95,6 +133,11 @@ export function ProjectLaunchPanel({
   updateProjectPrompt,
   updatingPrompt,
 }: ProjectLaunchPanelProps) {
+  const hasSavedLlamaCppModel =
+    selectedLlamaCppModelPath.trim() !== '' ||
+    selectedProject.llama_cpp_model_path.trim() !== '' ||
+    (llamaCppStatus?.model_path?.trim() ?? '') !== '';
+
   return (
     <>
       <section className="rounded-2xl border border-border bg-card p-6">
@@ -255,6 +298,104 @@ export function ProjectLaunchPanel({
                           {labels.launch}
                         </button>
                       </div>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-border bg-card p-6 shadow-sm transition-all hover:shadow-md">
+                    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-500/10">
+                          <Bot className="h-6 w-6 text-emerald-500" />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold">{labels.llamaCppModel}</h3>
+                          <p className="text-sm text-muted-foreground">
+                            {shouldShowLlamaCppControls
+                              ? llamaCppStatus?.running
+                                ? `${llamaCppStatus.active_model_name || llamaCppStatus.model_name || labels.running} • ${llamaCppStatus.server_url}`
+                                : hasSavedLlamaCppModel
+                                  ? `${selectedProject.llama_cpp_model_name || llamaCppStatus.model_name} • ${llamaCppStatus.server_url}`
+                                  : messages.llamaCppNotConfigured
+                              : messages.llamaCppNotInstalled}
+                          </p>
+                          {llamaCppStatus?.running ? (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {llamaCppStatus.active_model_path || selectedProject.llama_cpp_model_path}
+                            </p>
+                          ) : selectedProject.llama_cpp_model_path ? (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {selectedProject.llama_cpp_model_path}
+                            </p>
+                          ) : llamaCppStatus?.configured && llamaCppStatus.model_path ? (
+                            <p className="mt-1 text-xs text-muted-foreground">{llamaCppStatus.model_path}</p>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => void loadLlamaCppStatus()}
+                              disabled={llamaCppRefreshing}
+                              className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-border bg-background transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                              aria-label={labels.refresh}
+                            >
+                              <RefreshCw
+                                className={`h-4 w-4 ${llamaCppRefreshing ? 'animate-spin' : ''}`}
+                              />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>{labels.refresh}</TooltipContent>
+                        </Tooltip>
+
+                        {llamaCppStatus?.managed ? (
+                          <button
+                            type="button"
+                            onClick={() => void stopLlamaCppServer()}
+                            disabled={stoppingLlamaCpp || !llamaCppStatus?.running}
+                            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 text-sm font-medium text-rose-700 transition-all hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            {stoppingLlamaCpp ? (
+                              <LoaderCircle className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <AlertCircle className="h-4 w-4" />
+                            )}
+                            {labels.stop}
+                          </button>
+                        ) : null}
+
+                        <button
+                          onClick={() => void launchProjectLlamaCpp(selectedProject.project_id)}
+                          disabled={
+                            launchingLlamaCppProjectId === selectedProject.project_id ||
+                            !selectedProject.connection_ready ||
+                            selectedProject.is_paused ||
+                            !canLaunchLlamaCpp
+                          }
+                          className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-emerald-500 px-4 text-sm font-medium text-white transition-all hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {launchingLlamaCppProjectId === selectedProject.project_id ? (
+                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Play className="h-4 w-4" />
+                          )}
+                          {labels.launch}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-3">
+                      <Input
+                        value={selectedLlamaCppModelPath}
+                        onChange={(event) => setSelectedLlamaCppModelPath(event.target.value)}
+                        placeholder="/absolute/path/to/model.gguf"
+                        aria-label={labels.llamaCppModelPath}
+                      />
+                    </div>
+                    <div className="grid gap-1 text-xs text-muted-foreground">
+                      <span>{labels.llamaCppModelPath}</span>
                     </div>
                   </div>
 

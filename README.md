@@ -141,8 +141,6 @@ Default port: `38180`
 - [README-ru.md](./README-ru.md) - Russian user guide
 - [DEVELOPER.md](./DEVELOPER.md) - developer guide, API notes, and architecture
 - [DEVELOPER-ru.md](./DEVELOPER-ru.md) - Russian developer guide
-- [PRO-DEVELOPMENT.md](./PRO-DEVELOPMENT.md) - recommended Free / Pro repository split and build workflow
-- [examples/mcpboxpro-template](./examples/mcpboxpro-template) - starter scaffold for the private Pro repository
 
 ## Notes
 
@@ -151,6 +149,5 @@ Default port: `38180`
 - The Docker runtime support in `1.2.1` is intentionally an MVP. Advanced container features such as compose-style orchestration, custom networks, and volume presets are not fully implemented yet.
 - The `go_install` package flow in `1.2.2` assumes the target integration can be installed through `go install module/path@version` and exposed through a concrete binary entry point.
 - Secret masking is applied in the UI and catalog install flow. Existing manually configured servers that still pass secrets directly in command arguments should be migrated to environment variables for full process-list safety.
-- Future `Pro` capabilities are documented separately in `PRO-ROADMAP.md` and are not part of the current `1.2.2` implementation.
 - The Ollama launcher is shown only when `ollama` is installed on the machine.
 - Local server inspection is available for `stdio` servers only.

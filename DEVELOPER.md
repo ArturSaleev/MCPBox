@@ -77,7 +77,6 @@ Knowledge Base note:
 - collections are stored on disk and searched through Bleve
 - no external vector database is required
 - no embedding generation pipeline is required at this stage
-- future `Pro` capabilities are documented separately in [PRO-ROADMAP.md](./PRO-ROADMAP.md)
 
 ### Frontend
 
@@ -116,7 +115,6 @@ Expected Pro workflow:
 - a private `mcpboxpro` repository imports the public `app` package instead of copying the project
 - Pro-specific HTTP routes can be registered through edition registrars
 
-See [PRO-DEVELOPMENT.md](./PRO-DEVELOPMENT.md) for the repository workflow and examples.
 
 ## Transport Model
 

@@ -87,7 +87,7 @@ func (s *Server) handleCreateRAGCollection(w http.ResponseWriter, r *http.Reques
 
 	collectionID := uuid.NewString()
 
-	indexPath, err := resolveRAGIndexPath("", collectionID)
+	indexPath, err := s.resolveRAGIndexPath("", collectionID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -385,16 +385,22 @@ func reindexCollection(collection models.RAGCollection, dirPath string) error {
 	return index.IndexFolder(dirPath)
 }
 
-func resolveRAGIndexPath(indexPath, collectionID string) (string, error) {
+func (s *Server) resolveRAGIndexPath(indexPath, collectionID string) (string, error) {
 	if strings.TrimSpace(indexPath) != "" {
 		return filepath.Abs(indexPath)
 	}
 
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "", err
+	baseRoot := "."
+	if s != nil && s.store != nil && strings.TrimSpace(s.store.DataRoot()) != "" {
+		baseRoot = s.store.DataRoot()
+	} else {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		baseRoot = cwd
 	}
-	return filepath.Join(cwd, "knowledge_base", "indexes", sanitizeRAGPathSegment(collectionID)), nil
+	return filepath.Join(baseRoot, "knowledge_base", "indexes", sanitizeRAGPathSegment(collectionID)), nil
 }
 
 func sanitizeRAGPathSegment(value string) string {

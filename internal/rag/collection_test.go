@@ -147,6 +147,44 @@ func invoiceRetry() {
 	}
 }
 
+func TestCollectionIndexesDeepNestedFiles(t *testing.T) {
+	t.Parallel()
+
+	rootDir := t.TempDir()
+	indexPath := filepath.Join(rootDir, "indexes", "nested.bleve")
+	projectDir := filepath.Join(rootDir, "project")
+	nestedDir := filepath.Join(projectDir, "src", "billing", "handlers")
+	mustMkdirAll(t, nestedDir)
+
+	mustWriteFile(t, filepath.Join(nestedDir, "retry.go"), `package handlers
+
+func RetryGatewayPayment() {
+	println("deep nested gateway retry")
+}
+`)
+
+	collection, err := NewCollection("nested", "Nested", indexPath)
+	if err != nil {
+		t.Fatalf("NewCollection() error = %v", err)
+	}
+	defer func() { _ = collection.Close() }()
+
+	if err := collection.IndexFolder(projectDir); err != nil {
+		t.Fatalf("IndexFolder() error = %v", err)
+	}
+
+	results, err := collection.Search("deep nested gateway retry", 10)
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("Search() returned no results")
+	}
+	if !strings.Contains(results[0].FilePath, filepath.Join("src", "billing", "handlers", "retry.go")) {
+		t.Fatalf("top result path = %q, want nested file path", results[0].FilePath)
+	}
+}
+
 func TestChunkTextSplitsLongFilesWithOverlap(t *testing.T) {
 	t.Parallel()
 

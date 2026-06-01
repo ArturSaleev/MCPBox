@@ -296,6 +296,104 @@ func TestProjectConnectAggregatesToolsAcrossServers(t *testing.T) {
 	}
 }
 
+func TestProjectConnectOptionsAllowsCrossOriginRequests(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	request := httptest.NewRequest(http.MethodOptions, "/mcp/test-token", nil)
+	request.Host = "127.0.0.1:38180"
+	request.Header.Set("Origin", "http://127.0.0.1:8080")
+	request.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	request.Header.Set("Access-Control-Request-Headers", "content-type")
+	request.Header.Set("Access-Control-Request-Private-Network", "true")
+
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("OPTIONS status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if got := response.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want *", got)
+	}
+	if got := response.Header().Get("Access-Control-Allow-Methods"); got != http.MethodPost {
+		t.Fatalf("Access-Control-Allow-Methods = %q, want %q", got, http.MethodPost)
+	}
+	if got := response.Header().Get("Access-Control-Allow-Headers"); got != "content-type" {
+		t.Fatalf("Access-Control-Allow-Headers = %q, want content-type", got)
+	}
+	if got := response.Header().Get("Access-Control-Allow-Private-Network"); got != "true" {
+		t.Fatalf("Access-Control-Allow-Private-Network = %q, want true", got)
+	}
+}
+
+func TestProjectConnectErrorStillIncludesCORSHeaders(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	request := httptest.NewRequest(http.MethodPost, "/mcp/missing-token", bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
+	request.Host = "127.0.0.1:38180"
+	request.Header.Set("Origin", "http://127.0.0.1:8080")
+	request.Header.Set("Content-Type", "application/json")
+
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("POST status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if got := response.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want *", got)
+	}
+}
+
+func TestAdminHandlerServesProjectConnectPaths(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	project := &models.Project{Name: "Workspace", Description: "Admin handler connect test"}
+	if err := store.CreateProject(ctx, project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	request := httptest.NewRequest(http.MethodPost, "/mcp/"+project.Token, bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
+	request.Host = "127.0.0.1:38180"
+	request.Header.Set("Origin", "http://127.0.0.1:8080")
+	request.Header.Set("Content-Type", "application/json")
+
+	response := httptest.NewRecorder()
+	api.AdminHandler().ServeHTTP(response, request)
+
+	if response.Code == http.StatusNotFound {
+		t.Fatalf("AdminHandler returned 404 for connect path, body = %s", response.Body.String())
+	}
+	if got := response.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want *", got)
+	}
+}
+
 func TestProjectConnectRenamesGenericDatabaseTools(t *testing.T) {
 	t.Parallel()
 
@@ -1488,7 +1586,7 @@ func TestLaunchProjectOllamaCreatesConfigAndOpensTerminal(t *testing.T) {
 		t.Fatalf("ReadFile(%q) error = %v", payload.ConfigPath, err)
 	}
 	config := string(configBytes)
-	if !strings.Contains(config, "url: http://mcpbox.local:38180/mcp") {
+	if !strings.Contains(config, "project-http-stdio") || !strings.Contains(config, "http://mcpbox.local:38180/mcp/") {
 		t.Fatalf("config = %q", config)
 	}
 }
@@ -1646,6 +1744,134 @@ func TestLaunchProjectOllamaWithConnectedKnowledgeBaseOnly(t *testing.T) {
 	}
 }
 
+func TestLlamaCppStatusReportsConfiguration(t *testing.T) {
+	originalLookPath := execLookPath
+	execLookPath = func(file string) (string, error) {
+		if file == "llama-server" {
+			return "/usr/local/bin/llama-server", nil
+		}
+		return "", errors.New("unexpected binary lookup")
+	}
+	defer func() {
+		execLookPath = originalLookPath
+	}()
+
+	t.Setenv("MCPBOX_LLAMACPP_MODEL", "/models/qwen2.5-7b-instruct-q4_k_m.gguf")
+	t.Setenv("MCPBOX_LLAMACPP_PORT", "39333")
+
+	status := detectLlamaCppStatus()
+	if !status.Installed {
+		t.Fatal("Installed = false, want true")
+	}
+	if !status.Configured {
+		t.Fatal("Configured = false, want true")
+	}
+	if status.ModelName != "qwen2.5-7b-instruct-q4_k_m" {
+		t.Fatalf("ModelName = %q", status.ModelName)
+	}
+	if status.ServerURL != "http://127.0.0.1:39333" {
+		t.Fatalf("ServerURL = %q", status.ServerURL)
+	}
+}
+
+func TestLaunchProjectLlamaCppCreatesPromptAndOpensWebUI(t *testing.T) {
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	project := &models.Project{
+		Name:     "Workspace",
+		RootPath: t.TempDir(),
+		Prompt:   "Always call project_prompt first.",
+	}
+	if err := store.CreateProject(context.Background(), project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if err := store.AddServer(context.Background(), &models.MCPServer{
+		ProjectID: project.ID,
+		Name:      "Filesystem",
+		Transport: models.ServerTransportHTTPStream,
+		URL:       "http://127.0.0.1:8999/mcp",
+		IsEnabled: true,
+	}); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	var launchedURL string
+	api.urlLauncher = func(target string) error {
+		launchedURL = target
+		return nil
+	}
+
+	var startedArgs []string
+	originalStartDetachedProcess := startDetachedProcess
+	startDetachedProcess = func(args []string) error {
+		startedArgs = append([]string{}, args...)
+		return nil
+	}
+	defer func() {
+		startDetachedProcess = originalStartDetachedProcess
+	}()
+
+	originalLookPath := execLookPath
+	execLookPath = func(file string) (string, error) {
+		if file == "llama-server" {
+			return "/usr/local/bin/llama-server", nil
+		}
+		return "", errors.New("unexpected binary lookup")
+	}
+	defer func() {
+		execLookPath = originalLookPath
+	}()
+
+	t.Setenv("MCPBOX_LLAMACPP_MODEL", "/models/qwen2.5-7b-instruct-q4_k_m.gguf")
+	t.Setenv("MCPBOX_LLAMACPP_PORT", "39333")
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/projects/"+jsonNumber(project.ID)+"/launch-llamacpp",
+		bytes.NewBufferString(`{"model_path":"/custom/models/qwen3.gguf","model_name":"qwen3-local"}`),
+	)
+	request.Host = "mcpbox.local:38180"
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	if launchedURL != "http://127.0.0.1:39333" {
+		t.Fatalf("launchedURL = %q", launchedURL)
+	}
+	if len(startedArgs) == 0 {
+		t.Fatal("startDetachedProcess was not called")
+	}
+	if !slices.Contains(startedArgs, "--jinja") {
+		t.Fatalf("startedArgs = %#v", startedArgs)
+	}
+
+	var payload llamaCppLaunchResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.ModelName != "qwen3-local" {
+		t.Fatalf("payload.ModelName = %q", payload.ModelName)
+	}
+	if payload.ModelPath != "/custom/models/qwen3.gguf" {
+		t.Fatalf("payload.ModelPath = %q", payload.ModelPath)
+	}
+	if payload.WebUIURL != launchedURL {
+		t.Fatalf("payload.WebUIURL = %q, want %q", payload.WebUIURL, launchedURL)
+	}
+	if payload.CommandPreview == "" {
+		t.Fatal("payload.CommandPreview is empty")
+	}
+}
+
 func TestLaunchProjectLMStudioBuildsDeeplinkAndLaunches(t *testing.T) {
 	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
 	if err != nil {
@@ -1716,7 +1942,7 @@ func TestLaunchProjectLMStudioBuildsDeeplinkAndLaunches(t *testing.T) {
 	if err := json.Unmarshal(configBytes, &config); err != nil {
 		t.Fatalf("json.Unmarshal(config) error = %v", err)
 	}
-	if config["url"] != "http://mcpbox.local:38180/mcp" {
+	if config["url"] != "http://mcpbox.local:38180/mcp/"+project.Token {
 		t.Fatalf("config url = %q", config["url"])
 	}
 }

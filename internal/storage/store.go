@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,7 +18,8 @@ import (
 )
 
 type Store struct {
-	db *gorm.DB
+	db       *gorm.DB
+	dataRoot string
 }
 
 func (s *Store) DB() *gorm.DB {
@@ -35,6 +38,13 @@ func (s *Store) Close() error {
 		return err
 	}
 	return sqlDB.Close()
+}
+
+func (s *Store) DataRoot() string {
+	if s == nil {
+		return ""
+	}
+	return strings.TrimSpace(s.dataRoot)
 }
 
 func NewStore(dsn string) (*Store, error) {
@@ -76,7 +86,38 @@ func NewStore(dsn string) (*Store, error) {
 		return nil, err
 	}
 
-	return &Store{db: db}, nil
+	return &Store{
+		db:       db,
+		dataRoot: resolveDataRoot(dsn),
+	}, nil
+}
+
+func resolveDataRoot(dsn string) string {
+	trimmed := strings.TrimSpace(dsn)
+	if trimmed == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "."
+		}
+		return cwd
+	}
+	if strings.HasPrefix(trimmed, ":") || strings.HasPrefix(trimmed, "file:") {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "."
+		}
+		return cwd
+	}
+
+	absolute, err := filepath.Abs(trimmed)
+	if err != nil {
+		cwd, cwdErr := os.Getwd()
+		if cwdErr != nil {
+			return "."
+		}
+		return cwd
+	}
+	return filepath.Dir(absolute)
 }
 
 func migrateLegacyProjectSchema(db *gorm.DB) error {
@@ -283,6 +324,15 @@ func (s *Store) UpdateProject(ctx context.Context, projectID uint, name, descrip
 		}).Error
 }
 
+func (s *Store) UpdateProjectLlamaCppSettings(ctx context.Context, projectID uint, modelPath, modelName string) error {
+	return s.db.WithContext(ctx).Model(&models.Project{}).
+		Where("id = ?", projectID).
+		Updates(map[string]any{
+			"llama_cpp_model_path": strings.TrimSpace(modelPath),
+			"llama_cpp_model_name": strings.TrimSpace(modelName),
+		}).Error
+}
+
 func (s *Store) DuplicateProject(ctx context.Context, source *models.Project, name string) (*models.Project, error) {
 	if source == nil {
 		return nil, errors.New("source project is required")
@@ -301,11 +351,14 @@ func (s *Store) DuplicateProject(ctx context.Context, source *models.Project, na
 	var duplicatedProjectID uint
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		duplicated := &models.Project{
-			Name:        name,
-			Description: source.Description,
-			RootPath:    source.RootPath,
-			Token:       token,
-			IsPaused:    source.IsPaused,
+			Name:              name,
+			Description:       source.Description,
+			RootPath:          source.RootPath,
+			Token:             token,
+			IsPaused:          source.IsPaused,
+			Prompt:            source.Prompt,
+			LlamaCppModelPath: source.LlamaCppModelPath,
+			LlamaCppModelName: source.LlamaCppModelName,
 		}
 		if err := tx.Create(duplicated).Error; err != nil {
 			return err

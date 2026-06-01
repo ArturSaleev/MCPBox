@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -36,6 +37,9 @@ type Server struct {
 	editionID           string
 	editionName         string
 	editionCapabilities []string
+	connectHost         string
+	connectPort         int
+	uiFS                fs.FS
 	terminalLauncher    func(cwd, shellCommand string) error
 	urlLauncher         func(target string) error
 	mux                 *http.ServeMux
@@ -189,6 +193,8 @@ type projectStatusResponse struct {
 	RootPath              string                         `json:"root_path"`
 	Token                 string                         `json:"token"`
 	IsPaused              bool                           `json:"is_paused"`
+	LlamaCppModelPath     string                         `json:"llama_cpp_model_path"`
+	LlamaCppModelName     string                         `json:"llama_cpp_model_name"`
 	ConnectURL            string                         `json:"connect_url"`
 	ConnectURLs           []string                       `json:"connect_urls"`
 	ConnectionReady       bool                           `json:"connection_ready"`
@@ -272,6 +278,9 @@ type Options struct {
 	EditionID           string
 	EditionName         string
 	EditionCapabilities []string
+	ConnectHost         string
+	ConnectPort         int
+	UIFS                fs.FS
 	HTTPRegistrars      []func(*http.ServeMux)
 }
 
@@ -287,6 +296,9 @@ func NewServerWithInstaller(store *storage.Store, registry *orchestrator.Registr
 		editionID:           strings.TrimSpace(options.EditionID),
 		editionName:         strings.TrimSpace(options.EditionName),
 		editionCapabilities: slices.Clone(options.EditionCapabilities),
+		connectHost:         strings.TrimSpace(options.ConnectHost),
+		connectPort:         options.ConnectPort,
+		uiFS:                options.UIFS,
 		terminalLauncher:    launchTerminalSession,
 		urlLauncher:         launchExternalURL,
 		mux:                 http.NewServeMux(),
@@ -300,6 +312,9 @@ func NewServerWithInstaller(store *storage.Store, registry *orchestrator.Registr
 	if s.editionName == "" {
 		s.editionName = "MCPBox"
 	}
+	if s.uiFS == nil {
+		s.uiFS = defaultUIFS()
+	}
 
 	s.registerRoutes()
 	for _, registrar := range options.HTTPRegistrars {
@@ -311,7 +326,39 @@ func NewServerWithInstaller(store *storage.Store, registry *orchestrator.Registr
 }
 
 func (s *Server) Handler() http.Handler {
-	return s.mux
+	return withCORS(s.mux)
+}
+
+func (s *Server) AdminHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		applyGlobalCORS(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if isConnectPath(r.URL.Path) {
+			withCORS(s.mux).ServeHTTP(w, r)
+			return
+		}
+
+		withCORS(s.mux).ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) ConnectHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		applyGlobalCORS(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.URL.Path == "/healthz" || isConnectPath(r.URL.Path) {
+			withCORS(s.mux).ServeHTTP(w, r)
+			return
+		}
+
+		http.NotFound(w, r)
+	})
 }
 
 func (s *Server) registerRoutes() {
@@ -320,6 +367,8 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/logs", s.handleListLogs)
 	s.mux.HandleFunc("GET /api/logs/metrics", s.handleLogMetrics)
 	s.mux.HandleFunc("GET /api/ollama/status", s.handleOllamaStatus)
+	s.mux.HandleFunc("GET /api/llamacpp/status", s.handleLlamaCppStatus)
+	s.mux.HandleFunc("POST /api/llamacpp/stop", s.handleStopLlamaCpp)
 	s.mux.HandleFunc("GET /api/packages", s.handleInstalledPackageList)
 	s.mux.HandleFunc("DELETE /api/packages/", s.handleInstalledPackageAction)
 	s.mux.HandleFunc("GET /api/catalog/items", s.handleCatalogList)
@@ -519,6 +568,8 @@ func (s *Server) handleProjectAction(w http.ResponseWriter, r *http.Request) {
 		s.handleProjectInstallIntegration(w, r, projectID)
 	case "launch-ollama":
 		s.handleLaunchProjectOllama(w, r, *project)
+	case "launch-llamacpp":
+		s.handleLaunchProjectLlamaCpp(w, r, *project)
 	case "launch-lmstudio":
 		s.handleLaunchProjectLMStudio(w, r, *project)
 	case "pause":
@@ -1060,6 +1111,12 @@ func (s *Server) handleServerToolsUpdate(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
+	applyConnectCORS(w, r)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	token := extractProjectToken(r.URL.Path)
 	if token == "" || token == "." {
 		token = bearerTokenFromRequest(r)
@@ -1143,6 +1200,63 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.Header().Set("Allow", "GET, POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func applyConnectCORS(w http.ResponseWriter, r *http.Request) {
+	applyGlobalCORS(w, r)
+}
+
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		applyGlobalCORS(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func applyGlobalCORS(w http.ResponseWriter, r *http.Request) {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return
+	}
+
+	requestHeaders := strings.TrimSpace(r.Header.Get("Access-Control-Request-Headers"))
+	if requestHeaders == "" {
+		requestHeaders = strings.Join([]string{
+			"Accept",
+			"Authorization",
+			"Content-Type",
+			"Last-Event-ID",
+			"Mcp-Protocol-Version",
+			"Mcp-Session-Id",
+			"X-Requested-With",
+		}, ", ")
+	}
+
+	requestMethod := strings.TrimSpace(r.Header.Get("Access-Control-Request-Method"))
+	if requestMethod == "" {
+		requestMethod = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+	}
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Add("Vary", "Origin")
+	w.Header().Add("Vary", "Access-Control-Request-Method")
+	w.Header().Add("Vary", "Access-Control-Request-Headers")
+	w.Header().Set("Access-Control-Allow-Methods", requestMethod)
+	w.Header().Set("Access-Control-Allow-Headers", requestHeaders)
+	w.Header().Set("Access-Control-Expose-Headers", strings.Join([]string{
+		"Content-Type",
+		"Location",
+		"Mcp-Protocol-Version",
+		"Mcp-Session-Id",
+	}, ", "))
+	w.Header().Set("Access-Control-Max-Age", "86400")
+	if strings.EqualFold(strings.TrimSpace(r.Header.Get("Access-Control-Request-Private-Network")), "true") {
+		w.Header().Set("Access-Control-Allow-Private-Network", "true")
 	}
 }
 
@@ -1288,7 +1402,7 @@ func (s *Server) forwardJSONRPCSync(w http.ResponseWriter, r *http.Request, runn
 }
 
 func (s *Server) handleUI() http.Handler {
-	fileServer := http.FileServer(http.FS(uiFS()))
+	fileServer := http.FileServer(http.FS(s.uiFS))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/mcp/") || strings.HasPrefix(r.URL.Path, "/connect/") {
 			http.NotFound(w, r)
@@ -1296,7 +1410,7 @@ func (s *Server) handleUI() http.Handler {
 		}
 
 		if r.URL.Path == "/" || !strings.Contains(path.Base(r.URL.Path), ".") {
-			http.ServeFileFS(w, r, uiFS(), "index.html")
+			http.ServeFileFS(w, r, s.uiFS, "index.html")
 			return
 		}
 
@@ -1313,6 +1427,8 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 		RootPath:              project.RootPath,
 		Token:                 project.Token,
 		IsPaused:              project.IsPaused,
+		LlamaCppModelPath:     project.LlamaCppModelPath,
+		LlamaCppModelName:     project.LlamaCppModelName,
 		ConnectURL:            firstOrEmpty(connectURLs),
 		ConnectURLs:           connectURLs,
 		ConnectionReady:       s.projectConnectionReady(project),
@@ -1621,6 +1737,12 @@ func (s *Server) connectURL(r *http.Request, token string) string {
 
 func (s *Server) connectURLs(r *http.Request, token string) []string {
 	scheme, host, port := requestAddressParts(r)
+	if strings.TrimSpace(s.connectHost) != "" && !isWildcardHost(s.connectHost) {
+		host = strings.TrimSpace(s.connectHost)
+	}
+	if s.connectPort > 0 {
+		port = strconv.Itoa(s.connectPort)
+	}
 
 	urls := make([]string, 0, 16)
 	seen := make(map[string]struct{})
@@ -1669,7 +1791,7 @@ func (s *Server) connectURLs(r *http.Request, token string) []string {
 }
 
 func (s *Server) connectMessageURL(r *http.Request, token, sessionID string) string {
-	return s.absoluteURL(r, fmt.Sprintf("/mcp/%s?sessionId=%s", token, sessionID))
+	return s.absoluteConnectURL(r, fmt.Sprintf("/mcp/%s?sessionId=%s", token, sessionID))
 }
 
 func (s *Server) absoluteURL(r *http.Request, requestPath string) string {
@@ -1679,6 +1801,30 @@ func (s *Server) absoluteURL(r *http.Request, requestPath string) string {
 	}
 
 	return fmt.Sprintf("%s://%s%s", scheme, joinHostPort(host, port), requestPath)
+}
+
+func (s *Server) absoluteConnectURL(r *http.Request, requestPath string) string {
+	scheme, host, port := requestAddressParts(r)
+	if strings.TrimSpace(s.connectHost) != "" && !isWildcardHost(s.connectHost) {
+		host = strings.TrimSpace(s.connectHost)
+	}
+	if s.connectPort > 0 {
+		port = strconv.Itoa(s.connectPort)
+	}
+	if host == "" {
+		return requestPath
+	}
+
+	return fmt.Sprintf("%s://%s%s", scheme, joinHostPort(host, port), requestPath)
+}
+
+func isConnectPath(requestPath string) bool {
+	return strings.HasPrefix(requestPath, "/mcp/") || strings.HasPrefix(requestPath, "/connect/")
+}
+
+func isWildcardHost(host string) bool {
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	return host == "" || host == "0.0.0.0" || host == "::"
 }
 
 func requestAddressParts(r *http.Request) (scheme, host, port string) {

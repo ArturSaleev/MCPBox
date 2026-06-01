@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"unicode/utf16"
 
@@ -186,12 +187,24 @@ func (s *Server) writeMCPHostConfig(r *http.Request, project models.Project) (st
 	}
 
 	configPath := filepath.Join(configDir, fmt.Sprintf("project-%d.yml", project.ID))
-	content := fmt.Sprintf("mcpServers:\n  mcpbox:\n    type: remote\n    url: %s\n", s.connectURL(r, project.Token))
+	executablePath, err := osExecutable()
+	if err != nil {
+		return "", fmt.Errorf("resolve MCPBox executable: %w", err)
+	}
+	content := fmt.Sprintf(
+		"mcpServers:\n  mcpbox:\n    command:\n      - %s\n      - project-http-stdio\n      - --url\n      - %s\n",
+		quoteYAMLScalar(executablePath),
+		quoteYAMLScalar(s.absoluteConnectURL(r, "/mcp/"+project.Token)),
+	)
 	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
 		return "", fmt.Errorf("write mcphost config: %w", err)
 	}
 
 	return configPath, nil
+}
+
+func quoteYAMLScalar(value string) string {
+	return strconv.Quote(strings.TrimSpace(value))
 }
 
 func buildEmbeddedOllamaLaunchCommand(configPath, model string) (string, string, error) {
