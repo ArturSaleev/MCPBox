@@ -296,6 +296,201 @@ func TestProjectConnectAggregatesToolsAcrossServers(t *testing.T) {
 	}
 }
 
+func TestProjectConnectListsProjectPromptAsMCPPrompt(t *testing.T) {
+	t.Parallel()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode upstream payload: %v", err)
+		}
+
+		method, _ := payload["method"].(string)
+		id := payload["id"]
+
+		switch method {
+		case "initialize":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"protocolVersion": "2025-03-26",
+					"serverInfo":      map[string]any{"name": "dummy", "version": "1.0.0"},
+					"capabilities":    map[string]any{"prompts": map[string]any{}},
+				},
+			})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "prompts/list":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"error": map[string]any{
+					"code":    -32601,
+					"message": "prompts not supported",
+				},
+			})
+		default:
+			t.Fatalf("unexpected upstream method %q", method)
+		}
+	}))
+	defer upstream.Close()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	project := &models.Project{
+		Name:   "Workspace",
+		Prompt: "Always inspect enabled MCP servers before answering.",
+	}
+	if err := store.CreateProject(ctx, project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if err := store.AddServer(ctx, &models.MCPServer{
+		ProjectID: project.ID,
+		Name:      "Dummy",
+		Transport: models.ServerTransportHTTPStream,
+		URL:       upstream.URL,
+		IsEnabled: true,
+	}); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	requestBody := bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"prompts/list","params":{}}`)
+	request := httptest.NewRequest(http.MethodPost, "/mcp/"+project.Token, requestBody)
+	request.Host = "mcpbox.local:38180"
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("connect prompts/list status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Prompts []struct {
+				Name string `json:"name"`
+			} `json:"prompts"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload.Result.Prompts) != 1 {
+		t.Fatalf("len(payload.Result.Prompts) = %d, want 1", len(payload.Result.Prompts))
+	}
+	if payload.Result.Prompts[0].Name != projectPromptName {
+		t.Fatalf("prompt name = %q, want %q", payload.Result.Prompts[0].Name, projectPromptName)
+	}
+}
+
+func TestProjectConnectReturnsProjectPromptViaPromptsGet(t *testing.T) {
+	t.Parallel()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode upstream payload: %v", err)
+		}
+
+		method, _ := payload["method"].(string)
+		id := payload["id"]
+
+		switch method {
+		case "initialize":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"protocolVersion": "2025-03-26",
+					"serverInfo":      map[string]any{"name": "dummy", "version": "1.0.0"},
+					"capabilities":    map[string]any{"prompts": map[string]any{}},
+				},
+			})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "prompts/get":
+			t.Fatal("project prompt should be served by MCPBox without upstream prompts/get")
+		default:
+			t.Fatalf("unexpected upstream method %q", method)
+		}
+	}))
+	defer upstream.Close()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	project := &models.Project{
+		Name:   "Workspace",
+		Prompt: "Always inspect enabled MCP servers before answering.",
+	}
+	if err := store.CreateProject(ctx, project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if err := store.AddServer(ctx, &models.MCPServer{
+		ProjectID: project.ID,
+		Name:      "Dummy",
+		Transport: models.ServerTransportHTTPStream,
+		URL:       upstream.URL,
+		IsEnabled: true,
+	}); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	requestBody := bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"project_prompt"}}`)
+	request := httptest.NewRequest(http.MethodPost, "/mcp/"+project.Token, requestBody)
+	request.Host = "mcpbox.local:38180"
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("connect prompts/get status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"messages"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload.Result.Messages) != 1 {
+		t.Fatalf("len(payload.Result.Messages) = %d, want 1", len(payload.Result.Messages))
+	}
+	if payload.Result.Messages[0].Role != "user" {
+		t.Fatalf("message role = %q, want user", payload.Result.Messages[0].Role)
+	}
+	if payload.Result.Messages[0].Content.Type != "text" {
+		t.Fatalf("content type = %q, want text", payload.Result.Messages[0].Content.Type)
+	}
+	if payload.Result.Messages[0].Content.Text != project.Prompt {
+		t.Fatalf("content text = %q, want %q", payload.Result.Messages[0].Content.Text, project.Prompt)
+	}
+}
+
 func TestProjectConnectOptionsAllowsCrossOriginRequests(t *testing.T) {
 	t.Parallel()
 
@@ -1852,6 +2047,18 @@ func TestLaunchProjectLlamaCppCreatesPromptAndOpensWebUI(t *testing.T) {
 	}
 	if !slices.Contains(startedArgs, "--jinja") {
 		t.Fatalf("startedArgs = %#v", startedArgs)
+	}
+	systemPromptFlag := slices.Index(startedArgs, "--system-prompt-file")
+	if systemPromptFlag < 0 || systemPromptFlag+1 >= len(startedArgs) {
+		t.Fatalf("startedArgs missing --system-prompt-file: %#v", startedArgs)
+	}
+	systemPromptPath := startedArgs[systemPromptFlag+1]
+	systemPromptPayload, err := os.ReadFile(systemPromptPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q) error = %v", systemPromptPath, err)
+	}
+	if strings.TrimSpace(string(systemPromptPayload)) != project.Prompt {
+		t.Fatalf("system prompt file content = %q, want %q", strings.TrimSpace(string(systemPromptPayload)), project.Prompt)
 	}
 
 	var payload llamaCppLaunchResponse

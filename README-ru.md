@@ -31,8 +31,16 @@ MCPBox - это control plane на Go для MCP-серверов. Он позв
 - Audit log для MCP-трафика и управляющих действий
 - Пауза проекта и включение или отключение отдельных серверов
 - Встроенный Market / Catalog для синхронизации, установки, проверки и удаления интеграций
-- Запуск локального `ollama + MCPBox` в один клик через встроенный `mcphost/sdk`
+- Запуск локальных сценариев Ollama и llama.cpp в один клик
 - Один бинарный файл со встроенным React UI и локальной SQLite-базой
+
+## Что Нового В 1.2.3
+
+- Project prompt теперь доступен и как прежний MCP tool `get_project_env_and_rules`, и как стандартный MCP prompt `project_prompt`
+- Project endpoint продолжает отвечать на `prompts/list`, даже если отдельный upstream MCP-сервер явно возвращает `prompts not supported`
+- Запуск llama.cpp теперь записывает project prompt во временный system prompt файл и стартует `llama-server` с `--system-prompt-file`
+- Управляемый llama.cpp сервер перезапускается при смене модели или project prompt, чтобы изменения prompt применялись при следующем запуске
+- Исправлена сборка на Windows для managed llama.cpp launcher: Unix-логика process group вынесена в platform-specific файлы
 
 ## Что Нового В 1.2.2
 
@@ -114,6 +122,13 @@ MCPBox - это control plane на Go для MCP-серверов. Он позв
 3. Выберите `Add to LM Studio`.
 4. Подтвердите открытие deeplink в LM Studio, когда ОС покажет запрос.
 
+Для локального тестирования через llama.cpp Web UI:
+1. Убедитесь, что `llama-server` установлен и доступен в `PATH`.
+2. Укажите `MCPBOX_LLAMACPP_MODEL` или выберите локальную `.gguf` модель в диалоге запуска.
+3. Откройте проект с включенным MCP-сервером или подключенной базой знаний.
+4. Нажмите `Запустить` и выберите действие llama.cpp.
+5. MCPBox запустит `llama-server`, применит project prompt как system prompt и откроет Web UI.
+
 ## Сборка Из Исходников
 
 Требования:
@@ -150,4 +165,5 @@ go run .
 - Flow `go_install` в `1.2.2` предполагает, что интеграцию можно установить через `go install module/path@version` и выдать как конкретный бинарник entry point.
 - Маскировка секретов работает в UI и в catalog install flow. Уже существующие ручные серверы, которые передают секреты прямо в аргументах команды, лучше перевести на env-переменные для полной безопасности на уровне process list.
 - Кнопка запуска Ollama показывается только если `ollama` установлена на компьютере.
+- Для запуска llama.cpp нужен `llama-server`; project prompt передается через `--system-prompt-file` и дополнительно публикуется через MCP `prompts/list` как `project_prompt`.
 - Inspection доступен только для локальных `stdio` серверов.

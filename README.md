@@ -31,8 +31,16 @@ Key capabilities:
 - Audit log for MCP traffic and control actions
 - Project pause/resume and per-server enable/disable controls
 - Embedded Market / Catalog flow for syncing, installing, verifying, and uninstalling integrations
-- One-click Ollama launcher for local MCP testing through embedded `mcphost/sdk`
+- One-click Ollama and llama.cpp launchers for local MCP testing
 - Single-binary deployment with embedded React UI and local SQLite storage
+
+## What Is New In 1.2.3
+
+- Project prompts are now exposed both as the existing `get_project_env_and_rules` MCP tool and as a standard MCP prompt named `project_prompt`
+- The project MCP endpoint now keeps `prompts/list` working even when an upstream MCP server clearly reports that prompts are not supported
+- llama.cpp project launch now writes the project prompt to a temporary system prompt file and starts `llama-server` with `--system-prompt-file`
+- Managed llama.cpp servers restart when the selected model or project prompt changes, so prompt edits are applied on the next launch
+- Windows build compatibility was fixed for the managed llama.cpp process launcher by moving Unix process-group handling into platform-specific files
 
 ## What Is New In 1.2.2
 
@@ -114,6 +122,13 @@ For LM Studio:
 3. Choose `Add to LM Studio`.
 4. Confirm the deeplink in LM Studio when your OS opens it.
 
+For local llama.cpp Web UI testing:
+1. Make sure `llama-server` is installed and available in `PATH`.
+2. Set `MCPBOX_LLAMACPP_MODEL` or choose a local `.gguf` model in the launch dialog.
+3. Open a project with an enabled MCP server or connected knowledge base.
+4. Click `Launch Project` and choose the llama.cpp action.
+5. MCPBox starts `llama-server`, applies the project prompt as a system prompt, and opens the Web UI.
+
 ## Build From Source
 
 Requirements:
@@ -150,4 +165,5 @@ Default port: `38180`
 - The `go_install` package flow in `1.2.2` assumes the target integration can be installed through `go install module/path@version` and exposed through a concrete binary entry point.
 - Secret masking is applied in the UI and catalog install flow. Existing manually configured servers that still pass secrets directly in command arguments should be migrated to environment variables for full process-list safety.
 - The Ollama launcher is shown only when `ollama` is installed on the machine.
+- The llama.cpp launcher requires `llama-server`; project prompts are passed through `--system-prompt-file` and are also exposed through MCP `prompts/list` as `project_prompt`.
 - Local server inspection is available for `stdio` servers only.

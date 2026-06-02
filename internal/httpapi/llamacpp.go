@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,10 +9,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/ArturSaleev/MCPBox/internal/models"
@@ -46,11 +45,12 @@ type llamaCppLaunchRequest struct {
 }
 
 type llamaCppManagedState struct {
-	PID       int    `json:"pid"`
-	ModelPath string `json:"model_path"`
-	ModelName string `json:"model_name"`
-	ServerURL string `json:"server_url"`
-	StartedAt string `json:"started_at"`
+	PID                int    `json:"pid"`
+	ModelPath          string `json:"model_path"`
+	ModelName          string `json:"model_name"`
+	ServerURL          string `json:"server_url"`
+	SystemPromptDigest string `json:"system_prompt_digest,omitempty"`
+	StartedAt          string `json:"started_at"`
 }
 
 var startDetachedProcess = launchDetachedProcess
@@ -104,7 +104,13 @@ func (s *Server) handleLaunchProjectLlamaCpp(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	commandPreview, args, err := buildEmbeddedLlamaCppLaunchCommand(status)
+	systemPromptFile, systemPromptDigest, err := prepareProjectLlamaCppSystemPrompt(project)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	commandPreview, args, err := buildEmbeddedLlamaCppLaunchCommand(status, systemPromptFile)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
@@ -119,7 +125,7 @@ func (s *Server) handleLaunchProjectLlamaCpp(w http.ResponseWriter, r *http.Requ
 		truncateDetail(fmt.Sprintf("model=%s | preview=%s", status.ModelPath, commandPreview)),
 	)
 
-	if shouldRestartLlamaCppServer(status) {
+	if shouldRestartLlamaCppServer(status, systemPromptDigest) {
 		if err := stopManagedLlamaCppServer(); err != nil && !errors.Is(err, os.ErrNotExist) {
 			writeError(w, http.StatusBadGateway, err)
 			return
@@ -129,11 +135,12 @@ func (s *Server) handleLaunchProjectLlamaCpp(w http.ResponseWriter, r *http.Requ
 			return
 		}
 		if err := writeManagedLlamaCppState(llamaCppManagedState{
-			PID:       managedPIDFromArgs(args),
-			ModelPath: status.ModelPath,
-			ModelName: status.ModelName,
-			ServerURL: strings.TrimRight(status.ServerURL, "/"),
-			StartedAt: time.Now().Format(time.RFC3339),
+			PID:                managedPIDFromArgs(args),
+			ModelPath:          status.ModelPath,
+			ModelName:          status.ModelName,
+			ServerURL:          strings.TrimRight(status.ServerURL, "/"),
+			SystemPromptDigest: systemPromptDigest,
+			StartedAt:          time.Now().Format(time.RFC3339),
 		}); err != nil {
 			writeError(w, http.StatusInternalServerError, err)
 			return
@@ -225,7 +232,7 @@ func llamaCppServerURL() string {
 	return "http://127.0.0.1:" + port
 }
 
-func buildEmbeddedLlamaCppLaunchCommand(status llamaCppStatusResponse) (string, []string, error) {
+func buildEmbeddedLlamaCppLaunchCommand(status llamaCppStatusResponse, systemPromptFile string) (string, []string, error) {
 	llamaServerPath, err := execLookPath("llama-server")
 	if err != nil {
 		return "", nil, errors.New("llama-server is not installed or not available in PATH")
@@ -241,11 +248,11 @@ func buildEmbeddedLlamaCppLaunchCommand(status llamaCppStatusResponse) (string, 
 		return "", nil, err
 	}
 
-	serverCommand, args := buildLlamaCppServerCommand(llamaServerPath, modelPath, status.ChatTemplateFile, serverPort)
+	serverCommand, args := buildLlamaCppServerCommand(llamaServerPath, modelPath, status.ChatTemplateFile, systemPromptFile, serverPort)
 	return serverCommand, args, nil
 }
 
-func buildLlamaCppServerCommand(binaryPath, modelPath, chatTemplateFile string, port int) (string, []string) {
+func buildLlamaCppServerCommand(binaryPath, modelPath, chatTemplateFile, systemPromptFile string, port int) (string, []string) {
 	args := []string{
 		"-m", modelPath,
 		"--host", "127.0.0.1",
@@ -262,12 +269,34 @@ func buildLlamaCppServerCommand(binaryPath, modelPath, chatTemplateFile string, 
 	if strings.TrimSpace(chatTemplateFile) != "" {
 		args = append(args, "--chat-template-file", strings.TrimSpace(chatTemplateFile))
 	}
+	if strings.TrimSpace(systemPromptFile) != "" {
+		args = append(args, "--system-prompt-file", strings.TrimSpace(systemPromptFile))
+	}
 
 	previewParts := []string{shellQuote(binaryPath)}
 	for _, arg := range args {
 		previewParts = append(previewParts, shellQuote(arg))
 	}
 	return strings.Join(previewParts, " "), append([]string{binaryPath}, args...)
+}
+
+func prepareProjectLlamaCppSystemPrompt(project models.Project) (string, string, error) {
+	promptText := strings.TrimSpace(project.Prompt)
+	if promptText == "" {
+		return "", "", nil
+	}
+
+	promptDir := filepath.Join(os.TempDir(), "mcpbox-llamacpp")
+	if err := os.MkdirAll(promptDir, 0o755); err != nil {
+		return "", "", fmt.Errorf("create llama.cpp prompt directory: %w", err)
+	}
+
+	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(promptText)))
+	promptPath := filepath.Join(promptDir, fmt.Sprintf("project-%d-system-prompt.txt", project.ID))
+	if err := os.WriteFile(promptPath, []byte(promptText+"\n"), 0o600); err != nil {
+		return "", "", fmt.Errorf("write llama.cpp system prompt: %w", err)
+	}
+	return promptPath, digest, nil
 }
 
 func llamaCppPort() (int, error) {
@@ -315,9 +344,7 @@ func launchDetachedProcess(args []string) error {
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.Stdin = nil
-	if runtime.GOOS != "windows" {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	}
+	configureDetachedLlamaCppCmd(cmd)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start llama-server: %w", err)
 	}
@@ -332,7 +359,7 @@ func managedPIDFromArgs(_ []string) int {
 	return lastManagedPID
 }
 
-func shouldRestartLlamaCppServer(status llamaCppStatusResponse) bool {
+func shouldRestartLlamaCppServer(status llamaCppStatusResponse, systemPromptDigest string) bool {
 	serverURL := strings.TrimRight(strings.TrimSpace(status.ServerURL), "/")
 	if !llamaCppServerHealthy(serverURL) {
 		return true
@@ -341,7 +368,8 @@ func shouldRestartLlamaCppServer(status llamaCppStatusResponse) bool {
 	if err != nil || state == nil {
 		return false
 	}
-	return strings.TrimSpace(state.ModelPath) != strings.TrimSpace(status.ModelPath)
+	return strings.TrimSpace(state.ModelPath) != strings.TrimSpace(status.ModelPath) ||
+		strings.TrimSpace(state.SystemPromptDigest) != strings.TrimSpace(systemPromptDigest)
 }
 
 func managedLlamaCppStatePath() string {
@@ -385,15 +413,9 @@ func stopManagedLlamaCppServer() error {
 	if err != nil {
 		return fmt.Errorf("find llama.cpp process: %w", err)
 	}
-	if runtime.GOOS == "windows" {
-		if err := process.Kill(); err != nil {
-			return fmt.Errorf("kill llama.cpp process: %w", err)
-		}
-	} else {
-		if err := syscall.Kill(-state.PID, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
-			if killErr := process.Kill(); killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
-				return fmt.Errorf("stop llama.cpp process: %w", err)
-			}
+	if err := terminateDetachedLlamaCppProcess(process, state.PID); err != nil {
+		if !errors.Is(err, os.ErrProcessDone) {
+			return fmt.Errorf("stop llama.cpp process: %w", err)
 		}
 	}
 	_ = os.Remove(managedLlamaCppStatePath())
