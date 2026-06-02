@@ -54,6 +54,10 @@ type llamaCppManagedState struct {
 }
 
 var startDetachedProcess = launchDetachedProcess
+var waitForStartedLlamaCpp = waitForLlamaCppServer
+var supportsSystemPromptFile = llamaCppSupportsSystemPromptFile
+
+const llamaCppStartupTimeout = 12 * time.Second
 
 func (s *Server) handleLlamaCppStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, detectLlamaCppStatus())
@@ -143,6 +147,11 @@ func (s *Server) handleLaunchProjectLlamaCpp(w http.ResponseWriter, r *http.Requ
 			StartedAt:          time.Now().Format(time.RFC3339),
 		}); err != nil {
 			writeError(w, http.StatusInternalServerError, err)
+			return
+		}
+		if err := waitForStartedLlamaCpp(strings.TrimRight(status.ServerURL, "/"), llamaCppStartupTimeout); err != nil {
+			_ = stopManagedLlamaCppServer()
+			writeError(w, http.StatusBadGateway, err)
 			return
 		}
 	}
@@ -248,6 +257,10 @@ func buildEmbeddedLlamaCppLaunchCommand(status llamaCppStatusResponse, systemPro
 		return "", nil, err
 	}
 
+	if strings.TrimSpace(systemPromptFile) != "" && !supportsSystemPromptFile(llamaServerPath) {
+		systemPromptFile = ""
+	}
+
 	serverCommand, args := buildLlamaCppServerCommand(llamaServerPath, modelPath, status.ChatTemplateFile, systemPromptFile, serverPort)
 	return serverCommand, args, nil
 }
@@ -278,6 +291,15 @@ func buildLlamaCppServerCommand(binaryPath, modelPath, chatTemplateFile, systemP
 		previewParts = append(previewParts, shellQuote(arg))
 	}
 	return strings.Join(previewParts, " "), append([]string{binaryPath}, args...)
+}
+
+func llamaCppSupportsSystemPromptFile(binaryPath string) bool {
+	cmd := execCommand(binaryPath, "--help")
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(output), "--system-prompt-file")
 }
 
 func prepareProjectLlamaCppSystemPrompt(project models.Project) (string, string, error) {
@@ -326,6 +348,45 @@ func llamaCppServerHealthy(serverURL string) bool {
 	defer response.Body.Close()
 	_, _ = io.Copy(io.Discard, response.Body)
 	return response.StatusCode == http.StatusOK
+}
+
+func waitForLlamaCppServer(serverURL string, timeout time.Duration) error {
+	serverURL = strings.TrimRight(strings.TrimSpace(serverURL), "/")
+	if serverURL == "" {
+		return errors.New("llama.cpp server URL is empty")
+	}
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if llamaCppServerHealthy(serverURL) {
+			return nil
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	logTail := readLlamaCppLogTail()
+	if logTail != "" {
+		return fmt.Errorf("llama-server did not become healthy within %s; log tail: %s", timeout.String(), logTail)
+	}
+	return fmt.Errorf("llama-server did not become healthy within %s", timeout.String())
+}
+
+func readLlamaCppLogTail() string {
+	payload, err := os.ReadFile(filepath.Join(os.TempDir(), "mcpbox-llamacpp.log"))
+	if err != nil || len(payload) == 0 {
+		return ""
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(payload)), "\n")
+	if len(lines) > 8 {
+		lines = lines[len(lines)-8:]
+	}
+
+	tail := strings.TrimSpace(strings.Join(lines, " | "))
+	if len(tail) > 500 {
+		tail = tail[len(tail)-500:]
+	}
+	return tail
 }
 
 func launchDetachedProcess(args []string) error {

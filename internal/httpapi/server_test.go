@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ArturSaleev/MCPBox/internal/installer"
 	"github.com/ArturSaleev/MCPBox/internal/models"
@@ -2010,6 +2011,22 @@ func TestLaunchProjectLlamaCppCreatesPromptAndOpensWebUI(t *testing.T) {
 	}
 	defer func() {
 		startDetachedProcess = originalStartDetachedProcess
+	}()
+
+	originalWaitForStartedLlamaCpp := waitForStartedLlamaCpp
+	waitForStartedLlamaCpp = func(_ string, _ time.Duration) error {
+		return nil
+	}
+	defer func() {
+		waitForStartedLlamaCpp = originalWaitForStartedLlamaCpp
+	}()
+
+	originalSupportsSystemPromptFile := supportsSystemPromptFile
+	supportsSystemPromptFile = func(_ string) bool {
+		return true
+	}
+	defer func() {
+		supportsSystemPromptFile = originalSupportsSystemPromptFile
 	}()
 
 	originalLookPath := execLookPath

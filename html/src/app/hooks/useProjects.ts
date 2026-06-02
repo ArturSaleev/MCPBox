@@ -120,9 +120,14 @@ export function useProjects(messages: { requestFailed: string; projectCreated: s
 
     setUpdatingPrompt(true);
     try {
-      await apiRequest<void>(`/api/projects/${selectedProject.project_id}/prompt`, () => messages.requestFailed, {
+      await apiRequest<void>(`/api/projects/${selectedProject.project_id}`, () => messages.requestFailed, {
         method: 'PUT',
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({
+          name: selectedProject.name,
+          description: selectedProject.description,
+          root_path: selectedProject.root_path,
+          prompt,
+        }),
       });
       await loadProjects();
       toast.success(messages.projectUpdated);

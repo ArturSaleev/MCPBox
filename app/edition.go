@@ -8,7 +8,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Edition describes one distributable MCPBox flavor such as Free or Pro.
+// Edition describes one distributable MCPBox build configuration.
 type Edition struct {
 	ID             string
 	Name           string
@@ -44,7 +44,7 @@ type StartupHook func(ctx context.Context, runtime *RuntimeContext) error
 // HTTPRegistrar lets a caller extend the shared HTTP server without forking it.
 type HTTPRegistrar func(runtime *RuntimeContext, mux *http.ServeMux)
 
-// FreeEdition returns the public MCPBox edition metadata.
+// FreeEdition returns the default MCPBox build metadata.
 func FreeEdition() Edition {
 	return Edition{
 		ID:         "free",

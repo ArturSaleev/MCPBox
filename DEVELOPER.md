@@ -13,7 +13,7 @@ Today MCPBox is:
 - a project-based organizer for local and remote MCP backends
 - an aggregation endpoint for enabled servers inside a project
 - an operator UI for project lifecycle, server lifecycle, inspection, health checks, and logging
-- a reusable core module for future edition-specific builds
+- a reusable core module for the current MCPBox build
 
 Today MCPBox is not:
 - a multi-user platform with auth and roles
@@ -101,19 +101,14 @@ Knowledge Base note:
 - `Add to LM Studio` action from the project UI
 - English and Russian localization
 
-## Edition Architecture
+## Runtime Architecture
 
-The public repository now acts as the shared core for both Free and future Pro builds.
+The repository contains both the application entrypoint and the reusable runtime used by the current MCPBox build.
 
 Current structure:
-- root `main.go` builds the Free edition
-- [`app`](./app) exposes the reusable application runtime for external composition
-- `GET /api/meta` returns edition identity and capabilities for edition-aware integrations or UI flows
-
-Expected Pro workflow:
-- `github.com/ArturSaleev/MCPBox` remains the source of truth for shared code
-- a private `mcpboxpro` repository imports the public `app` package instead of copying the project
-- Pro-specific HTTP routes can be registered through edition registrars
+- root `main.go` starts the default MCPBox application
+- [`app`](./app) exposes the reusable application runtime for local composition inside this repository
+- `GET /api/meta` returns build identity and capabilities for UI flows and integrations
 
 
 ## Transport Model
