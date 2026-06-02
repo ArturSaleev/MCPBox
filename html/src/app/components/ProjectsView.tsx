@@ -5,8 +5,10 @@ import { Server } from 'lucide-react';
 import { dictionaries } from '../i18n';
 import { ProjectKnowledgePanel } from './ProjectKnowledgePanel';
 import { ProjectLaunchPanel } from './ProjectLaunchPanel';
+import { ProjectPromptPanel } from './ProjectPromptPanel';
 import { ProjectServerDialogs } from './ProjectServerDialogs';
 import { ProjectServersPanel } from './ProjectServersPanel';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 
 type KeyValuePair = {
   key: string;
@@ -425,55 +427,105 @@ export function ProjectsView({
         startDuplicateProject={startDuplicateProject}
         startEditProject={startEditProject}
         deleteProject={deleteProject}
-        updateProjectPrompt={updateProjectPrompt}
-        updatingPrompt={updatingPrompt}
       />
 
-      <ProjectKnowledgePanel
-        labels={labels}
-        messages={messages}
-        connectRAGCollectionOpen={connectRAGCollectionOpen}
-        setConnectRAGCollectionOpen={setConnectRAGCollectionOpen}
-        availableRAGCollections={availableRAGCollections}
-        connectRAGCollectionToProject={connectRAGCollectionToProject}
-        linkingCollectionId={linkingCollectionId}
-        selectedProject={selectedProject}
-        disconnectRAGCollectionFromProject={disconnectRAGCollectionFromProject}
-        busyProjectId={busyProjectId}
-      />
+      <Tabs defaultValue="mcp" className="gap-5">
+        <TabsList className="grid h-auto w-full grid-cols-3 rounded-2xl border border-border bg-card p-1.5">
+          <TabsTrigger
+            className="h-auto rounded-xl px-4 py-3 text-sm font-semibold text-muted-foreground transition-all data-[state=active]:border-electric-blue data-[state=active]:bg-electric-blue data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-electric-blue/20"
+            value="mcp"
+          >
+            <span className="flex items-center gap-2">
+              <span>MCP</span>
+              <span className="rounded-full bg-background/80 px-2 py-0.5 text-xs text-foreground/70 data-[state=active]:bg-white/20 data-[state=active]:text-white">
+                {selectedProject.servers.length}
+              </span>
+            </span>
+          </TabsTrigger>
+          <TabsTrigger
+            className="h-auto rounded-xl px-4 py-3 text-sm font-semibold text-muted-foreground transition-all data-[state=active]:border-electric-blue data-[state=active]:bg-electric-blue data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-electric-blue/20"
+            value="rag"
+          >
+            <span className="flex items-center gap-2">
+              <span>RAG</span>
+              <span className="rounded-full bg-background/80 px-2 py-0.5 text-xs text-foreground/70 data-[state=active]:bg-white/20 data-[state=active]:text-white">
+                {selectedProject.rag_collections.length}
+              </span>
+            </span>
+          </TabsTrigger>
+          <TabsTrigger
+            className="h-auto rounded-xl px-4 py-3 text-sm font-semibold text-muted-foreground transition-all data-[state=active]:border-electric-blue data-[state=active]:bg-electric-blue data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-electric-blue/20"
+            value="prompt"
+          >
+            <span className="flex items-center gap-2">
+              <span>Prompt</span>
+              <span className="rounded-full bg-background/80 px-2 py-0.5 text-xs text-foreground/70 data-[state=active]:bg-white/20 data-[state=active]:text-white">
+                {selectedProject.prompt.trim() ? '1' : '0'}
+              </span>
+            </span>
+          </TabsTrigger>
+        </TabsList>
 
-      <ProjectServersPanel
-        labels={labels}
-        messages={messages}
-        selectedProject={selectedProject}
-        addServerOpen={addServerOpen}
-        setAddServerOpen={setAddServerOpen}
-        editingServerId={editingServerId}
-        resetServerEditor={resetServerEditor}
-        serverForm={serverForm}
-        updateServerForm={updateServerForm}
-        updateStringListField={updateStringListField}
-        removeStringListField={removeStringListField}
-        addStringListField={addStringListField}
-        updateKeyValueField={updateKeyValueField}
-        removeKeyValueField={removeKeyValueField}
-        addKeyValueField={addKeyValueField}
-        updateServerLastArg={updateServerLastArg}
-        editingServerIntegrationCatalogItemId={editingServerIntegrationCatalogItemId}
-        addingServer={addingServer}
-        addServer={addServer}
-        busyServerId={busyServerId}
-        checkServerHealth={checkServerHealth}
-        runServerAction={runServerAction}
-        openAuthModal={openAuthModal}
-        openServerTools={openServerTools}
-        serverToolsLoadingId={serverToolsLoadingId}
-        inspectServer={inspectServer}
-        inspectingServerId={inspectingServerId}
-        startEditServer={startEditServer}
-        setServerEnabled={setServerEnabled}
-        deleteServer={deleteServer}
-      />
+        <TabsContent value="mcp" className="space-y-6">
+          <ProjectServersPanel
+            labels={labels}
+            messages={messages}
+            selectedProject={selectedProject}
+            addServerOpen={addServerOpen}
+            setAddServerOpen={setAddServerOpen}
+            editingServerId={editingServerId}
+            resetServerEditor={resetServerEditor}
+            serverForm={serverForm}
+            updateServerForm={updateServerForm}
+            updateStringListField={updateStringListField}
+            removeStringListField={removeStringListField}
+            addStringListField={addStringListField}
+            updateKeyValueField={updateKeyValueField}
+            removeKeyValueField={removeKeyValueField}
+            addKeyValueField={addKeyValueField}
+            updateServerLastArg={updateServerLastArg}
+            editingServerIntegrationCatalogItemId={editingServerIntegrationCatalogItemId}
+            addingServer={addingServer}
+            addServer={addServer}
+            busyServerId={busyServerId}
+            checkServerHealth={checkServerHealth}
+            runServerAction={runServerAction}
+            openAuthModal={openAuthModal}
+            openServerTools={openServerTools}
+            serverToolsLoadingId={serverToolsLoadingId}
+            inspectServer={inspectServer}
+            inspectingServerId={inspectingServerId}
+            startEditServer={startEditServer}
+            setServerEnabled={setServerEnabled}
+            deleteServer={deleteServer}
+          />
+        </TabsContent>
+
+        <TabsContent value="rag">
+          <ProjectKnowledgePanel
+            labels={labels}
+            messages={messages}
+            connectRAGCollectionOpen={connectRAGCollectionOpen}
+            setConnectRAGCollectionOpen={setConnectRAGCollectionOpen}
+            availableRAGCollections={availableRAGCollections}
+            connectRAGCollectionToProject={connectRAGCollectionToProject}
+            linkingCollectionId={linkingCollectionId}
+            selectedProject={selectedProject}
+            disconnectRAGCollectionFromProject={disconnectRAGCollectionFromProject}
+            busyProjectId={busyProjectId}
+          />
+        </TabsContent>
+
+        <TabsContent value="prompt">
+          <ProjectPromptPanel
+            labels={labels}
+            messages={messages}
+            selectedProject={selectedProject}
+            updateProjectPrompt={updateProjectPrompt}
+            updatingPrompt={updatingPrompt}
+          />
+        </TabsContent>
+      </Tabs>
 
       <ProjectServerDialogs
         labels={labels}

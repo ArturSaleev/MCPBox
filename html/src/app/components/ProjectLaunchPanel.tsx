@@ -84,8 +84,6 @@ type ProjectLaunchPanelProps = {
   startDuplicateProject: () => void;
   startEditProject: () => void;
   deleteProject: (projectId: number) => void | Promise<void>;
-  updateProjectPrompt: (prompt: string) => void | Promise<void>;
-  updatingPrompt: boolean;
 };
 
 export function ProjectLaunchPanel({
@@ -130,8 +128,6 @@ export function ProjectLaunchPanel({
   startDuplicateProject,
   startEditProject,
   deleteProject,
-  updateProjectPrompt,
-  updatingPrompt,
 }: ProjectLaunchPanelProps) {
   const hasSavedLlamaCppModel =
     selectedLlamaCppModelPath.trim() !== '' ||
@@ -151,29 +147,6 @@ export function ProjectLaunchPanel({
               <p className="mt-2 max-w-2xl text-muted-foreground">
                 {selectedProject.description || messages.overviewFallbackDescription}
               </p>
-              <div className="mt-4">
-                <label className="block text-sm font-medium">{labels.prompt}</label>
-                <textarea
-                  defaultValue={selectedProject.prompt || ''}
-                  disabled={updatingPrompt}
-                  className="mt-2 min-h-[100px] w-full rounded-lg border border-border bg-background px-4 py-3 text-sm transition-colors focus:border-electric-blue focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-                  placeholder={labels.prompt}
-                  id="project-prompt"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const textarea = document.getElementById('project-prompt') as HTMLTextAreaElement;
-                    if (textarea) {
-                      void updateProjectPrompt(textarea.value);
-                    }
-                  }}
-                  disabled={updatingPrompt}
-                  className="mt-2 inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {updatingPrompt ? labels.saving : labels.save}
-                </button>
-              </div>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-4">

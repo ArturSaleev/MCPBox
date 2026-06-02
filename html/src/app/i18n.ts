@@ -656,6 +656,8 @@ export const dictionaries: Record<Language, Dictionary> = {
       disabledToolsBadge: (count: number) => `${count} tools off`,
       launchProjectDescription:
         'Choose how you want to start working with this project locally.',
+      projectPromptDescription:
+        'Define the shared instruction that connected MCP clients should receive for this project.',
       ollamaNotInstalled: 'Ollama is not installed or not available in PATH.',
       llamaCppNotInstalled: 'llama-server is not installed or not available in PATH.',
       llamaCppNotConfigured: 'Set MCPBOX_LLAMACPP_MODEL to a local GGUF file to enable llama.cpp launch.',
@@ -1002,6 +1004,8 @@ export const dictionaries: Record<Language, Dictionary> = {
       disabledToolsBadge: (count: number) => `${count} tools выкл`,
       launchProjectDescription:
         'Выберите, как вы хотите запускать этот проект локально.',
+      projectPromptDescription:
+        'Задайте общую инструкцию, которую подключенные MCP-клиенты должны получать для этого проекта.',
       ollamaNotInstalled: 'Ollama не установлена или недоступна в PATH.',
       llamaCppNotInstalled: 'llama-server не установлен или недоступен в PATH.',
       llamaCppNotConfigured: 'Укажите MCPBOX_LLAMACPP_MODEL на локальный GGUF-файл, чтобы включить запуск llama.cpp.',
