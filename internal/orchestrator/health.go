@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/models"
 )
 
 type HealthTraceFunc func(event, detail string)

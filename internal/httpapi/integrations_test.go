@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/models"
 )
 
 func TestBuildInstalledIntegrationDockerRuntime(t *testing.T) {

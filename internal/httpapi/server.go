@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -23,24 +24,30 @@ import (
 	"sync"
 	"time"
 
-	"MCPBox/internal/installer"
-	"MCPBox/internal/models"
-	"MCPBox/internal/orchestrator"
-	"MCPBox/internal/storage"
+	"github.com/ArturSaleev/MCPBox/internal/installer"
+	"github.com/ArturSaleev/MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/orchestrator"
+	"github.com/ArturSaleev/MCPBox/internal/storage"
 )
 
 type Server struct {
-	store              *storage.Store
-	registry           *orchestrator.Registry
-	installer          *installer.Service
-	terminalLauncher   func(cwd, shellCommand string) error
-	urlLauncher        func(target string) error
-	mux                *http.ServeMux
-	sessionMu          sync.RWMutex
-	sessions           map[string]connectSession
-	oauthMu            sync.RWMutex
-	oauth              map[string]oauthSession
-	initializedServers map[uint]bool
+	store               *storage.Store
+	registry            *orchestrator.Registry
+	installer           *installer.Service
+	editionID           string
+	editionName         string
+	editionCapabilities []string
+	connectHost         string
+	connectPort         int
+	uiFS                fs.FS
+	terminalLauncher    func(cwd, shellCommand string) error
+	urlLauncher         func(target string) error
+	mux                 *http.ServeMux
+	sessionMu           sync.RWMutex
+	sessions            map[string]connectSession
+	oauthMu             sync.RWMutex
+	oauth               map[string]oauthSession
+	initializedServers  map[uint]bool
 }
 
 type connectSession struct {
@@ -70,6 +77,7 @@ type updateProjectRequest struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	RootPath    string `json:"root_path"`
+	Prompt      string `json:"prompt"`
 }
 
 type duplicateProjectRequest struct {
@@ -185,12 +193,15 @@ type projectStatusResponse struct {
 	RootPath              string                         `json:"root_path"`
 	Token                 string                         `json:"token"`
 	IsPaused              bool                           `json:"is_paused"`
+	LlamaCppModelPath     string                         `json:"llama_cpp_model_path"`
+	LlamaCppModelName     string                         `json:"llama_cpp_model_name"`
 	ConnectURL            string                         `json:"connect_url"`
 	ConnectURLs           []string                       `json:"connect_urls"`
 	ConnectionReady       bool                           `json:"connection_ready"`
 	Servers               []serverStatusRecord           `json:"servers"`
 	RAGCollections        []ragCollectionResponse        `json:"rag_collections"`
 	InstalledIntegrations []installedIntegrationResponse `json:"installed_integrations"`
+	Prompt                string                         `json:"prompt"`
 }
 
 type serverStatusRecord struct {
@@ -263,36 +274,101 @@ type serverToolSettingsRequest struct {
 	DisabledTools []string `json:"disabled_tools"`
 }
 
-func NewServer(store *storage.Store, registry *orchestrator.Registry) *Server {
-	return NewServerWithInstaller(store, registry, nil)
+type Options struct {
+	EditionID           string
+	EditionName         string
+	EditionCapabilities []string
+	ConnectHost         string
+	ConnectPort         int
+	UIFS                fs.FS
+	HTTPRegistrars      []func(*http.ServeMux)
 }
 
-func NewServerWithInstaller(store *storage.Store, registry *orchestrator.Registry, packageInstaller *installer.Service) *Server {
+func NewServer(store *storage.Store, registry *orchestrator.Registry) *Server {
+	return NewServerWithInstaller(store, registry, nil, Options{})
+}
+
+func NewServerWithInstaller(store *storage.Store, registry *orchestrator.Registry, packageInstaller *installer.Service, options Options) *Server {
 	s := &Server{
-		store:              store,
-		registry:           registry,
-		installer:          packageInstaller,
-		terminalLauncher:   launchTerminalSession,
-		urlLauncher:        launchExternalURL,
-		mux:                http.NewServeMux(),
-		sessions:           make(map[string]connectSession),
-		oauth:              make(map[string]oauthSession),
-		initializedServers: make(map[uint]bool),
+		store:               store,
+		registry:            registry,
+		installer:           packageInstaller,
+		editionID:           strings.TrimSpace(options.EditionID),
+		editionName:         strings.TrimSpace(options.EditionName),
+		editionCapabilities: slices.Clone(options.EditionCapabilities),
+		connectHost:         strings.TrimSpace(options.ConnectHost),
+		connectPort:         options.ConnectPort,
+		uiFS:                options.UIFS,
+		terminalLauncher:    launchTerminalSession,
+		urlLauncher:         launchExternalURL,
+		mux:                 http.NewServeMux(),
+		sessions:            make(map[string]connectSession),
+		oauth:               make(map[string]oauthSession),
+		initializedServers:  make(map[uint]bool),
+	}
+	if s.editionID == "" {
+		s.editionID = "free"
+	}
+	if s.editionName == "" {
+		s.editionName = "MCPBox"
+	}
+	if s.uiFS == nil {
+		s.uiFS = defaultUIFS()
 	}
 
 	s.registerRoutes()
+	for _, registrar := range options.HTTPRegistrars {
+		if registrar != nil {
+			registrar(s.mux)
+		}
+	}
 	return s
 }
 
 func (s *Server) Handler() http.Handler {
-	return s.mux
+	return withCORS(s.mux)
+}
+
+func (s *Server) AdminHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		applyGlobalCORS(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if isConnectPath(r.URL.Path) {
+			withCORS(s.mux).ServeHTTP(w, r)
+			return
+		}
+
+		withCORS(s.mux).ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) ConnectHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		applyGlobalCORS(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.URL.Path == "/healthz" || isConnectPath(r.URL.Path) {
+			withCORS(s.mux).ServeHTTP(w, r)
+			return
+		}
+
+		http.NotFound(w, r)
+	})
 }
 
 func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
+	s.mux.HandleFunc("GET /api/meta", s.handleMeta)
 	s.mux.HandleFunc("GET /api/logs", s.handleListLogs)
 	s.mux.HandleFunc("GET /api/logs/metrics", s.handleLogMetrics)
 	s.mux.HandleFunc("GET /api/ollama/status", s.handleOllamaStatus)
+	s.mux.HandleFunc("GET /api/llamacpp/status", s.handleLlamaCppStatus)
+	s.mux.HandleFunc("POST /api/llamacpp/stop", s.handleStopLlamaCpp)
 	s.mux.HandleFunc("GET /api/packages", s.handleInstalledPackageList)
 	s.mux.HandleFunc("DELETE /api/packages/", s.handleInstalledPackageAction)
 	s.mux.HandleFunc("GET /api/catalog/items", s.handleCatalogList)
@@ -321,6 +397,14 @@ func (s *Server) registerRoutes() {
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleMeta(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"edition_id":   s.editionID,
+		"edition_name": s.editionName,
+		"capabilities": slices.Clone(s.editionCapabilities),
+	})
 }
 
 func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
@@ -484,6 +568,8 @@ func (s *Server) handleProjectAction(w http.ResponseWriter, r *http.Request) {
 		s.handleProjectInstallIntegration(w, r, projectID)
 	case "launch-ollama":
 		s.handleLaunchProjectOllama(w, r, *project)
+	case "launch-llamacpp":
+		s.handleLaunchProjectLlamaCpp(w, r, *project)
 	case "launch-lmstudio":
 		s.handleLaunchProjectLMStudio(w, r, *project)
 	case "pause":
@@ -554,6 +640,7 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 		name,
 		strings.TrimSpace(req.Description),
 		strings.TrimSpace(req.RootPath),
+		strings.TrimSpace(req.Prompt),
 	); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -1024,7 +1111,16 @@ func (s *Server) handleServerToolsUpdate(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
+	applyConnectCORS(w, r)
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	token := extractProjectToken(r.URL.Path)
+	if token == "" || token == "." {
+		token = bearerTokenFromRequest(r)
+	}
 	if token == "" || token == "." {
 		http.NotFound(w, r)
 		return
@@ -1104,6 +1200,63 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.Header().Set("Allow", "GET, POST")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func applyConnectCORS(w http.ResponseWriter, r *http.Request) {
+	applyGlobalCORS(w, r)
+}
+
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		applyGlobalCORS(w, r)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func applyGlobalCORS(w http.ResponseWriter, r *http.Request) {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return
+	}
+
+	requestHeaders := strings.TrimSpace(r.Header.Get("Access-Control-Request-Headers"))
+	if requestHeaders == "" {
+		requestHeaders = strings.Join([]string{
+			"Accept",
+			"Authorization",
+			"Content-Type",
+			"Last-Event-ID",
+			"Mcp-Protocol-Version",
+			"Mcp-Session-Id",
+			"X-Requested-With",
+		}, ", ")
+	}
+
+	requestMethod := strings.TrimSpace(r.Header.Get("Access-Control-Request-Method"))
+	if requestMethod == "" {
+		requestMethod = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+	}
+
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Add("Vary", "Origin")
+	w.Header().Add("Vary", "Access-Control-Request-Method")
+	w.Header().Add("Vary", "Access-Control-Request-Headers")
+	w.Header().Set("Access-Control-Allow-Methods", requestMethod)
+	w.Header().Set("Access-Control-Allow-Headers", requestHeaders)
+	w.Header().Set("Access-Control-Expose-Headers", strings.Join([]string{
+		"Content-Type",
+		"Location",
+		"Mcp-Protocol-Version",
+		"Mcp-Session-Id",
+	}, ", "))
+	w.Header().Set("Access-Control-Max-Age", "86400")
+	if strings.EqualFold(strings.TrimSpace(r.Header.Get("Access-Control-Request-Private-Network")), "true") {
+		w.Header().Set("Access-Control-Allow-Private-Network", "true")
 	}
 }
 
@@ -1249,7 +1402,7 @@ func (s *Server) forwardJSONRPCSync(w http.ResponseWriter, r *http.Request, runn
 }
 
 func (s *Server) handleUI() http.Handler {
-	fileServer := http.FileServer(http.FS(uiFS()))
+	fileServer := http.FileServer(http.FS(s.uiFS))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/api/") || strings.HasPrefix(r.URL.Path, "/mcp/") || strings.HasPrefix(r.URL.Path, "/connect/") {
 			http.NotFound(w, r)
@@ -1257,7 +1410,7 @@ func (s *Server) handleUI() http.Handler {
 		}
 
 		if r.URL.Path == "/" || !strings.Contains(path.Base(r.URL.Path), ".") {
-			http.ServeFileFS(w, r, uiFS(), "index.html")
+			http.ServeFileFS(w, r, s.uiFS, "index.html")
 			return
 		}
 
@@ -1274,12 +1427,15 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 		RootPath:              project.RootPath,
 		Token:                 project.Token,
 		IsPaused:              project.IsPaused,
+		LlamaCppModelPath:     project.LlamaCppModelPath,
+		LlamaCppModelName:     project.LlamaCppModelName,
 		ConnectURL:            firstOrEmpty(connectURLs),
 		ConnectURLs:           connectURLs,
 		ConnectionReady:       s.projectConnectionReady(project),
 		Servers:               make([]serverStatusRecord, 0, len(project.Servers)),
 		RAGCollections:        make([]ragCollectionResponse, 0, len(project.RAGCollections)),
 		InstalledIntegrations: mapInstalledIntegrations(project.InstalledIntegrations),
+		Prompt:                project.Prompt,
 	}
 
 	for _, collection := range project.RAGCollections {
@@ -1580,13 +1736,18 @@ func (s *Server) connectURL(r *http.Request, token string) string {
 }
 
 func (s *Server) connectURLs(r *http.Request, token string) []string {
-	requestPath := "/mcp/" + token
 	scheme, host, port := requestAddressParts(r)
+	if strings.TrimSpace(s.connectHost) != "" && !isWildcardHost(s.connectHost) {
+		host = strings.TrimSpace(s.connectHost)
+	}
+	if s.connectPort > 0 {
+		port = strconv.Itoa(s.connectPort)
+	}
 
-	urls := make([]string, 0, 8)
+	urls := make([]string, 0, 16)
 	seen := make(map[string]struct{})
 
-	appendCandidate := func(candidateHost string) {
+	appendCandidate := func(candidateHost, requestPath string) {
 		candidateHost = strings.TrimSpace(candidateHost)
 		if candidateHost == "" {
 			return
@@ -1600,32 +1761,37 @@ func (s *Server) connectURLs(r *http.Request, token string) []string {
 		urls = append(urls, target)
 	}
 
-	appendCandidate(host)
-	appendCandidate("127.0.0.1")
-	appendCandidate("localhost")
+	appendForPath := func(requestPath string) {
+		appendCandidate(host, requestPath)
+		appendCandidate("127.0.0.1", requestPath)
+		appendCandidate("localhost", requestPath)
 
-	if hostname, err := os.Hostname(); err == nil {
-		appendCandidate(hostname)
+		if hostname, err := os.Hostname(); err == nil {
+			appendCandidate(hostname, requestPath)
+		}
+
+		interfaceHosts := make([]string, 0, 8)
+		for _, iface := range networkIPv4Hosts() {
+			interfaceHosts = append(interfaceHosts, iface)
+		}
+		slices.Sort(interfaceHosts)
+		for _, iface := range interfaceHosts {
+			appendCandidate(iface, requestPath)
+		}
 	}
 
-	interfaceHosts := make([]string, 0, 8)
-	for _, iface := range networkIPv4Hosts() {
-		interfaceHosts = append(interfaceHosts, iface)
-	}
-	slices.Sort(interfaceHosts)
-	for _, iface := range interfaceHosts {
-		appendCandidate(iface)
-	}
+	// appendForPath("/mcp")
+	appendForPath("/mcp/" + token)
 
 	if len(urls) == 0 {
-		urls = append(urls, requestPath)
+		urls = append(urls, "/mcp")
 	}
 
 	return urls
 }
 
 func (s *Server) connectMessageURL(r *http.Request, token, sessionID string) string {
-	return s.absoluteURL(r, fmt.Sprintf("/mcp/%s?sessionId=%s", token, sessionID))
+	return s.absoluteConnectURL(r, fmt.Sprintf("/mcp/%s?sessionId=%s", token, sessionID))
 }
 
 func (s *Server) absoluteURL(r *http.Request, requestPath string) string {
@@ -1635,6 +1801,30 @@ func (s *Server) absoluteURL(r *http.Request, requestPath string) string {
 	}
 
 	return fmt.Sprintf("%s://%s%s", scheme, joinHostPort(host, port), requestPath)
+}
+
+func (s *Server) absoluteConnectURL(r *http.Request, requestPath string) string {
+	scheme, host, port := requestAddressParts(r)
+	if strings.TrimSpace(s.connectHost) != "" && !isWildcardHost(s.connectHost) {
+		host = strings.TrimSpace(s.connectHost)
+	}
+	if s.connectPort > 0 {
+		port = strconv.Itoa(s.connectPort)
+	}
+	if host == "" {
+		return requestPath
+	}
+
+	return fmt.Sprintf("%s://%s%s", scheme, joinHostPort(host, port), requestPath)
+}
+
+func isConnectPath(requestPath string) bool {
+	return strings.HasPrefix(requestPath, "/mcp/") || strings.HasPrefix(requestPath, "/connect/")
+}
+
+func isWildcardHost(host string) bool {
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	return host == "" || host == "0.0.0.0" || host == "::"
 }
 
 func requestAddressParts(r *http.Request) (scheme, host, port string) {
@@ -3104,5 +3294,16 @@ func extractProjectToken(requestPath string) string {
 		}
 	}
 
+	return ""
+}
+
+func bearerTokenFromRequest(r *http.Request) string {
+	raw := strings.TrimSpace(r.Header.Get("Authorization"))
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(strings.ToLower(raw), "bearer ") {
+		return strings.TrimSpace(raw[7:])
+	}
 	return ""
 }

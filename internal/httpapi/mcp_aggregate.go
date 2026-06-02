@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"MCPBox/internal/models"
-	"MCPBox/internal/orchestrator"
-	"MCPBox/internal/rag"
+	"github.com/ArturSaleev/MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/orchestrator"
+	"github.com/ArturSaleev/MCPBox/internal/rag"
 )
 
 type projectRequestEnvelope struct {
@@ -97,6 +97,8 @@ type projectKnowledgeSearchResultItem struct {
 }
 
 const projectKnowledgeSearchToolName = "search_project_knowledge"
+const projectPromptToolName = "get_project_env_and_rules"
+const projectPromptName = "project_prompt"
 
 type listResourcesResult struct {
 	Resources  []orchestrator.InspectionItem `json:"resources"`
@@ -215,6 +217,7 @@ func (s *Server) dispatchProjectJSONRPC(
 	if strings.TrimSpace(request.Method) == "" {
 		return nil, false, errors.New("json-rpc method is required")
 	}
+	request.Method = strings.TrimSpace(request.Method)
 
 	switch request.Method {
 	case "initialize":
@@ -253,6 +256,8 @@ func (s *Server) dispatchProjectJSONRPC(
 		if err != nil {
 			return nil, false, err
 		}
+		// Add prompt tool at the beginning to encourage LLM to call it first
+		tools = append([]aggregateTool{s.projectPromptAggregateTool()}, tools...)
 		if len(project.RAGCollections) > 0 {
 			tools = append(tools, s.projectKnowledgeAggregateTool())
 		}
@@ -286,6 +291,24 @@ func (s *Server) dispatchProjectJSONRPC(
 			if err != nil {
 				return nil, false, err
 			}
+			return mustMarshal(projectResponseEnvelope{
+				JSONRPC: "2.0",
+				ID:      request.ID,
+				Result:  result,
+			}), true, nil
+		}
+		if params.Name == projectPromptToolName {
+			result := map[string]any{
+				"content": []map[string]any{
+					{
+						"type": "text",
+						"text": project.Prompt,
+					},
+				},
+			}
+			s.logAudit(ctx, &project.ID, nil, "tool_call_project_prompt", "mcp-client", mustJSON(map[string]any{
+				"tool": projectPromptToolName,
+			}))
 			return mustMarshal(projectResponseEnvelope{
 				JSONRPC: "2.0",
 				ID:      request.ID,
@@ -371,6 +394,9 @@ func (s *Server) dispatchProjectJSONRPC(
 			item.Name = prompt.Alias
 			result.Prompts = append(result.Prompts, item)
 		}
+		if synthetic, ok := s.projectAggregatePrompt(project); ok {
+			result.Prompts = append([]orchestrator.InspectionPrompt{synthetic}, result.Prompts...)
+		}
 		return mustMarshal(projectResponseEnvelope{
 			JSONRPC: "2.0",
 			ID:      request.ID,
@@ -380,6 +406,14 @@ func (s *Server) dispatchProjectJSONRPC(
 		var params promptGetParams
 		if err := json.Unmarshal(request.Params, &params); err != nil {
 			return nil, false, errors.New("invalid prompts/get params")
+		}
+		if params.Name == projectPromptName {
+			result := s.projectAggregatePromptResult(project)
+			return mustMarshal(projectResponseEnvelope{
+				JSONRPC: "2.0",
+				ID:      request.ID,
+				Result:  result,
+			}), true, nil
 		}
 		prompt, err := s.resolveAggregatePrompt(ctx, servers, params.Name)
 		if err != nil {
@@ -679,6 +713,49 @@ func (s *Server) projectKnowledgeAggregateTool() aggregateTool {
 	}
 }
 
+func (s *Server) projectPromptAggregateTool() aggregateTool {
+	return aggregateTool{
+		Origin: orchestrator.InspectionTool{
+			Name:        projectPromptToolName,
+			Title:       "Get Project Environment and Rules",
+			Description: "ОБЯЗАТЕЛЬНО К ВЫЗОВУ ПРИ СТАРТЕ СЕССИИ. Возвращает глобальный контекст проекта, роли пользователей, ограничения и требуемый тон общения модели.",
+			InputSchema: json.RawMessage(`{
+				"type":"object",
+				"properties":{}
+			}`),
+		},
+		Alias: projectPromptToolName,
+	}
+}
+
+func (s *Server) projectAggregatePrompt(project models.Project) (orchestrator.InspectionPrompt, bool) {
+	promptText := strings.TrimSpace(project.Prompt)
+	if promptText == "" {
+		return orchestrator.InspectionPrompt{}, false
+	}
+	return orchestrator.InspectionPrompt{
+		Name:        projectPromptName,
+		Title:       "Project Prompt",
+		Description: "Project-level instructions and working context configured in MCPBox.",
+		Arguments:   []orchestrator.InspectionPromptArgument{},
+	}, true
+}
+
+func (s *Server) projectAggregatePromptResult(project models.Project) map[string]any {
+	return map[string]any{
+		"description": "Project-level instructions and working context configured in MCPBox.",
+		"messages": []map[string]any{
+			{
+				"role": "user",
+				"content": map[string]any{
+					"type": "text",
+					"text": strings.TrimSpace(project.Prompt),
+				},
+			},
+		},
+	}
+}
+
 func (s *Server) callProjectKnowledgeTool(ctx context.Context, project models.Project, arguments map[string]any) (map[string]any, error) {
 	rawArgs, err := json.Marshal(arguments)
 	if err != nil {
@@ -807,6 +884,9 @@ func (s *Server) aggregateResources(ctx context.Context, servers []models.MCPSer
 		}
 		var result listResourcesResult
 		if err := s.fetchServerList(ctx, server, "resources/list", &result); err != nil {
+			if isIgnorableAggregateListError(err) {
+				continue
+			}
 			return nil, err
 		}
 		for _, item := range result.Resources {
@@ -827,6 +907,9 @@ func (s *Server) aggregatePrompts(ctx context.Context, servers []models.MCPServe
 		}
 		var result listPromptsResult
 		if err := s.fetchServerList(ctx, server, "prompts/list", &result); err != nil {
+			if isIgnorableAggregateListError(err) {
+				continue
+			}
 			return nil, err
 		}
 		for _, item := range result.Prompts {
@@ -836,6 +919,27 @@ func (s *Server) aggregatePrompts(ctx context.Context, servers []models.MCPServe
 	assignPromptAliases(prompts)
 	sort.Slice(prompts, func(i, j int) bool { return prompts[i].Alias < prompts[j].Alias })
 	return prompts, nil
+}
+
+func isIgnorableAggregateListError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	if message == "" {
+		return false
+	}
+	for _, fragment := range []string{
+		"method not found",
+		"not supported",
+		"unsupported",
+		"-32601",
+	} {
+		if strings.Contains(message, fragment) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) fetchServerList(ctx context.Context, server models.MCPServer, method string, result any) error {

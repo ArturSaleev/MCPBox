@@ -16,7 +16,7 @@ import (
 	"sync"
 	"syscall"
 
-	"MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/models"
 )
 
 const scannerBufferSize = 1024 * 1024

@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/models"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )

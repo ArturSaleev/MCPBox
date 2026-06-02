@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/models"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 )

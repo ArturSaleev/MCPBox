@@ -13,6 +13,7 @@ Today MCPBox is:
 - a project-based organizer for local and remote MCP backends
 - an aggregation endpoint for enabled servers inside a project
 - an operator UI for project lifecycle, server lifecycle, inspection, health checks, and logging
+- a reusable core module for the current MCPBox build
 
 Today MCPBox is not:
 - a multi-user platform with auth and roles
@@ -76,7 +77,6 @@ Knowledge Base note:
 - collections are stored on disk and searched through Bleve
 - no external vector database is required
 - no embedding generation pipeline is required at this stage
-- future `Pro` capabilities are documented separately in [PRO-ROADMAP.md](./PRO-ROADMAP.md)
 
 ### Frontend
 
@@ -100,6 +100,16 @@ Knowledge Base note:
 - `Launch Project` dialog for choosing local launch flows
 - `Add to LM Studio` action from the project UI
 - English and Russian localization
+
+## Runtime Architecture
+
+The repository contains both the application entrypoint and the reusable runtime used by the current MCPBox build.
+
+Current structure:
+- root `main.go` starts the default MCPBox application
+- [`app`](./app) exposes the reusable application runtime for local composition inside this repository
+- `GET /api/meta` returns build identity and capabilities for UI flows and integrations
+
 
 ## Transport Model
 
@@ -137,8 +147,10 @@ Why this matters:
 Current behavior:
 - `initialize` is answered by MCPBox itself
 - `tools/list`, `resources/list`, and `prompts/list` combine results from enabled project servers
+- MCPBox injects project-level helpers into aggregated MCP responses: `get_project_env_and_rules` as a tool, `search_project_knowledge` when RAG collections are attached, and `project_prompt` as a standard MCP prompt when the project prompt is not empty
 - MCPBox adds stable aliases when needed so duplicate names from different servers can coexist
 - tool calls, prompt fetches, and resource reads are routed back to the originating server
+- unsupported upstream `resources/list` and `prompts/list` responses are ignored when the server clearly reports that the optional capability is not implemented
 - aggregated calls also write normalized audit entries so downstream activity can be traced per method and per backing server
 
 This is why one project can present several MCP backends through one URL while keeping client configuration stable.
@@ -234,6 +246,20 @@ Current behavior:
 
 Practical requirement:
 - `ollama` must still be installed locally, because MCPBox launches a local Ollama-backed session rather than bundling the model runtime itself
+
+## llama.cpp Integration
+
+MCPBox can launch a local `llama-server` process and open its Web UI for the selected project.
+
+Current behavior:
+- the UI checks `GET /api/llamacpp/status`
+- project launch uses `POST /api/projects/{id}/launch-llamacpp`
+- the model path comes from the launch request, saved project settings, or `MCPBOX_LLAMACPP_MODEL`
+- MCPBox starts `llama-server` with host `127.0.0.1`, the configured port, `--jinja`, optional context/GPU/chat-template settings, and a generated `--system-prompt-file` when the project prompt is not empty
+- managed llama.cpp state stores the PID, active model, server URL, and project prompt digest so MCPBox can restart the server when either the model or prompt changes
+
+Practical requirement:
+- `llama-server` must be installed locally and available in `PATH`
 
 ## LM Studio Integration
 

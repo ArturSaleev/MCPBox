@@ -8,7 +8,7 @@ import (
 //go:embed all:ui/dist
 var embeddedUI embed.FS
 
-func uiFS() fs.FS {
+func defaultUIFS() fs.FS {
 	sub, err := fs.Sub(embeddedUI, "ui/dist")
 	if err != nil {
 		panic(err)

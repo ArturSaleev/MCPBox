@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/models"
 )
 
 type Inspection struct {

@@ -76,7 +76,6 @@ MCPBox - это control plane на Go для MCP-серверов.
 - коллекции хранятся на диске и ищутся через Bleve
 - внешняя векторная база не требуется
 - pipeline генерации embeddings на этом этапе тоже не нужен
-- будущие возможности `Pro` вынесены в отдельный документ [PRO-ROADMAP-ru.md](./PRO-ROADMAP-ru.md)
 
 ### Frontend
 
@@ -137,8 +136,10 @@ POST /connect/{project_token}
 Текущее поведение:
 - `initialize` обрабатывается самим MCPBox
 - `tools/list`, `resources/list` и `prompts/list` объединяют результаты всех включенных серверов проекта
+- MCPBox добавляет project-level helpers в агрегированные MCP-ответы: `get_project_env_and_rules` как tool, `search_project_knowledge` при подключенных RAG-коллекциях и `project_prompt` как стандартный MCP prompt, если prompt проекта не пустой
 - при необходимости MCPBox добавляет стабильные alias'ы, чтобы одинаковые имена из разных серверов не конфликтовали
 - tool calls, prompt fetch и resource read маршрутизируются обратно в сервер-источник
+- неподдерживаемые upstream-ответы для `resources/list` и `prompts/list` игнорируются, если сервер явно сообщает, что optional capability не реализована
 - агрегированные вызовы также пишут нормализованные audit entries, чтобы downstream activity можно было отследить по методу и по backing server
 
 Благодаря этому один project URL может представлять несколько MCP-бэкендов без смены конфигурации клиента.
@@ -234,6 +235,20 @@ POST /api/projects/{id}/integrations
 
 Практический нюанс:
 - сама `ollama` все равно должна быть установлена локально, потому что MCPBox не встраивает runtime модели, а запускает локальный Ollama-backed session
+
+## Интеграция С llama.cpp
+
+MCPBox умеет запускать локальный `llama-server` и открывать его Web UI для выбранного проекта.
+
+Текущее поведение:
+- UI запрашивает `GET /api/llamacpp/status`
+- запуск проекта выполняется через `POST /api/projects/{id}/launch-llamacpp`
+- путь к модели берется из request, сохраненных настроек проекта или `MCPBOX_LLAMACPP_MODEL`
+- MCPBox запускает `llama-server` с host `127.0.0.1`, настроенным портом, `--jinja`, опциональными настройками context/GPU/chat-template и сгенерированным `--system-prompt-file`, если prompt проекта не пустой
+- managed state llama.cpp хранит PID, активную модель, URL сервера и digest project prompt, чтобы MCPBox перезапускал сервер при смене модели или prompt
+
+Практический нюанс:
+- `llama-server` должен быть установлен локально и доступен в `PATH`
 
 ## Интеграция С LM Studio
 

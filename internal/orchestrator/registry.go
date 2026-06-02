@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/models"
 )
 
 type Registry struct {

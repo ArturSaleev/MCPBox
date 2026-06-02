@@ -1,9 +1,9 @@
-package main
+package app
 
 import (
 	"testing"
 
-	"MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/models"
 )
 
 func TestStartupServersForProjectsStartsAllEnabledSTDIOInAutoStartProject(t *testing.T) {

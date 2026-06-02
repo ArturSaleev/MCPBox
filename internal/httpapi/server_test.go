@@ -13,14 +13,16 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
-	"MCPBox/internal/installer"
-	"MCPBox/internal/models"
-	"MCPBox/internal/orchestrator"
-	"MCPBox/internal/storage"
+	"github.com/ArturSaleev/MCPBox/internal/installer"
+	"github.com/ArturSaleev/MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/orchestrator"
+	"github.com/ArturSaleev/MCPBox/internal/storage"
 )
 
 func TestDisplayLaunchCommandMasksSensitiveArgs(t *testing.T) {
@@ -95,7 +97,7 @@ func TestProjectEndpointsExposeConnectURLForConfiguredServers(t *testing.T) {
 	}
 
 	got := payload[0]
-	if got.ConnectURL != "http://mcpbox.local:38180/mcp/"+project.Token {
+	if got.ConnectURL != "http://mcpbox.local:38180/mcp" {
 		t.Fatalf("ConnectURL = %q", got.ConnectURL)
 	}
 	if len(got.ConnectURLs) == 0 {
@@ -103,6 +105,9 @@ func TestProjectEndpointsExposeConnectURLForConfiguredServers(t *testing.T) {
 	}
 	if got.ConnectURLs[0] != got.ConnectURL {
 		t.Fatalf("ConnectURLs[0] = %q, want %q", got.ConnectURLs[0], got.ConnectURL)
+	}
+	if !slices.Contains(got.ConnectURLs, "http://mcpbox.local:38180/mcp/"+project.Token) {
+		t.Fatalf("legacy token URL missing from ConnectURLs: %#v", got.ConnectURLs)
 	}
 	if got.ConnectionReady {
 		t.Fatal("ConnectionReady = true, want false for stopped stdio servers")
@@ -289,6 +294,299 @@ func TestProjectConnectAggregatesToolsAcrossServers(t *testing.T) {
 		if !gotNames[name] {
 			t.Fatalf("tool %q not found in aggregated response: %#v", name, payload.Result.Tools)
 		}
+	}
+}
+
+func TestProjectConnectListsProjectPromptAsMCPPrompt(t *testing.T) {
+	t.Parallel()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode upstream payload: %v", err)
+		}
+
+		method, _ := payload["method"].(string)
+		id := payload["id"]
+
+		switch method {
+		case "initialize":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"protocolVersion": "2025-03-26",
+					"serverInfo":      map[string]any{"name": "dummy", "version": "1.0.0"},
+					"capabilities":    map[string]any{"prompts": map[string]any{}},
+				},
+			})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "prompts/list":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"error": map[string]any{
+					"code":    -32601,
+					"message": "prompts not supported",
+				},
+			})
+		default:
+			t.Fatalf("unexpected upstream method %q", method)
+		}
+	}))
+	defer upstream.Close()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	project := &models.Project{
+		Name:   "Workspace",
+		Prompt: "Always inspect enabled MCP servers before answering.",
+	}
+	if err := store.CreateProject(ctx, project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if err := store.AddServer(ctx, &models.MCPServer{
+		ProjectID: project.ID,
+		Name:      "Dummy",
+		Transport: models.ServerTransportHTTPStream,
+		URL:       upstream.URL,
+		IsEnabled: true,
+	}); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	requestBody := bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"prompts/list","params":{}}`)
+	request := httptest.NewRequest(http.MethodPost, "/mcp/"+project.Token, requestBody)
+	request.Host = "mcpbox.local:38180"
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("connect prompts/list status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Prompts []struct {
+				Name string `json:"name"`
+			} `json:"prompts"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload.Result.Prompts) != 1 {
+		t.Fatalf("len(payload.Result.Prompts) = %d, want 1", len(payload.Result.Prompts))
+	}
+	if payload.Result.Prompts[0].Name != projectPromptName {
+		t.Fatalf("prompt name = %q, want %q", payload.Result.Prompts[0].Name, projectPromptName)
+	}
+}
+
+func TestProjectConnectReturnsProjectPromptViaPromptsGet(t *testing.T) {
+	t.Parallel()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode upstream payload: %v", err)
+		}
+
+		method, _ := payload["method"].(string)
+		id := payload["id"]
+
+		switch method {
+		case "initialize":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      id,
+				"result": map[string]any{
+					"protocolVersion": "2025-03-26",
+					"serverInfo":      map[string]any{"name": "dummy", "version": "1.0.0"},
+					"capabilities":    map[string]any{"prompts": map[string]any{}},
+				},
+			})
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		case "prompts/get":
+			t.Fatal("project prompt should be served by MCPBox without upstream prompts/get")
+		default:
+			t.Fatalf("unexpected upstream method %q", method)
+		}
+	}))
+	defer upstream.Close()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	project := &models.Project{
+		Name:   "Workspace",
+		Prompt: "Always inspect enabled MCP servers before answering.",
+	}
+	if err := store.CreateProject(ctx, project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if err := store.AddServer(ctx, &models.MCPServer{
+		ProjectID: project.ID,
+		Name:      "Dummy",
+		Transport: models.ServerTransportHTTPStream,
+		URL:       upstream.URL,
+		IsEnabled: true,
+	}); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	requestBody := bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"prompts/get","params":{"name":"project_prompt"}}`)
+	request := httptest.NewRequest(http.MethodPost, "/mcp/"+project.Token, requestBody)
+	request.Host = "mcpbox.local:38180"
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("connect prompts/get status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	var payload struct {
+		Result struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"messages"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload.Result.Messages) != 1 {
+		t.Fatalf("len(payload.Result.Messages) = %d, want 1", len(payload.Result.Messages))
+	}
+	if payload.Result.Messages[0].Role != "user" {
+		t.Fatalf("message role = %q, want user", payload.Result.Messages[0].Role)
+	}
+	if payload.Result.Messages[0].Content.Type != "text" {
+		t.Fatalf("content type = %q, want text", payload.Result.Messages[0].Content.Type)
+	}
+	if payload.Result.Messages[0].Content.Text != project.Prompt {
+		t.Fatalf("content text = %q, want %q", payload.Result.Messages[0].Content.Text, project.Prompt)
+	}
+}
+
+func TestProjectConnectOptionsAllowsCrossOriginRequests(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	request := httptest.NewRequest(http.MethodOptions, "/mcp/test-token", nil)
+	request.Host = "127.0.0.1:38180"
+	request.Header.Set("Origin", "http://127.0.0.1:8080")
+	request.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	request.Header.Set("Access-Control-Request-Headers", "content-type")
+	request.Header.Set("Access-Control-Request-Private-Network", "true")
+
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("OPTIONS status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if got := response.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want *", got)
+	}
+	if got := response.Header().Get("Access-Control-Allow-Methods"); got != http.MethodPost {
+		t.Fatalf("Access-Control-Allow-Methods = %q, want %q", got, http.MethodPost)
+	}
+	if got := response.Header().Get("Access-Control-Allow-Headers"); got != "content-type" {
+		t.Fatalf("Access-Control-Allow-Headers = %q, want content-type", got)
+	}
+	if got := response.Header().Get("Access-Control-Allow-Private-Network"); got != "true" {
+		t.Fatalf("Access-Control-Allow-Private-Network = %q, want true", got)
+	}
+}
+
+func TestProjectConnectErrorStillIncludesCORSHeaders(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	request := httptest.NewRequest(http.MethodPost, "/mcp/missing-token", bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
+	request.Host = "127.0.0.1:38180"
+	request.Header.Set("Origin", "http://127.0.0.1:8080")
+	request.Header.Set("Content-Type", "application/json")
+
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("POST status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if got := response.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want *", got)
+	}
+}
+
+func TestAdminHandlerServesProjectConnectPaths(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	project := &models.Project{Name: "Workspace", Description: "Admin handler connect test"}
+	if err := store.CreateProject(ctx, project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	request := httptest.NewRequest(http.MethodPost, "/mcp/"+project.Token, bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
+	request.Host = "127.0.0.1:38180"
+	request.Header.Set("Origin", "http://127.0.0.1:8080")
+	request.Header.Set("Content-Type", "application/json")
+
+	response := httptest.NewRecorder()
+	api.AdminHandler().ServeHTTP(response, request)
+
+	if response.Code == http.StatusNotFound {
+		t.Fatalf("AdminHandler returned 404 for connect path, body = %s", response.Body.String())
+	}
+	if got := response.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want *", got)
 	}
 }
 
@@ -1484,7 +1782,7 @@ func TestLaunchProjectOllamaCreatesConfigAndOpensTerminal(t *testing.T) {
 		t.Fatalf("ReadFile(%q) error = %v", payload.ConfigPath, err)
 	}
 	config := string(configBytes)
-	if !strings.Contains(config, "url: http://mcpbox.local:38180/mcp/"+project.Token) {
+	if !strings.Contains(config, "project-http-stdio") || !strings.Contains(config, "http://mcpbox.local:38180/mcp/") {
 		t.Fatalf("config = %q", config)
 	}
 }
@@ -1639,6 +1937,162 @@ func TestLaunchProjectOllamaWithConnectedKnowledgeBaseOnly(t *testing.T) {
 	}
 	if !strings.Contains(launchedCommand, "ollama-chat --config") {
 		t.Fatalf("launch command = %q", launchedCommand)
+	}
+}
+
+func TestLlamaCppStatusReportsConfiguration(t *testing.T) {
+	originalLookPath := execLookPath
+	execLookPath = func(file string) (string, error) {
+		if file == "llama-server" {
+			return "/usr/local/bin/llama-server", nil
+		}
+		return "", errors.New("unexpected binary lookup")
+	}
+	defer func() {
+		execLookPath = originalLookPath
+	}()
+
+	t.Setenv("MCPBOX_LLAMACPP_MODEL", "/models/qwen2.5-7b-instruct-q4_k_m.gguf")
+	t.Setenv("MCPBOX_LLAMACPP_PORT", "39333")
+
+	status := detectLlamaCppStatus()
+	if !status.Installed {
+		t.Fatal("Installed = false, want true")
+	}
+	if !status.Configured {
+		t.Fatal("Configured = false, want true")
+	}
+	if status.ModelName != "qwen2.5-7b-instruct-q4_k_m" {
+		t.Fatalf("ModelName = %q", status.ModelName)
+	}
+	if status.ServerURL != "http://127.0.0.1:39333" {
+		t.Fatalf("ServerURL = %q", status.ServerURL)
+	}
+}
+
+func TestLaunchProjectLlamaCppCreatesPromptAndOpensWebUI(t *testing.T) {
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	project := &models.Project{
+		Name:     "Workspace",
+		RootPath: t.TempDir(),
+		Prompt:   "Always call project_prompt first.",
+	}
+	if err := store.CreateProject(context.Background(), project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if err := store.AddServer(context.Background(), &models.MCPServer{
+		ProjectID: project.ID,
+		Name:      "Filesystem",
+		Transport: models.ServerTransportHTTPStream,
+		URL:       "http://127.0.0.1:8999/mcp",
+		IsEnabled: true,
+	}); err != nil {
+		t.Fatalf("AddServer() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	var launchedURL string
+	api.urlLauncher = func(target string) error {
+		launchedURL = target
+		return nil
+	}
+
+	var startedArgs []string
+	originalStartDetachedProcess := startDetachedProcess
+	startDetachedProcess = func(args []string) error {
+		startedArgs = append([]string{}, args...)
+		return nil
+	}
+	defer func() {
+		startDetachedProcess = originalStartDetachedProcess
+	}()
+
+	originalWaitForStartedLlamaCpp := waitForStartedLlamaCpp
+	waitForStartedLlamaCpp = func(_ string, _ time.Duration) error {
+		return nil
+	}
+	defer func() {
+		waitForStartedLlamaCpp = originalWaitForStartedLlamaCpp
+	}()
+
+	originalSupportsSystemPromptFile := supportsSystemPromptFile
+	supportsSystemPromptFile = func(_ string) bool {
+		return true
+	}
+	defer func() {
+		supportsSystemPromptFile = originalSupportsSystemPromptFile
+	}()
+
+	originalLookPath := execLookPath
+	execLookPath = func(file string) (string, error) {
+		if file == "llama-server" {
+			return "/usr/local/bin/llama-server", nil
+		}
+		return "", errors.New("unexpected binary lookup")
+	}
+	defer func() {
+		execLookPath = originalLookPath
+	}()
+
+	t.Setenv("MCPBOX_LLAMACPP_MODEL", "/models/qwen2.5-7b-instruct-q4_k_m.gguf")
+	t.Setenv("MCPBOX_LLAMACPP_PORT", "39333")
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/projects/"+jsonNumber(project.ID)+"/launch-llamacpp",
+		bytes.NewBufferString(`{"model_path":"/custom/models/qwen3.gguf","model_name":"qwen3-local"}`),
+	)
+	request.Host = "mcpbox.local:38180"
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+
+	if launchedURL != "http://127.0.0.1:39333" {
+		t.Fatalf("launchedURL = %q", launchedURL)
+	}
+	if len(startedArgs) == 0 {
+		t.Fatal("startDetachedProcess was not called")
+	}
+	if !slices.Contains(startedArgs, "--jinja") {
+		t.Fatalf("startedArgs = %#v", startedArgs)
+	}
+	systemPromptFlag := slices.Index(startedArgs, "--system-prompt-file")
+	if systemPromptFlag < 0 || systemPromptFlag+1 >= len(startedArgs) {
+		t.Fatalf("startedArgs missing --system-prompt-file: %#v", startedArgs)
+	}
+	systemPromptPath := startedArgs[systemPromptFlag+1]
+	systemPromptPayload, err := os.ReadFile(systemPromptPath)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q) error = %v", systemPromptPath, err)
+	}
+	if strings.TrimSpace(string(systemPromptPayload)) != project.Prompt {
+		t.Fatalf("system prompt file content = %q, want %q", strings.TrimSpace(string(systemPromptPayload)), project.Prompt)
+	}
+
+	var payload llamaCppLaunchResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if payload.ModelName != "qwen3-local" {
+		t.Fatalf("payload.ModelName = %q", payload.ModelName)
+	}
+	if payload.ModelPath != "/custom/models/qwen3.gguf" {
+		t.Fatalf("payload.ModelPath = %q", payload.ModelPath)
+	}
+	if payload.WebUIURL != launchedURL {
+		t.Fatalf("payload.WebUIURL = %q, want %q", payload.WebUIURL, launchedURL)
+	}
+	if payload.CommandPreview == "" {
+		t.Fatal("payload.CommandPreview is empty")
 	}
 }
 
@@ -2153,6 +2607,7 @@ func TestCatalogPackageInstallAndListEndpoints(t *testing.T) {
 		store,
 		orchestrator.NewRegistry(context.Background()),
 		installer.NewService(store, filepath.Join(t.TempDir(), "packages")),
+		Options{},
 	)
 
 	syncBody := bytes.NewBufferString(`{"url":"` + manifestServer.URL + `"}`)
@@ -2259,6 +2714,7 @@ func TestCatalogPackageAddToProjectEndpoint(t *testing.T) {
 		store,
 		orchestrator.NewRegistry(context.Background()),
 		installer.NewService(store, filepath.Join(t.TempDir(), "packages")),
+		Options{},
 	)
 
 	syncBody := bytes.NewBufferString(`{"url":"` + manifestServer.URL + `"}`)
@@ -2369,6 +2825,7 @@ func TestFilesystemPackageAddToProjectPassesRootPathArgument(t *testing.T) {
 		store,
 		orchestrator.NewRegistry(context.Background()),
 		installer.NewService(store, filepath.Join(t.TempDir(), "packages")),
+		Options{},
 	)
 
 	syncBody := bytes.NewBufferString(`{"url":"` + manifestServer.URL + `"}`)
