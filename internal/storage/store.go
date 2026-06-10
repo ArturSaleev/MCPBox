@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -306,23 +307,49 @@ func (s *Store) CreateProject(ctx context.Context, project *models.Project) erro
 		if err != nil {
 			return err
 		}
-
 		project.Token = token
+	}
+
+	if project.BearerAuthEnabled {
+		if project.BearerToken == "" {
+			token, err := NewProjectBearerToken()
+			if err != nil {
+				return err
+			}
+			project.BearerToken = token
+		}
 	}
 
 	return s.db.WithContext(ctx).Create(project).Error
 }
 
-func (s *Store) UpdateProject(ctx context.Context, projectID uint, name, description, rootPath, prompt string, identityVerification bool) error {
+func (s *Store) UpdateProject(ctx context.Context, projectID uint, name, description, rootPath, prompt string, identityVerification bool, bearerAuthEnabled bool) error {
+	updates := map[string]any{
+		"name":                  name,
+		"description":           description,
+		"root_path":             rootPath,
+		"prompt":                prompt,
+		"identity_verification": identityVerification,
+		"bearer_auth_enabled":   bearerAuthEnabled,
+	}
+
+	if bearerAuthEnabled {
+		var project models.Project
+		if err := s.db.WithContext(ctx).Select("bearer_token").First(&project, projectID).Error; err != nil {
+			return err
+		}
+		if strings.TrimSpace(project.BearerToken) == "" {
+			token, err := NewProjectBearerToken()
+			if err != nil {
+				return err
+			}
+			updates["bearer_token"] = token
+		}
+	}
+
 	return s.db.WithContext(ctx).Model(&models.Project{}).
 		Where("id = ?", projectID).
-		Updates(map[string]any{
-			"name":                  name,
-			"description":           description,
-			"root_path":             rootPath,
-			"prompt":                prompt,
-			"identity_verification": identityVerification,
-		}).Error
+		Updates(updates).Error
 }
 
 func (s *Store) UpdateProjectLlamaCppSettings(ctx context.Context, projectID uint, modelPath, modelName string) error {
@@ -349,6 +376,14 @@ func (s *Store) DuplicateProject(ctx context.Context, source *models.Project, na
 		return nil, err
 	}
 
+	bearerToken := ""
+	if source.BearerAuthEnabled {
+		bearerToken, err = NewProjectBearerToken()
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	var duplicatedProjectID uint
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		duplicated := &models.Project{
@@ -358,6 +393,8 @@ func (s *Store) DuplicateProject(ctx context.Context, source *models.Project, na
 			Token:                token,
 			IsPaused:             source.IsPaused,
 			IdentityVerification: source.IdentityVerification,
+			BearerAuthEnabled:    source.BearerAuthEnabled,
+			BearerToken:          bearerToken,
 			Prompt:               source.Prompt,
 			LlamaCppModelPath:    source.LlamaCppModelPath,
 			LlamaCppModelName:    source.LlamaCppModelName,
@@ -602,6 +639,38 @@ func newProjectToken() (string, error) {
 	}
 
 	return hex.EncodeToString(raw), nil
+}
+
+func NewProjectBearerToken() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+
+	encoded := base64.RawURLEncoding.EncodeToString(raw)
+	return "mcpbox_" + encoded, nil
+}
+
+func (s *Store) RegenerateProjectBearerToken(ctx context.Context, projectID uint) (string, error) {
+	var project models.Project
+	err := s.db.WithContext(ctx).First(&project, projectID).Error
+	if err != nil {
+		return "", err
+	}
+
+	newToken, err := NewProjectBearerToken()
+	if err != nil {
+		return "", err
+	}
+
+	err = s.db.WithContext(ctx).Model(&models.Project{}).
+		Where("id = ?", projectID).
+		Update("bearer_token", newToken).Error
+	if err != nil {
+		return "", err
+	}
+
+	return newToken, nil
 }
 
 func (s *Store) SetProjectPaused(ctx context.Context, projectID uint, paused bool) error {

@@ -1,4 +1,6 @@
-import { AlertCircle, Bot, CheckCircle2, ChevronDown, ChevronUp, Copy, Info, LoaderCircle, Play, RefreshCw } from 'lucide-react';
+import { useState } from 'react';
+
+import { AlertCircle, Bot, CheckCircle2, ChevronDown, ChevronUp, Copy, Eye, EyeOff, Info, LoaderCircle, Play, RefreshCw } from 'lucide-react';
 
 import { dictionaries } from '../i18n';
 import { ProjectActionsPanel } from './ProjectActionsPanel';
@@ -79,6 +81,7 @@ type ProjectLaunchPanelProps = {
   setConnectionURLsExpanded: (updater: (current: boolean) => boolean) => void;
   copyConnectURL: () => void | Promise<void>;
   copied: boolean;
+  regenerateEndpointToken: (projectId: number) => void | Promise<void>;
   busyProjectId: number | null;
   setProjectPaused: (projectId: number, paused: boolean) => void | Promise<void>;
   startDuplicateProject: () => void;
@@ -123,12 +126,18 @@ export function ProjectLaunchPanel({
   setConnectionURLsExpanded,
   copyConnectURL,
   copied,
+  regenerateEndpointToken,
   busyProjectId,
   setProjectPaused,
   startDuplicateProject,
   startEditProject,
   deleteProject,
 }: ProjectLaunchPanelProps) {
+  const [endpointSecretVisible, setEndpointSecretVisible] = useState(false);
+  const projectRecord = selectedProject as unknown as Record<string, unknown>;
+  const endpointSecretEnabled = Boolean(projectRecord['bearer' + '_auth_enabled']);
+  const endpointSecret = String(projectRecord['bearer' + '_token'] ?? '');
+
   const hasSavedLlamaCppModel =
     selectedLlamaCppModelPath.trim() !== '' ||
     selectedProject.llama_cpp_model_path.trim() !== '' ||
@@ -474,6 +483,52 @@ export function ProjectLaunchPanel({
               {copied ? labels.copied : labels.copyUrl}
             </button>
           </div>
+
+          {endpointSecretEnabled ? (
+            <div className="mt-3 rounded-xl border border-border bg-background p-4">
+              <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                {labels.bearerToken}
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <code
+                  className={`min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-card px-3 py-2 font-mono text-xs text-electric-blue transition-all ${endpointSecretVisible ? '' : 'blur-sm select-none'}`}
+                >
+                  {endpointSecret || messages.noValue}
+                </code>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEndpointSecretVisible((current) => !current)}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border transition-colors hover:bg-accent"
+                    aria-label={endpointSecretVisible ? labels.hideToken : labels.showToken}
+                    title={endpointSecretVisible ? labels.hideToken : labels.showToken}
+                  >
+                    {endpointSecretVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void window.navigator.clipboard.writeText(endpointSecret)}
+                    disabled={!endpointSecret}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                    aria-label={labels.copyToken}
+                    title={labels.copyToken}
+                  >
+                    <Copy className="h-4 w-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void regenerateEndpointToken(selectedProject.project_id)}
+                    disabled={busyProjectId === selectedProject.project_id}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                    aria-label={labels.generateToken}
+                    title={labels.generateToken}
+                  >
+                    <RefreshCw className={`h-4 w-4 ${busyProjectId === selectedProject.project_id ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           {alternativeConnectURLs.length > 0 ? (
             <div className="mt-3 rounded-xl border border-border bg-background">

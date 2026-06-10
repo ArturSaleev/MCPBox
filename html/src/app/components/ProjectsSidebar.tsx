@@ -25,6 +25,8 @@ type ProjectFormState = {
   description: string;
   root_path: string;
   identity_verification_enabled: boolean;
+  bearer_auth_enabled: boolean;
+  bearer_token: string;
 };
 
 type SidebarProject = {
@@ -33,6 +35,8 @@ type SidebarProject = {
   description: string;
   connection_ready: boolean;
   is_paused: boolean;
+  bearer_auth_enabled?: boolean;
+  bearer_token?: string;
   servers: Array<{ status: string }>;
 };
 
@@ -192,6 +196,34 @@ export function ProjectsSidebar({
                         placeholder={messages.projectDescriptionPlaceholder}
                       />
                     </label>
+
+                    <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">
+                      <label className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={projectForm.bearer_auth_enabled}
+                          onChange={(event) =>
+                            setProjectForm((current) => ({
+                              ...current,
+                              bearer_auth_enabled: event.target.checked,
+                            }))
+                          }
+                          className="mt-1 h-4 w-4 rounded border-border text-electric-blue focus:ring-electric-blue"
+                        />
+                        <span>
+                          <span className="block text-sm font-medium">{labels.bearerEndpointProtection}</span>
+                          <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                            {messages.bearerEndpointProtectionDescription}
+                          </span>
+                        </span>
+                      </label>
+
+                      {projectForm.bearer_auth_enabled ? (
+                        <p className="text-xs leading-5 text-muted-foreground">
+                          {messages.bearerTokenGeneratedAfterCreate}
+                        </p>
+                      ) : null}
+                    </div>
 
                     <button
                       type="submit"

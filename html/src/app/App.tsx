@@ -112,6 +112,8 @@ const emptyProjectForm: ProjectFormState = {
   description: '',
   root_path: '',
   identity_verification_enabled: false,
+  bearer_auth_enabled: false,
+  bearer_token: '',
 };
 
 const emptyServerForm: ServerFormState = {
@@ -910,13 +912,21 @@ export default function App() {
     setActionError(null);
 
     try {
+      const projectPayload = {
+        name: projectForm.name,
+        description: projectForm.description,
+        root_path: projectForm.root_path,
+        identity_verification_enabled: projectForm.identity_verification_enabled,
+        bearer_auth_enabled: projectForm.bearer_auth_enabled,
+      };
+
       if (editingProjectId) {
         const updatedProject = await apiRequest<ProjectStatus>(
           `/api/projects/${editingProjectId}`,
           messages.requestFailed,
           {
             method: 'PUT',
-            body: JSON.stringify(projectForm),
+            body: JSON.stringify(projectPayload),
           },
         );
 
@@ -928,7 +938,7 @@ export default function App() {
       } else {
         await apiRequest('/api/projects', messages.requestFailed, {
           method: 'POST',
-          body: JSON.stringify(projectForm),
+          body: JSON.stringify(projectPayload),
         });
         await loadProjects();
       }
@@ -963,6 +973,7 @@ export default function App() {
             description: selectedProject.description,
             root_path: selectedProject.root_path,
             identity_verification_enabled: selectedProject.identity_verification_enabled,
+            bearer_auth_enabled: selectedProject.bearer_auth_enabled,
             prompt,
           }),
         },
@@ -1098,6 +1109,36 @@ export default function App() {
       await loadLogs();
     } finally {
       setBusyServerId(null);
+    }
+  }
+
+  async function regenerateProjectBearerToken(projectId: number) {
+    setBusyProjectId(projectId);
+    setActionError(null);
+
+    try {
+      const updatedProject = await apiRequest<ProjectStatus>(
+        `/api/projects/${projectId}/bearer-token`,
+        messages.requestFailed,
+        { method: 'POST' },
+      );
+
+      setProjects((current) =>
+        current.map((project) =>
+          project.project_id === updatedProject.project_id ? updatedProject : project,
+        ),
+      );
+      setProjectForm((current) => ({
+        ...current,
+        bearer_auth_enabled: updatedProject.bearer_auth_enabled,
+        bearer_token: updatedProject.bearer_token,
+      }));
+      toast.success(messages.bearerTokenRegenerated);
+      await loadLogs({ silent: true });
+    } catch (submitError) {
+      setActionError(submitError instanceof Error ? submitError.message : messages.createProjectError);
+    } finally {
+      setBusyProjectId(null);
     }
   }
 
@@ -1355,6 +1396,8 @@ export default function App() {
       description: selectedProject.description,
       root_path: selectedProject.root_path,
       identity_verification_enabled: selectedProject.identity_verification_enabled,
+      bearer_auth_enabled: selectedProject.bearer_auth_enabled,
+      bearer_token: selectedProject.bearer_token,
     });
     setEditingProjectId(selectedProject.project_id);
     setCreateProjectOpen(true);
@@ -1981,6 +2024,8 @@ export default function App() {
             duplicateProject={duplicateProject}
             duplicatingProjectId={duplicatingProjectId}
             selectedProject={selectedProject}
+            regenerateProjectBearerToken={regenerateProjectBearerToken}
+            busyProjectId={busyProjectId}
           />
         ) : null
       }

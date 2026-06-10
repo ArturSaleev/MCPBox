@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -74,6 +75,7 @@ type createProjectRequest struct {
 	Description                 string `json:"description"`
 	RootPath                    string `json:"root_path"`
 	IdentityVerificationEnabled bool   `json:"identity_verification_enabled"`
+	BearerAuthEnabled           bool   `json:"bearer_auth_enabled"`
 }
 
 type updateProjectRequest struct {
@@ -82,6 +84,7 @@ type updateProjectRequest struct {
 	RootPath                    string `json:"root_path"`
 	Prompt                      string `json:"prompt"`
 	IdentityVerificationEnabled bool   `json:"identity_verification_enabled"`
+	BearerAuthEnabled           bool   `json:"bearer_auth_enabled"`
 }
 
 type duplicateProjectRequest struct {
@@ -198,6 +201,8 @@ type projectStatusResponse struct {
 	Token                       string                         `json:"token"`
 	IsPaused                    bool                           `json:"is_paused"`
 	IdentityVerificationEnabled bool                           `json:"identity_verification_enabled"`
+	BearerAuthEnabled           bool                           `json:"bearer_auth_enabled"`
+	BearerToken                 string                         `json:"bearer_token"`
 	LlamaCppModelPath           string                         `json:"llama_cpp_model_path"`
 	LlamaCppModelName           string                         `json:"llama_cpp_model_name"`
 	ConnectURL                  string                         `json:"connect_url"`
@@ -426,6 +431,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		Description:          strings.TrimSpace(req.Description),
 		RootPath:             strings.TrimSpace(req.RootPath),
 		IdentityVerification: req.IdentityVerificationEnabled,
+		BearerAuthEnabled:    req.BearerAuthEnabled,
 	}
 	if project.Name == "" {
 		writeError(w, http.StatusBadRequest, errors.New("name is required"))
@@ -586,9 +592,31 @@ func (s *Server) handleProjectAction(w http.ResponseWriter, r *http.Request) {
 		s.handleSetProjectPaused(w, r, projectID, false)
 	case "duplicate":
 		s.handleDuplicateProject(w, r, *project)
+	case "bearer-token":
+		s.handleRegenerateProjectBearerToken(w, r, projectID)
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (s *Server) handleRegenerateProjectBearerToken(w http.ResponseWriter, r *http.Request, projectID uint) {
+	if _, err := s.store.RegenerateProjectBearerToken(r.Context(), projectID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	project, err := s.store.GetProject(r.Context(), projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if project == nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	s.logAudit(r.Context(), &projectID, nil, "project_bearer_token_regenerated", clientActor(r), project.Name)
+	writeJSON(w, http.StatusOK, s.projectStatus(r, *project))
 }
 
 func (s *Server) handleDuplicateProject(w http.ResponseWriter, r *http.Request, project models.Project) {
@@ -650,6 +678,7 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 		strings.TrimSpace(req.RootPath),
 		strings.TrimSpace(req.Prompt),
 		req.IdentityVerificationEnabled,
+		req.BearerAuthEnabled,
 	); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -1149,6 +1178,10 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if !projectEndpointBearerAuthorized(r, *project) {
+		writeError(w, http.StatusUnauthorized, errors.New("missing or invalid bearer token"))
+		return
+	}
 	if project.IsPaused {
 		s.logAudit(r.Context(), &project.ID, nil, "connect_blocked_project_paused", actor, "")
 		writeError(w, http.StatusForbidden, errors.New("project is paused"))
@@ -1464,6 +1497,8 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 		Token:                       project.Token,
 		IsPaused:                    project.IsPaused,
 		IdentityVerificationEnabled: project.IdentityVerification,
+		BearerAuthEnabled:           project.BearerAuthEnabled,
+		BearerToken:                 project.BearerToken,
 		LlamaCppModelPath:           project.LlamaCppModelPath,
 		LlamaCppModelName:           project.LlamaCppModelName,
 		ConnectURL:                  firstOrEmpty(connectURLs),
@@ -3360,4 +3395,22 @@ func bearerTokenFromRequest(r *http.Request) string {
 		return strings.TrimSpace(raw[7:])
 	}
 	return ""
+}
+
+func projectEndpointBearerAuthorized(r *http.Request, project models.Project) bool {
+	if !project.BearerAuthEnabled {
+		return true
+	}
+	expected := strings.TrimSpace(project.BearerToken)
+	if expected == "" {
+		return false
+	}
+	provided := strings.TrimSpace(bearerTokenFromRequest(r))
+	if provided == "" {
+		return false
+	}
+	if len(provided) != len(expected) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
 }
