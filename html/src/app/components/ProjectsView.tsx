@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { Server } from 'lucide-react';
 
 import { dictionaries } from '../i18n';
+import type { CatalogItem, InstalledPackage } from '../market';
 import { ProjectKnowledgePanel } from './ProjectKnowledgePanel';
 import { ProjectLaunchPanel } from './ProjectLaunchPanel';
 import { ProjectPromptPanel } from './ProjectPromptPanel';
@@ -51,15 +52,26 @@ type ServerStatus = {
 };
 
 type RAGCollection = {
+  id?: number;
   collection_id: string;
   name: string;
   data_type: string;
+  source_path?: string;
+  auto_reindex?: boolean;
+  index_path?: string;
+};
+
+type RAGCollectionForm = {
+  name: string;
+  source_path: string;
+  auto_reindex: boolean;
 };
 
 type ProjectStatus = {
   project_id: number;
   name: string;
   description: string;
+  root_path: string;
   token: string;
   is_paused: boolean;
   llama_cpp_model_path: string;
@@ -68,6 +80,7 @@ type ProjectStatus = {
   connect_url: string;
   servers: ServerStatus[];
   rag_collections: RAGCollection[];
+  installed_integrations: Array<{ catalog_item_id: string }>;
   prompt: string;
 };
 
@@ -209,10 +222,20 @@ type ProjectsViewProps = {
   deleteProject: (projectId: number) => void | Promise<void>;
   connectRAGCollectionOpen: boolean;
   setConnectRAGCollectionOpen: (open: boolean) => void;
+  allRAGCollections: RAGCollection[];
   availableRAGCollections: RAGCollection[];
   connectRAGCollectionToProject: (collectionId: string) => void | Promise<void>;
   linkingCollectionId: string | null;
   disconnectRAGCollectionFromProject: (collectionId: string) => void | Promise<void>;
+  ragCollectionForm: RAGCollectionForm;
+  setRAGCollectionForm: (updater: (current: RAGCollectionForm) => RAGCollectionForm) => void;
+  resetRAGCollectionForm: () => void;
+  createAndConnectRAGCollectionToProject: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
+  creatingRAGCollection: boolean;
+  ragIndexPaths: Record<string, string>;
+  setRAGIndexPaths: (updater: (current: Record<string, string>) => Record<string, string>) => void;
+  indexRAGCollection: (collectionId: string) => void | Promise<void>;
+  indexingCollectionId: string | null;
   addServerOpen: boolean;
   setAddServerOpen: (open: boolean) => void;
   editingServerId: number | null;
@@ -236,6 +259,15 @@ type ProjectsViewProps = {
   addKeyValueField: (key: 'env_vars' | 'headers' | 'header_env_vars') => void;
   updateServerLastArg: (value: string) => void;
   editingServerIntegrationCatalogItemId: string | null;
+  catalogItems: CatalogItem[];
+  installedPackages: InstalledPackage[];
+  addingCatalogItemId: string | null;
+  onPerformCatalogInstall: (
+    item: CatalogItem,
+    projectId: number,
+    config: Record<string, unknown>,
+  ) => Promise<boolean>;
+  onActionError: (message: string | null) => void;
   addingServer: boolean;
   addServer: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
   busyServerId: number | null;
@@ -317,10 +349,20 @@ export function ProjectsView({
   deleteProject,
   connectRAGCollectionOpen,
   setConnectRAGCollectionOpen,
+  allRAGCollections,
   availableRAGCollections,
   connectRAGCollectionToProject,
   linkingCollectionId,
   disconnectRAGCollectionFromProject,
+  ragCollectionForm,
+  setRAGCollectionForm,
+  resetRAGCollectionForm,
+  createAndConnectRAGCollectionToProject,
+  creatingRAGCollection,
+  ragIndexPaths,
+  setRAGIndexPaths,
+  indexRAGCollection,
+  indexingCollectionId,
   addServerOpen,
   setAddServerOpen,
   editingServerId,
@@ -335,6 +377,11 @@ export function ProjectsView({
   addKeyValueField,
   updateServerLastArg,
   editingServerIntegrationCatalogItemId,
+  catalogItems,
+  installedPackages,
+  addingCatalogItemId,
+  onPerformCatalogInstall,
+  onActionError,
   addingServer,
   addServer,
   busyServerId,
@@ -485,6 +532,11 @@ export function ProjectsView({
             addKeyValueField={addKeyValueField}
             updateServerLastArg={updateServerLastArg}
             editingServerIntegrationCatalogItemId={editingServerIntegrationCatalogItemId}
+            catalogItems={catalogItems}
+            installedPackages={installedPackages}
+            addingCatalogItemId={addingCatalogItemId}
+            onPerformCatalogInstall={onPerformCatalogInstall}
+            onActionError={onActionError}
             addingServer={addingServer}
             addServer={addServer}
             busyServerId={busyServerId}
@@ -507,12 +559,22 @@ export function ProjectsView({
             messages={messages}
             connectRAGCollectionOpen={connectRAGCollectionOpen}
             setConnectRAGCollectionOpen={setConnectRAGCollectionOpen}
+            allRAGCollections={allRAGCollections}
             availableRAGCollections={availableRAGCollections}
             connectRAGCollectionToProject={connectRAGCollectionToProject}
             linkingCollectionId={linkingCollectionId}
             selectedProject={selectedProject}
             disconnectRAGCollectionFromProject={disconnectRAGCollectionFromProject}
             busyProjectId={busyProjectId}
+            ragCollectionForm={ragCollectionForm}
+            setRAGCollectionForm={setRAGCollectionForm}
+            resetRAGCollectionForm={resetRAGCollectionForm}
+            createAndConnectRAGCollectionToProject={createAndConnectRAGCollectionToProject}
+            creatingRAGCollection={creatingRAGCollection}
+            ragIndexPaths={ragIndexPaths}
+            setRAGIndexPaths={setRAGIndexPaths}
+            indexRAGCollection={indexRAGCollection}
+            indexingCollectionId={indexingCollectionId}
           />
         </TabsContent>
 

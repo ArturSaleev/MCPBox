@@ -111,6 +111,9 @@ const emptyProjectForm: ProjectFormState = {
   name: '',
   description: '',
   root_path: '',
+  identity_verification_enabled: false,
+  bearer_auth_enabled: false,
+  bearer_token: '',
 };
 
 const emptyServerForm: ServerFormState = {
@@ -909,13 +912,21 @@ export default function App() {
     setActionError(null);
 
     try {
+      const projectPayload = {
+        name: projectForm.name,
+        description: projectForm.description,
+        root_path: projectForm.root_path,
+        identity_verification_enabled: projectForm.identity_verification_enabled,
+        bearer_auth_enabled: projectForm.bearer_auth_enabled,
+      };
+
       if (editingProjectId) {
         const updatedProject = await apiRequest<ProjectStatus>(
           `/api/projects/${editingProjectId}`,
           messages.requestFailed,
           {
             method: 'PUT',
-            body: JSON.stringify(projectForm),
+            body: JSON.stringify(projectPayload),
           },
         );
 
@@ -927,7 +938,7 @@ export default function App() {
       } else {
         await apiRequest('/api/projects', messages.requestFailed, {
           method: 'POST',
-          body: JSON.stringify(projectForm),
+          body: JSON.stringify(projectPayload),
         });
         await loadProjects();
       }
@@ -961,6 +972,8 @@ export default function App() {
             name: selectedProject.name,
             description: selectedProject.description,
             root_path: selectedProject.root_path,
+            identity_verification_enabled: selectedProject.identity_verification_enabled,
+            bearer_auth_enabled: selectedProject.bearer_auth_enabled,
             prompt,
           }),
         },
@@ -1096,6 +1109,36 @@ export default function App() {
       await loadLogs();
     } finally {
       setBusyServerId(null);
+    }
+  }
+
+  async function regenerateProjectBearerToken(projectId: number) {
+    setBusyProjectId(projectId);
+    setActionError(null);
+
+    try {
+      const updatedProject = await apiRequest<ProjectStatus>(
+        `/api/projects/${projectId}/bearer-token`,
+        messages.requestFailed,
+        { method: 'POST' },
+      );
+
+      setProjects((current) =>
+        current.map((project) =>
+          project.project_id === updatedProject.project_id ? updatedProject : project,
+        ),
+      );
+      setProjectForm((current) => ({
+        ...current,
+        bearer_auth_enabled: updatedProject.bearer_auth_enabled,
+        bearer_token: updatedProject.bearer_token,
+      }));
+      toast.success(messages.bearerTokenRegenerated);
+      await loadLogs({ silent: true });
+    } catch (submitError) {
+      setActionError(submitError instanceof Error ? submitError.message : messages.createProjectError);
+    } finally {
+      setBusyProjectId(null);
     }
   }
 
@@ -1352,6 +1395,9 @@ export default function App() {
       name: selectedProject.name,
       description: selectedProject.description,
       root_path: selectedProject.root_path,
+      identity_verification_enabled: selectedProject.identity_verification_enabled,
+      bearer_auth_enabled: selectedProject.bearer_auth_enabled,
+      bearer_token: selectedProject.bearer_token,
     });
     setEditingProjectId(selectedProject.project_id);
     setCreateProjectOpen(true);
@@ -1693,6 +1739,59 @@ export default function App() {
     }
   }
 
+  async function createAndConnectRAGCollectionToProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedProject) {
+      return;
+    }
+
+    setCreatingRAGCollection(true);
+    setActionError(null);
+
+    try {
+      const savedCollection = await apiRequest<RAGCollection>(
+        '/api/rag/collections',
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            name: ragCollectionForm.name,
+            source_path: ragCollectionForm.source_path,
+            auto_reindex: ragCollectionForm.auto_reindex,
+          }),
+        },
+      );
+
+      setAllRAGCollections((current) => [...current, savedCollection]);
+      setRAGIndexPaths((current) => ({
+        ...current,
+        [savedCollection.collection_id]: savedCollection.source_path,
+      }));
+
+      const updatedProject = await apiRequest<ProjectStatus>(
+        `/api/projects/${selectedProject.project_id}/rag-collections`,
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({ collection_id: savedCollection.collection_id }),
+        },
+      );
+
+      setProjects((current) =>
+        current.map((project) =>
+          project.project_id === updatedProject.project_id ? updatedProject : project,
+        ),
+      );
+      setRAGCollectionForm(emptyRAGCollectionForm);
+      setConnectRAGCollectionOpen(false);
+      await loadLogs();
+    } catch (submitError) {
+      setActionError(submitError instanceof Error ? submitError.message : messages.loadProjectsError);
+    } finally {
+      setCreatingRAGCollection(false);
+    }
+  }
+
   async function indexRAGCollection(collectionId: string) {
     const dirPath = (ragIndexPaths[collectionId] ?? selectedProject?.root_path ?? '').trim();
     if (!dirPath) {
@@ -1824,7 +1923,7 @@ export default function App() {
   }
 
   function updateStringListField(
-    field: 'args' | 'env_passthrough',
+    field: 'args' | 'env_passthrough' | 'oauth_scopes',
     index: number,
     value: string,
   ) {
@@ -1834,14 +1933,14 @@ export default function App() {
     }));
   }
 
-  function addStringListField(field: 'args' | 'env_passthrough') {
+  function addStringListField(field: 'args' | 'env_passthrough' | 'oauth_scopes') {
     setServerForm((current) => ({
       ...current,
       [field]: [...current[field], ''],
     }));
   }
 
-  function removeStringListField(field: 'args' | 'env_passthrough', index: number) {
+  function removeStringListField(field: 'args' | 'env_passthrough' | 'oauth_scopes', index: number) {
     setServerForm((current) => {
       const next = current[field].filter((_, itemIndex) => itemIndex !== index);
       return {
@@ -1925,6 +2024,8 @@ export default function App() {
             duplicateProject={duplicateProject}
             duplicatingProjectId={duplicatingProjectId}
             selectedProject={selectedProject}
+            regenerateProjectBearerToken={regenerateProjectBearerToken}
+            busyProjectId={busyProjectId}
           />
         ) : null
       }
@@ -2070,10 +2171,23 @@ export default function App() {
               deleteProject={deleteProject}
               connectRAGCollectionOpen={connectRAGCollectionOpen}
               setConnectRAGCollectionOpen={setConnectRAGCollectionOpen}
+              allRAGCollections={allRAGCollections}
               availableRAGCollections={availableRAGCollections}
               connectRAGCollectionToProject={connectRAGCollectionToProject}
               linkingCollectionId={linkingCollectionId}
               disconnectRAGCollectionFromProject={disconnectRAGCollectionFromProject}
+              ragCollectionForm={ragCollectionForm}
+              setRAGCollectionForm={setRAGCollectionForm}
+              resetRAGCollectionForm={() => {
+                setRAGCollectionForm(emptyRAGCollectionForm);
+                setEditingRAGCollectionId(null);
+              }}
+              createAndConnectRAGCollectionToProject={createAndConnectRAGCollectionToProject}
+              creatingRAGCollection={creatingRAGCollection}
+              ragIndexPaths={ragIndexPaths}
+              setRAGIndexPaths={setRAGIndexPaths}
+              indexRAGCollection={indexRAGCollection}
+              indexingCollectionId={indexingCollectionId}
               addServerOpen={addServerOpen}
               setAddServerOpen={setAddServerOpen}
               editingServerId={editingServerId}
@@ -2092,6 +2206,11 @@ export default function App() {
               addKeyValueField={addKeyValueField}
               updateServerLastArg={updateServerLastArg}
               editingServerIntegrationCatalogItemId={editingServerIntegration?.catalog_item_id ?? null}
+              catalogItems={catalogItems}
+              installedPackages={installedPackages}
+              addingCatalogItemId={addingCatalogItemId}
+              onPerformCatalogInstall={performCatalogInstall}
+              onActionError={setActionError}
               addingServer={addingServer}
               addServer={addServer}
               busyServerId={busyServerId}
