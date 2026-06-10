@@ -5,7 +5,11 @@ set "ROOT=%~dp0"
 cd /d "%ROOT%"
 
 set "GOCACHE=%ROOT%.gocache"
-set "RELEASE_DIR=%ROOT%release"
+if defined RELEASE_DIR (
+    set "RELEASE_DIR=%RELEASE_DIR%"
+) else (
+    set "RELEASE_DIR=%ROOT%release"
+)
 
 if not exist "%RELEASE_DIR%" (
     mkdir "%RELEASE_DIR%"

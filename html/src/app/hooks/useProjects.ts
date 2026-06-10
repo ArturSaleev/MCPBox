@@ -7,6 +7,7 @@ export type ProjectFormState = {
   name: string;
   description: string;
   root_path: string;
+  identity_verification_enabled: boolean;
 };
 
 export type ServerFormState = {
@@ -41,6 +42,7 @@ const emptyProjectForm: ProjectFormState = {
   name: '',
   description: '',
   root_path: '',
+  identity_verification_enabled: false,
 };
 
 const emptyServerForm: ServerFormState = {
@@ -126,6 +128,7 @@ export function useProjects(messages: { requestFailed: string; projectCreated: s
           name: selectedProject.name,
           description: selectedProject.description,
           root_path: selectedProject.root_path,
+          identity_verification_enabled: selectedProject.identity_verification_enabled,
           prompt,
         }),
       });

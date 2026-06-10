@@ -1,4 +1,4 @@
-import type { FormEvent } from 'react';
+import { useMemo, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
 
 import {
   CheckCircle2,
@@ -16,6 +16,16 @@ import {
 
 import { dictionaries } from '../i18n';
 import {
+  applyProjectDefaultsToInstallValues,
+  catalogConfigFields,
+  catalogEnvFields,
+  normalizeEnvConfig,
+  normalizeInstallConfig,
+  type CatalogItem,
+  type CatalogConfigField,
+  type InstalledPackage,
+} from '../market';
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -23,6 +33,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from './ui/dialog';
+import { Input } from './ui/input';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 
 type KeyValuePair = {
   key: string;
@@ -90,7 +102,13 @@ type ServerFormState = {
 type ProjectServersPanelProps = {
   labels: typeof dictionaries.en.labels;
   messages: typeof dictionaries.en.messages;
-  selectedProject: { project_id: number; servers: ServerStatus[] };
+  selectedProject: {
+    project_id: number;
+    name: string;
+    root_path: string;
+    servers: ServerStatus[];
+    installed_integrations?: Array<{ catalog_item_id: string }>;
+  };
   addServerOpen: boolean;
   setAddServerOpen: (open: boolean) => void;
   editingServerId: number | null;
@@ -114,6 +132,15 @@ type ProjectServersPanelProps = {
   addKeyValueField: (key: 'env_vars' | 'headers' | 'header_env_vars') => void;
   updateServerLastArg: (value: string) => void;
   editingServerIntegrationCatalogItemId: string | null;
+  catalogItems: CatalogItem[];
+  installedPackages: InstalledPackage[];
+  addingCatalogItemId: string | null;
+  onPerformCatalogInstall: (
+    item: CatalogItem,
+    projectId: number,
+    config: Record<string, unknown>,
+  ) => Promise<boolean>;
+  onActionError: (message: string | null) => void;
   addingServer: boolean;
   addServer: (event: FormEvent<HTMLFormElement>) => void | Promise<void>;
   busyServerId: number | null;
@@ -206,6 +233,11 @@ export function ProjectServersPanel({
   addKeyValueField,
   updateServerLastArg,
   editingServerIntegrationCatalogItemId,
+  catalogItems,
+  installedPackages,
+  addingCatalogItemId,
+  onPerformCatalogInstall,
+  onActionError,
   addingServer,
   addServer,
   busyServerId,
@@ -220,6 +252,126 @@ export function ProjectServersPanel({
   setServerEnabled,
   deleteServer,
 }: ProjectServersPanelProps) {
+  const [addServerTab, setAddServerTab] = useState<'stdio_http' | 'installed'>('stdio_http');
+  const [installedConfigItem, setInstalledConfigItem] = useState<CatalogItem | null>(null);
+  const [installedConfigValues, setInstalledConfigValues] = useState<Record<string, string>>({});
+  const [installedEnvValues, setInstalledEnvValues] = useState<Record<string, string>>({});
+
+  const installedCatalogItems = useMemo(() => {
+    const installedPackageIDs = new Set(
+      installedPackages
+        .filter((pkg) => pkg.status === 'installed')
+        .map((pkg) => pkg.catalog_item_id),
+    );
+
+    return catalogItems
+      .filter((item) => installedPackageIDs.has(item.id))
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }, [catalogItems, installedPackages]);
+
+  const projectCatalogIDs = useMemo(
+    () => new Set((selectedProject.installed_integrations ?? []).map((integration) => integration.catalog_item_id)),
+    [selectedProject.installed_integrations],
+  );
+
+  const installedConfigFields = installedConfigItem ? catalogConfigFields(installedConfigItem) : [];
+  const installedEnvFields = installedConfigItem ? catalogEnvFields(installedConfigItem) : [];
+  const selectedProjectOption = {
+    project_id: selectedProject.project_id,
+    name: selectedProject.name,
+    root_path: selectedProject.root_path,
+  };
+
+  function openInstalledConfig(item: CatalogItem) {
+    const fields = catalogConfigFields(item);
+    const envFields = catalogEnvFields(item);
+    const baseValues = Object.fromEntries(fields.map((field) => [field.key, field.defaultValue]));
+    const baseEnvValues = Object.fromEntries(envFields.map((field) => [field.key, field.defaultValue]));
+
+    setInstalledConfigItem(item);
+    setInstalledConfigValues(
+      applyProjectDefaultsToInstallValues(baseValues, fields, selectedProjectOption),
+    );
+    setInstalledEnvValues(baseEnvValues);
+  }
+
+  async function addInstalledItem(item: CatalogItem) {
+    const fields = catalogConfigFields(item);
+    const envFields = catalogEnvFields(item);
+    if (fields.length > 0 || envFields.length > 0) {
+      openInstalledConfig(item);
+      return;
+    }
+
+    await onPerformCatalogInstall(item, selectedProject.project_id, {});
+  }
+
+  async function submitInstalledConfig(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!installedConfigItem) {
+      onActionError('Installed MCP server is not selected.');
+      return;
+    }
+
+    const config = normalizeInstallConfig(installedConfigFields, installedConfigValues);
+    const env = {
+      ...(config.env && typeof config.env === 'object' ? (config.env as Record<string, string>) : {}),
+      ...normalizeEnvConfig(installedEnvFields, installedEnvValues),
+    };
+    if (Object.keys(env).length > 0) {
+      config.env = env;
+    }
+
+    const success = await onPerformCatalogInstall(
+      installedConfigItem,
+      selectedProject.project_id,
+      config,
+    );
+    if (success) {
+      setInstalledConfigItem(null);
+      setInstalledConfigValues({});
+      setInstalledEnvValues({});
+      setAddServerOpen(false);
+    }
+  }
+
+  function renderInstalledConfigField(
+    field: CatalogConfigField,
+    values: Record<string, string>,
+    setValues: Dispatch<SetStateAction<Record<string, string>>>,
+    prefix: string,
+  ) {
+    return (
+      <label key={`${prefix}-${field.key}`} className="block space-y-2">
+        <span className="text-sm text-muted-foreground">
+          {field.label}
+          {field.required ? ' *' : ''}
+        </span>
+        {field.description ? (
+          <span className="block text-xs text-muted-foreground">{field.description}</span>
+        ) : null}
+        {field.type === 'array' ? (
+          <textarea
+            value={values[field.key] ?? ''}
+            onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))}
+            rows={4}
+            className="w-full rounded-md border border-border bg-input-background px-3 py-2 text-sm outline-none transition-colors focus:border-electric-blue"
+            placeholder={messages.oneValuePerLine}
+            required={field.required}
+          />
+        ) : (
+          <Input
+            type={field.secret ? 'password' : 'text'}
+            value={values[field.key] ?? ''}
+            onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))}
+            className="h-10"
+            required={field.required}
+          />
+        )}
+      </label>
+    );
+  }
+
   return (
     <section className="rounded-2xl border border-border bg-card p-6">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -235,6 +387,10 @@ export function ProjectServersPanel({
             setAddServerOpen(open);
             if (!open) {
               resetServerEditor();
+              setInstalledConfigItem(null);
+              setInstalledConfigValues({});
+              setInstalledEnvValues({});
+              setAddServerTab('stdio_http');
             }
           }}
         >
@@ -244,13 +400,30 @@ export function ProjectServersPanel({
               {labels.addServer}
             </button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-xl">
+          <DialogContent className="sm:max-w-3xl">
             <DialogHeader>
               <DialogTitle>{editingServerId ? 'Edit MCP Server' : labels.addServer}</DialogTitle>
               <DialogDescription>{messages.addServerDescription}</DialogDescription>
             </DialogHeader>
 
-            <form className="space-y-4" onSubmit={addServer}>
+            <Tabs value={addServerTab} onValueChange={(value) => setAddServerTab(value as 'stdio_http' | 'installed')} className="space-y-4">
+              <TabsList className="grid h-auto w-full grid-cols-2 rounded-xl border border-border bg-background p-1">
+                <TabsTrigger
+                  value="stdio_http"
+                  className="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-all data-[state=active]:bg-electric-blue data-[state=active]:text-white data-[state=active]:shadow-md data-[state=active]:shadow-electric-blue/20"
+                >
+                  STDIO / HTTP
+                </TabsTrigger>
+                <TabsTrigger
+                  value="installed"
+                  className="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-all data-[state=active]:bg-electric-blue data-[state=active]:text-white data-[state=active]:shadow-md data-[state=active]:shadow-electric-blue/20"
+                >
+                  Installed
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="stdio_http" className="space-y-4">
+                <form className="space-y-4" onSubmit={addServer}>
               <label className="block space-y-2">
                 <span className="text-sm text-muted-foreground">{labels.serverName}</span>
                 <input
@@ -548,15 +721,134 @@ export function ProjectServersPanel({
                 </div>
               )}
 
-              <button
-                type="submit"
-                disabled={addingServer}
-                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {addingServer ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                {editingServerId ? 'Save Server' : labels.addServer}
-              </button>
-            </form>
+                  <button
+                    type="submit"
+                    disabled={addingServer}
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {addingServer ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                    {editingServerId ? 'Save Server' : labels.addServer}
+                  </button>
+                </form>
+              </TabsContent>
+
+              <TabsContent value="installed" className="space-y-4">
+                {installedCatalogItems.length === 0 ? (
+                  <div className="rounded-xl border border-dashed border-border bg-background px-4 py-8 text-center text-sm text-muted-foreground">
+                    No installed MCP servers yet. Install a server from Market first.
+                  </div>
+                ) : installedConfigItem ? (
+                  <form className="space-y-4" onSubmit={submitInstalledConfig}>
+                    <div className="rounded-xl border border-border bg-background p-4">
+                      <div className="font-medium">{installedConfigItem.name}</div>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {installedConfigItem.description || 'Configure this installed server for the current project.'}
+                      </p>
+                      {selectedProject.root_path ? (
+                        <div className="mt-2 text-xs text-muted-foreground">
+                          Current project folder: {selectedProject.root_path}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {installedConfigFields.map((field) =>
+                      renderInstalledConfigField(field, installedConfigValues, setInstalledConfigValues, 'installed-config'),
+                    )}
+
+                    {installedEnvFields.length > 0 ? (
+                      <div className="space-y-4 rounded-xl border border-border bg-background p-4">
+                        <div>
+                          <div className="text-sm font-medium">{labels.environmentVariables}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">{messages.envSchemaDescription}</div>
+                        </div>
+                        {installedEnvFields.map((field) => (
+                          <div key={`installed-env-wrap-${field.key}`} className="space-y-1">
+                            <code className="block text-xs text-electric-blue">{field.key}</code>
+                            {renderInstalledConfigField(field, installedEnvValues, setInstalledEnvValues, 'installed-env')}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setInstalledConfigItem(null);
+                          setInstalledConfigValues({});
+                          setInstalledEnvValues({});
+                        }}
+                        className="inline-flex h-10 flex-1 items-center justify-center rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent"
+                      >
+                        Back to installed
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={addingCatalogItemId === installedConfigItem.id}
+                        className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {addingCatalogItemId === installedConfigItem.id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                        {labels.addToProject}
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="grid gap-3">
+                    {installedCatalogItems.map((item) => {
+                      const packageInfo = installedPackages.find((pkg) => pkg.catalog_item_id === item.id && pkg.status === 'installed') ?? null;
+                      const alreadyInProject = projectCatalogIDs.has(item.id);
+                      const busy = addingCatalogItemId === item.id;
+                      const primaryValue = item.transport === 'stdio'
+                        ? [item.command, ...(item.args ?? [])].filter(Boolean).join(' ')
+                        : item.mcp_url || 'No endpoint';
+
+                      return (
+                        <div key={`installed-${item.id}`} className="rounded-xl border border-border bg-background p-4">
+                          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                            <div className="min-w-0 flex-1">
+                              <div className="font-medium">{item.name}</div>
+                              <div className="mt-1 text-sm text-muted-foreground">
+                                {item.description || 'Installed MCP server from Market.'}
+                              </div>
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
+                                  {item.transport === 'stdio' ? 'STDIO' : item.transport}
+                                </span>
+                                <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
+                                  {item.runtime.type || 'runtime'}
+                                </span>
+                                {alreadyInProject ? (
+                                  <span className="rounded-full border border-electric-blue/30 bg-electric-blue/12 px-2 py-1 text-xs font-medium text-electric-blue">
+                                    Already in project
+                                  </span>
+                                ) : null}
+                              </div>
+                              <code className="mt-3 block overflow-x-auto rounded-md bg-card px-3 py-2 text-xs text-electric-blue">
+                                {primaryValue || 'No command'}
+                              </code>
+                              {packageInfo?.install_dir ? (
+                                <div className="mt-2 text-xs text-muted-foreground">
+                                  Installed at: {packageInfo.install_dir}
+                                </div>
+                              ) : null}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => void addInstalledItem(item)}
+                              disabled={busy || !item.enabled}
+                              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                            >
+                              {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                              {labels.addToProject}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
           </DialogContent>
         </Dialog>
       </div>

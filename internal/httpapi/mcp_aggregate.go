@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ArturSaleev/MCPBox/connectruntime"
 	"github.com/ArturSaleev/MCPBox/internal/models"
 	"github.com/ArturSaleev/MCPBox/internal/orchestrator"
 	"github.com/ArturSaleev/MCPBox/internal/rag"
@@ -640,6 +641,7 @@ func (s *Server) callHTTPServerMethod(ctx context.Context, server models.MCPServ
 	}
 	upstreamReq.Header.Set("Content-Type", "application/json")
 	applyConfiguredHeaders(upstreamReq.Header, server)
+	applyRuntimeHeaders(upstreamReq.Header, connectruntime.FromContext(ctx))
 
 	response, err := http.DefaultClient.Do(upstreamReq)
 	if err != nil {

@@ -20,6 +20,7 @@ type Project struct {
 	RootPath              string                   `gorm:"size:1024" json:"root_path"`
 	Token                 string                   `gorm:"size:64;uniqueIndex;not null" json:"token"`
 	IsPaused              bool                     `gorm:"not null;default:false" json:"is_paused"`
+	IdentityVerification  bool                     `gorm:"not null;default:false" json:"identity_verification_enabled"`
 	Prompt                string                   `gorm:"type:text" json:"prompt"`
 	LlamaCppModelPath     string                   `gorm:"size:2048" json:"llama_cpp_model_path"`
 	LlamaCppModelName     string                   `gorm:"size:255" json:"llama_cpp_model_name"`

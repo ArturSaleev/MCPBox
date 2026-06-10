@@ -313,14 +313,15 @@ func (s *Store) CreateProject(ctx context.Context, project *models.Project) erro
 	return s.db.WithContext(ctx).Create(project).Error
 }
 
-func (s *Store) UpdateProject(ctx context.Context, projectID uint, name, description, rootPath, prompt string) error {
+func (s *Store) UpdateProject(ctx context.Context, projectID uint, name, description, rootPath, prompt string, identityVerification bool) error {
 	return s.db.WithContext(ctx).Model(&models.Project{}).
 		Where("id = ?", projectID).
 		Updates(map[string]any{
-			"name":        name,
-			"description": description,
-			"root_path":   rootPath,
-			"prompt":      prompt,
+			"name":                  name,
+			"description":           description,
+			"root_path":             rootPath,
+			"prompt":                prompt,
+			"identity_verification": identityVerification,
 		}).Error
 }
 
@@ -351,14 +352,15 @@ func (s *Store) DuplicateProject(ctx context.Context, source *models.Project, na
 	var duplicatedProjectID uint
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		duplicated := &models.Project{
-			Name:              name,
-			Description:       source.Description,
-			RootPath:          source.RootPath,
-			Token:             token,
-			IsPaused:          source.IsPaused,
-			Prompt:            source.Prompt,
-			LlamaCppModelPath: source.LlamaCppModelPath,
-			LlamaCppModelName: source.LlamaCppModelName,
+			Name:                 name,
+			Description:          source.Description,
+			RootPath:             source.RootPath,
+			Token:                token,
+			IsPaused:             source.IsPaused,
+			IdentityVerification: source.IdentityVerification,
+			Prompt:               source.Prompt,
+			LlamaCppModelPath:    source.LlamaCppModelPath,
+			LlamaCppModelName:    source.LlamaCppModelName,
 		}
 		if err := tx.Create(duplicated).Error; err != nil {
 			return err

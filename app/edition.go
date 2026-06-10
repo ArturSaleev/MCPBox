@@ -5,22 +5,24 @@ import (
 	"io/fs"
 	"net/http"
 
+	"github.com/ArturSaleev/MCPBox/connectruntime"
 	"gorm.io/gorm"
 )
 
 // Edition describes one distributable MCPBox build configuration.
 type Edition struct {
-	ID             string
-	Name           string
-	BinaryName     string
-	Capabilities   []string
-	UIFS           fs.FS
-	AdminHost      string
-	AdminPort      int
-	MCPHost        string
-	MCPPort        int
-	StartupHooks   []StartupHook
-	HTTPRegistrars []HTTPRegistrar
+	ID                string
+	Name              string
+	BinaryName        string
+	Capabilities      []string
+	UIFS              fs.FS
+	AdminHost         string
+	AdminPort         int
+	MCPHost           string
+	MCPPort           int
+	StartupHooks      []StartupHook
+	HTTPRegistrars    []HTTPRegistrar
+	ConnectAuthorizer connectruntime.ProjectAuthorizer
 }
 
 // RuntimeContext exposes safe shared runtime handles for edition extensions.

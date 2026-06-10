@@ -5,6 +5,7 @@ export type ProjectStatus = {
   root_path: string;
   token: string;
   is_paused: boolean;
+  identity_verification_enabled: boolean;
   llama_cpp_model_path: string;
   llama_cpp_model_name: string;
   connect_url: string;
@@ -61,6 +62,7 @@ export type ProjectFormState = {
   name: string;
   description: string;
   root_path: string;
+  identity_verification_enabled: boolean;
 };
 
 export type ServerFormState = {

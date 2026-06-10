@@ -38,21 +38,35 @@ func (s *Store) UpdateRAGCollectionSourcePath(ctx context.Context, collectionID,
 		Update("source_path", sourcePath).Error
 }
 
-func (s *Store) UpdateRAGCollectionConfig(ctx context.Context, collectionID, name, sourcePath string, autoReindex bool) error {
+func (s *Store) UpdateRAGCollectionConfig(ctx context.Context, collectionID, name, sourcePath string, autoReindex bool, vectorConnectionID string) error {
 	return s.db.WithContext(ctx).
 		Model(&models.RAGCollection{}).
 		Where("collection_id = ?", collectionID).
 		Updates(map[string]any{
-			"name":         name,
-			"source_path":  sourcePath,
-			"auto_reindex": autoReindex,
+			"name":                 name,
+			"source_path":          sourcePath,
+			"auto_reindex":         autoReindex,
+			"vector_connection_id": vectorConnectionID,
+		}).Error
+}
+
+func (s *Store) UpdateRAGCollectionFullConfig(ctx context.Context, collectionID, name, sourcePath string, autoReindex bool, serviceMode, vectorConnectionID string) error {
+	return s.db.WithContext(ctx).
+		Model(&models.RAGCollection{}).
+		Where("collection_id = ?", collectionID).
+		Updates(map[string]any{
+			"name":                 name,
+			"source_path":          sourcePath,
+			"auto_reindex":         autoReindex,
+			"service_mode":         models.NormalizeRAGServiceMode(serviceMode),
+			"vector_connection_id": vectorConnectionID,
 		}).Error
 }
 
 func (s *Store) ListAutoReindexRAGCollections(ctx context.Context) ([]models.RAGCollection, error) {
 	var collections []models.RAGCollection
 	err := s.db.WithContext(ctx).
-		Where("auto_reindex = ? AND TRIM(COALESCE(source_path, '')) <> ''", true).
+		Where("auto_reindex = ? AND TRIM(COALESCE(source_path, '')) <> '' AND COALESCE(service_mode, '') <> ?", true, models.RAGServiceModeRagBoxOnly).
 		Order("id asc").
 		Find(&collections).Error
 	return collections, err

@@ -1,0 +1,285 @@
+MCPBox 1.2.4 endpoint security plan
+
+Purpose
+-------
+Add optional project-level protection for public project MCP endpoints.
+This is useful when MCPBox is exposed through a public tunnel such as ngrok.
+
+This file avoids exact credential wording in some places because tool filters blocked a more detailed draft. In product UI you can call the feature Bearer protection and use Authorization header wording.
+
+Target behavior
+---------------
+1. Each project has a checkbox to enable endpoint protection.
+2. When disabled, project endpoints work exactly as before.
+3. When enabled, every request to the project endpoint must provide the configured HTTP access value.
+4. Missing or wrong credentials must return HTTP 401 before SSE or JSON-RPC handling starts.
+5. The access value must be generated only on the backend.
+6. The UI field is readonly and hidden by default like a password field.
+7. UI controls required: show/hide eye button, copy button, generate/regenerate button.
+8. Generate can be clicked many times. Each click replaces the old value.
+9. If checkbox is disabled, keep the existing value in DB, but do not enforce it.
+10. Protect all project MCP entrypoints: GET and POST for /mcp/{project_token} and /connect/{project_token}.
+
+Backend files
+-------------
+
+1. internal/models/models.go
+
+In Project struct, add two fields after IdentityVerification.
+Recommended Go names:
+- BearerAuthEnabled bool
+- BearerToken string
+
+Recommended JSON names:
+- bearer_auth_enabled
+- bearer_token
+
+2. internal/storage/store.go
+
+Add backend generator:
+- use crypto/rand
+- generate 32 random bytes
+- encode with base64.RawURLEncoding
+- add prefix mcpbox_
+
+Add helper:
+- NewProjectBearerToken() (string, error)
+
+Update CreateProject:
+- if BearerAuthEnabled is true and BearerToken is empty, generate token on backend before saving.
+
+Update UpdateProject:
+- add bearerAuthEnabled bool parameter
+- save bearer_auth_enabled state
+- do not overwrite bearer_token during normal project update
+
+Add method:
+- RegenerateProjectBearerToken(ctx, projectID) (string, error)
+
+Method behavior:
+- generate new value
+- update project row
+- return generated value
+
+Update DuplicateProject:
+- copy enabled flag
+- if enabled, generate a fresh token for duplicated project
+- do not reuse source project token
+
+3. internal/httpapi/server.go
+
+Add crypto/subtle import for constant-time comparison.
+
+Update createProjectRequest:
+- BearerAuthEnabled bool json bearer_auth_enabled
+
+Update updateProjectRequest:
+- BearerAuthEnabled bool json bearer_auth_enabled
+
+Update projectStatusResponse:
+- BearerAuthEnabled bool json bearer_auth_enabled
+- BearerToken string json bearer_token
+
+Update handleCreateProject:
+- pass req.BearerAuthEnabled into models.Project
+- do not accept manually entered token from UI on create
+
+Update handleProjectUpdate:
+- pass req.BearerAuthEnabled into store.UpdateProject
+
+Update projectStatus mapping:
+- include project.BearerAuthEnabled
+- include project.BearerToken
+
+In handleProjectAction switch, add case:
+- bearer-token
+
+Add handler:
+- handleRegenerateProjectBearerToken
+
+Handler behavior:
+- call store.RegenerateProjectBearerToken
+- reload project
+- audit log action: project_bearer_token_regenerated
+- return projectStatus
+
+In handleConnect:
+- after project is loaded and nil check passes
+- before paused check and before SSE/JSON-RPC dispatch
+- validate project endpoint auth if BearerAuthEnabled is true
+
+Validation logic:
+- if disabled, allow
+- expected = project.BearerToken trimmed
+- if expected empty, return 401
+- provided = value from existing bearerTokenFromRequest helper
+- if provided empty, return 401
+- compare provided and expected with subtle.ConstantTimeCompare
+- mismatch returns 401
+
+Important:
+- protect both /mcp and /connect
+- keep CORS support for Authorization header
+
+Frontend files
+--------------
+
+4. html/src/app/types.ts
+
+ProjectStatus add:
+- bearer_auth_enabled: boolean
+- bearer_token: string
+
+ProjectFormState add:
+- bearer_auth_enabled: boolean
+- bearer_token: string
+
+5. html/src/app/App.tsx
+
+emptyProjectForm add:
+- bearer_auth_enabled: false
+- bearer_token: empty string
+
+createProject payload:
+- include bearer_auth_enabled
+- do not send token manually
+
+update project payload:
+- include bearer_auth_enabled
+
+startEditProject:
+- set bearer_auth_enabled from project
+- set bearer_token from project
+
+Add function regenerateProjectBearerToken(projectId):
+- POST /api/projects/{projectId}/bearer-token
+- response is ProjectStatus
+- update projects state
+- update projectForm token fields
+- toast success
+
+Pass regenerateProjectBearerToken to ProjectsSidebar.
+
+6. html/src/app/components/ProjectsSidebar.tsx
+
+Update React import:
+- useState plus FormEvent type
+
+Add icons:
+- Eye
+- EyeOff
+- optionally ShieldCheck
+
+Update local ProjectFormState type:
+- bearer_auth_enabled
+- bearer_token
+
+Update SidebarProject type if needed:
+- bearer_auth_enabled optional
+- bearer_token optional
+
+Update props:
+- regenerateProjectBearerToken(projectId)
+
+Inside component:
+- add bearerTokenVisible state
+
+In create/edit project form, after description, add security block:
+- checkbox Enable Bearer endpoint protection
+- description says this requires Bearer auth for project MCP endpoints
+
+When checked show:
+- readonly input
+- type password by default
+- eye button toggles text/password
+- copy button copies value with navigator.clipboard.writeText
+- generate button enabled only when editing existing project
+- for new project show: token will be generated after project creation
+
+7. html/src/app/i18n.ts
+
+Add labels/messages in EN and RU:
+EN:
+- Bearer endpoint protection
+- Require Authorization Bearer token for this project MCP endpoint.
+- Bearer token
+- Generate token
+- Token will be generated by the server after project creation.
+- Show token
+- Hide token
+- Copy token
+- Bearer token regenerated
+
+RU:
+- Bearer-защита endpoint
+- Требовать Bearer токен для MCP endpoint этого проекта.
+- Bearer токен
+- Сгенерировать токен
+- Токен будет сгенерирован сервером после создания проекта.
+- Показать токен
+- Скрыть токен
+- Скопировать токен
+- Bearer токен пересоздан
+
+Documentation
+-------------
+
+8. README.md
+
+Add section above 1.2.3:
+What Is New In 1.2.4
+
+Mention:
+- optional Bearer protection for project MCP endpoints
+- create/edit UI checkbox
+- backend-generated token
+- readonly hidden field with show/hide, copy, regenerate
+- /mcp and /connect return 401 when protection is enabled and request is not authorized
+
+9. README-ru.md
+
+Add same section in Russian above 1.2.3.
+
+10. DEVELOPER.md
+
+Add section after Transport Model:
+Project Bearer Protection
+
+Describe:
+- optional per-project protection
+- check runs after project token resolution and before SSE/JSON-RPC
+- backend-only generation
+- readonly UI handling
+- duplicated protected projects get fresh token
+
+11. DEVELOPER-ru.md
+
+Add same section in Russian.
+
+Build and test checklist
+------------------------
+Run:
+- gofmt -w internal/models/models.go internal/storage/store.go internal/httpapi/server.go
+- go test ./...
+- npm --prefix html install
+- npm --prefix html run build
+- go build -o MCPBox .
+
+Manual tests
+------------
+1. Create project with protection disabled. Endpoint works as before.
+2. Create project with protection enabled. Backend generates token and UI shows readonly hidden field.
+3. Call protected endpoint without auth header. Expect 401.
+4. Call protected endpoint with wrong value. Expect 401.
+5. Call protected endpoint with correct value. GET returns SSE endpoint event, POST returns JSON-RPC response.
+6. Test /connect too.
+7. Regenerate token. Old value stops working, new value works.
+8. Disable checkbox. Endpoint works without auth header again.
+9. Duplicate protected project. Protection remains enabled but token is different.
+
+Extra notes
+-----------
+- Do not generate token in frontend.
+- Do not make token manually editable.
+- This feature is only for project MCP endpoints, not admin UI/API auth.
+- Avoid logging the token. If it ever appears in diagnostics, mask it.

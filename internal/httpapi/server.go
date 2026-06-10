@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ArturSaleev/MCPBox/connectruntime"
 	"github.com/ArturSaleev/MCPBox/internal/installer"
 	"github.com/ArturSaleev/MCPBox/internal/models"
 	"github.com/ArturSaleev/MCPBox/internal/orchestrator"
@@ -48,6 +49,7 @@ type Server struct {
 	oauthMu             sync.RWMutex
 	oauth               map[string]oauthSession
 	initializedServers  map[uint]bool
+	projectAuthorizer   connectruntime.ProjectAuthorizer
 }
 
 type connectSession struct {
@@ -68,16 +70,18 @@ type oauthSession struct {
 }
 
 type createProjectRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	RootPath    string `json:"root_path"`
+	Name                        string `json:"name"`
+	Description                 string `json:"description"`
+	RootPath                    string `json:"root_path"`
+	IdentityVerificationEnabled bool   `json:"identity_verification_enabled"`
 }
 
 type updateProjectRequest struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	RootPath    string `json:"root_path"`
-	Prompt      string `json:"prompt"`
+	Name                        string `json:"name"`
+	Description                 string `json:"description"`
+	RootPath                    string `json:"root_path"`
+	Prompt                      string `json:"prompt"`
+	IdentityVerificationEnabled bool   `json:"identity_verification_enabled"`
 }
 
 type duplicateProjectRequest struct {
@@ -187,21 +191,22 @@ type serverActionResponse struct {
 }
 
 type projectStatusResponse struct {
-	ProjectID             uint                           `json:"project_id"`
-	Name                  string                         `json:"name"`
-	Description           string                         `json:"description"`
-	RootPath              string                         `json:"root_path"`
-	Token                 string                         `json:"token"`
-	IsPaused              bool                           `json:"is_paused"`
-	LlamaCppModelPath     string                         `json:"llama_cpp_model_path"`
-	LlamaCppModelName     string                         `json:"llama_cpp_model_name"`
-	ConnectURL            string                         `json:"connect_url"`
-	ConnectURLs           []string                       `json:"connect_urls"`
-	ConnectionReady       bool                           `json:"connection_ready"`
-	Servers               []serverStatusRecord           `json:"servers"`
-	RAGCollections        []ragCollectionResponse        `json:"rag_collections"`
-	InstalledIntegrations []installedIntegrationResponse `json:"installed_integrations"`
-	Prompt                string                         `json:"prompt"`
+	ProjectID                   uint                           `json:"project_id"`
+	Name                        string                         `json:"name"`
+	Description                 string                         `json:"description"`
+	RootPath                    string                         `json:"root_path"`
+	Token                       string                         `json:"token"`
+	IsPaused                    bool                           `json:"is_paused"`
+	IdentityVerificationEnabled bool                           `json:"identity_verification_enabled"`
+	LlamaCppModelPath           string                         `json:"llama_cpp_model_path"`
+	LlamaCppModelName           string                         `json:"llama_cpp_model_name"`
+	ConnectURL                  string                         `json:"connect_url"`
+	ConnectURLs                 []string                       `json:"connect_urls"`
+	ConnectionReady             bool                           `json:"connection_ready"`
+	Servers                     []serverStatusRecord           `json:"servers"`
+	RAGCollections              []ragCollectionResponse        `json:"rag_collections"`
+	InstalledIntegrations       []installedIntegrationResponse `json:"installed_integrations"`
+	Prompt                      string                         `json:"prompt"`
 }
 
 type serverStatusRecord struct {
@@ -282,6 +287,7 @@ type Options struct {
 	ConnectPort         int
 	UIFS                fs.FS
 	HTTPRegistrars      []func(*http.ServeMux)
+	ProjectAuthorizer   connectruntime.ProjectAuthorizer
 }
 
 func NewServer(store *storage.Store, registry *orchestrator.Registry) *Server {
@@ -305,6 +311,7 @@ func NewServerWithInstaller(store *storage.Store, registry *orchestrator.Registr
 		sessions:            make(map[string]connectSession),
 		oauth:               make(map[string]oauthSession),
 		initializedServers:  make(map[uint]bool),
+		projectAuthorizer:   options.ProjectAuthorizer,
 	}
 	if s.editionID == "" {
 		s.editionID = "free"
@@ -415,9 +422,10 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	project := &models.Project{
-		Name:        strings.TrimSpace(req.Name),
-		Description: strings.TrimSpace(req.Description),
-		RootPath:    strings.TrimSpace(req.RootPath),
+		Name:                 strings.TrimSpace(req.Name),
+		Description:          strings.TrimSpace(req.Description),
+		RootPath:             strings.TrimSpace(req.RootPath),
+		IdentityVerification: req.IdentityVerificationEnabled,
 	}
 	if project.Name == "" {
 		writeError(w, http.StatusBadRequest, errors.New("name is required"))
@@ -641,6 +649,7 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 		strings.TrimSpace(req.Description),
 		strings.TrimSpace(req.RootPath),
 		strings.TrimSpace(req.Prompt),
+		req.IdentityVerificationEnabled,
 	); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -1117,6 +1126,11 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	actor := clientActor(r)
+	if access := connectruntime.FromContext(r.Context()); access != nil && strings.TrimSpace(access.Actor) != "" {
+		actor = strings.TrimSpace(access.Actor)
+	}
+
 	token := extractProjectToken(r.URL.Path)
 	if token == "" || token == "." {
 		token = bearerTokenFromRequest(r)
@@ -1136,22 +1150,44 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if project.IsPaused {
-		s.logAudit(r.Context(), &project.ID, nil, "connect_blocked_project_paused", clientActor(r), "")
+		s.logAudit(r.Context(), &project.ID, nil, "connect_blocked_project_paused", actor, "")
 		writeError(w, http.StatusForbidden, errors.New("project is paused"))
 		return
+	}
+	if s.projectAuthorizer != nil {
+		authorizedAccess, authErr := s.projectAuthorizer(r, connectruntime.Project{
+			ID:                   project.ID,
+			Token:                project.Token,
+			IdentityVerification: project.IdentityVerification,
+		})
+		if authErr != nil {
+			status := http.StatusForbidden
+			if accessErr := (*connectruntime.AuthorizationError)(nil); errors.As(authErr, &accessErr) && accessErr.StatusCode > 0 {
+				status = accessErr.StatusCode
+			}
+			s.logAudit(r.Context(), &project.ID, nil, "connect_blocked_identity_verification", actor, truncateDetail(authErr.Error()))
+			writeError(w, status, authErr)
+			return
+		}
+		if authorizedAccess != nil {
+			r = r.Clone(connectruntime.WithAccess(r.Context(), authorizedAccess))
+			if strings.TrimSpace(authorizedAccess.Actor) != "" {
+				actor = strings.TrimSpace(authorizedAccess.Actor)
+			}
+		}
 	}
 
 	servers := s.projectConnectServers(*project)
 	if len(servers) == 0 && len(project.RAGCollections) == 0 {
 		err := errors.New("project has no enabled MCP servers configured")
-		s.logAudit(r.Context(), &project.ID, nil, "connect_failed", clientActor(r), truncateDetail(err.Error()))
+		s.logAudit(r.Context(), &project.ID, nil, "connect_failed", actor, truncateDetail(err.Error()))
 		writeError(w, http.StatusBadGateway, err)
 		return
 	}
 
 	switch r.Method {
 	case http.MethodGet:
-		s.logAudit(r.Context(), &project.ID, nil, "connect_stream_open", clientActor(r), "")
+		s.logAudit(r.Context(), &project.ID, nil, "connect_stream_open", actor, "")
 		s.serveProjectSSE(w, r, project.Token, project.ID)
 	case http.MethodPost:
 		if s.isSSESessionRequest(r) {
@@ -1164,7 +1200,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, err)
 				return
 			}
-			response, hasResponse, err := s.dispatchProjectJSONRPC(r.Context(), clientActor(r), *project, servers, payload)
+			response, hasResponse, err := s.dispatchProjectJSONRPC(r.Context(), actor, *project, servers, payload)
 			if err != nil {
 				writeError(w, http.StatusBadGateway, err)
 				return
@@ -1185,7 +1221,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		response, hasResponse, err := s.dispatchProjectJSONRPC(r.Context(), clientActor(r), *project, servers, payload)
+		response, hasResponse, err := s.dispatchProjectJSONRPC(r.Context(), actor, *project, servers, payload)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, err)
 			return
@@ -1421,21 +1457,22 @@ func (s *Server) handleUI() http.Handler {
 func (s *Server) projectStatus(r *http.Request, project models.Project) projectStatusResponse {
 	connectURLs := s.connectURLs(r, project.Token)
 	response := projectStatusResponse{
-		ProjectID:             project.ID,
-		Name:                  project.Name,
-		Description:           project.Description,
-		RootPath:              project.RootPath,
-		Token:                 project.Token,
-		IsPaused:              project.IsPaused,
-		LlamaCppModelPath:     project.LlamaCppModelPath,
-		LlamaCppModelName:     project.LlamaCppModelName,
-		ConnectURL:            firstOrEmpty(connectURLs),
-		ConnectURLs:           connectURLs,
-		ConnectionReady:       s.projectConnectionReady(project),
-		Servers:               make([]serverStatusRecord, 0, len(project.Servers)),
-		RAGCollections:        make([]ragCollectionResponse, 0, len(project.RAGCollections)),
-		InstalledIntegrations: mapInstalledIntegrations(project.InstalledIntegrations),
-		Prompt:                project.Prompt,
+		ProjectID:                   project.ID,
+		Name:                        project.Name,
+		Description:                 project.Description,
+		RootPath:                    project.RootPath,
+		Token:                       project.Token,
+		IsPaused:                    project.IsPaused,
+		IdentityVerificationEnabled: project.IdentityVerification,
+		LlamaCppModelPath:           project.LlamaCppModelPath,
+		LlamaCppModelName:           project.LlamaCppModelName,
+		ConnectURL:                  firstOrEmpty(connectURLs),
+		ConnectURLs:                 connectURLs,
+		ConnectionReady:             s.projectConnectionReady(project),
+		Servers:                     make([]serverStatusRecord, 0, len(project.Servers)),
+		RAGCollections:              make([]ragCollectionResponse, 0, len(project.RAGCollections)),
+		InstalledIntegrations:       mapInstalledIntegrations(project.InstalledIntegrations),
+		Prompt:                      project.Prompt,
 	}
 
 	for _, collection := range project.RAGCollections {
@@ -1791,6 +1828,9 @@ func (s *Server) connectURLs(r *http.Request, token string) []string {
 }
 
 func (s *Server) connectMessageURL(r *http.Request, token, sessionID string) string {
+	if access := connectruntime.FromContext(r.Context()); access != nil && strings.TrimSpace(access.PublicConnectPath) != "" {
+		return s.absoluteConnectURL(r, fmt.Sprintf("%s?sessionId=%s", strings.TrimSpace(access.PublicConnectPath), sessionID))
+	}
 	return s.absoluteConnectURL(r, fmt.Sprintf("/mcp/%s?sessionId=%s", token, sessionID))
 }
 
@@ -3183,6 +3223,20 @@ func applyConfiguredHeaders(dst http.Header, server models.MCPServer) {
 		if token := strings.TrimSpace(server.OAuthAccessToken); token != "" {
 			dst.Set("Authorization", "Bearer "+token)
 		}
+	}
+}
+
+func applyRuntimeHeaders(dst http.Header, access *connectruntime.Access) {
+	if access == nil {
+		return
+	}
+	for key, value := range access.UpstreamHeaders {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		dst.Set(key, value)
 	}
 }
 

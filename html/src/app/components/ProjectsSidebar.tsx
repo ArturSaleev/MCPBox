@@ -24,6 +24,7 @@ type ProjectFormState = {
   name: string;
   description: string;
   root_path: string;
+  identity_verification_enabled: boolean;
 };
 
 type SidebarProject = {

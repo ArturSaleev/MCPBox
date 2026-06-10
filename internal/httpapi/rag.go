@@ -14,15 +14,19 @@ import (
 )
 
 type createRAGCollectionRequest struct {
-	Name        string `json:"name"`
-	SourcePath  string `json:"source_path"`
-	AutoReindex bool   `json:"auto_reindex"`
+	Name               string `json:"name"`
+	SourcePath         string `json:"source_path"`
+	AutoReindex        bool   `json:"auto_reindex"`
+	ServiceMode        string `json:"service_mode"`
+	VectorConnectionID string `json:"vector_connection_id"`
 }
 
 type updateRAGCollectionRequest struct {
-	Name        string `json:"name"`
-	SourcePath  string `json:"source_path"`
-	AutoReindex bool   `json:"auto_reindex"`
+	Name               string `json:"name"`
+	SourcePath         string `json:"source_path"`
+	AutoReindex        bool   `json:"auto_reindex"`
+	ServiceMode        string `json:"service_mode"`
+	VectorConnectionID string `json:"vector_connection_id"`
 }
 
 type linkRAGCollectionRequest struct {
@@ -39,13 +43,15 @@ type searchRAGCollectionRequest struct {
 }
 
 type ragCollectionResponse struct {
-	ID           uint   `json:"id"`
-	CollectionID string `json:"collection_id"`
-	Name         string `json:"name"`
-	DataType     string `json:"data_type"`
-	SourcePath   string `json:"source_path"`
-	AutoReindex  bool   `json:"auto_reindex"`
-	IndexPath    string `json:"index_path"`
+	ID                 uint   `json:"id"`
+	CollectionID       string `json:"collection_id"`
+	Name               string `json:"name"`
+	DataType           string `json:"data_type"`
+	SourcePath         string `json:"source_path"`
+	AutoReindex        bool   `json:"auto_reindex"`
+	ServiceMode        string `json:"service_mode"`
+	VectorConnectionID string `json:"vector_connection_id"`
+	IndexPath          string `json:"index_path"`
 }
 
 type ragSearchResponse struct {
@@ -84,6 +90,7 @@ func (s *Server) handleCreateRAGCollection(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, errors.New("source_path is required"))
 		return
 	}
+	serviceMode := models.NormalizeRAGServiceMode(strings.TrimSpace(req.ServiceMode))
 
 	collectionID := uuid.NewString()
 
@@ -94,17 +101,21 @@ func (s *Server) handleCreateRAGCollection(w http.ResponseWriter, r *http.Reques
 	}
 
 	collection := &models.RAGCollection{
-		CollectionID: collectionID,
-		Name:         name,
-		DataType:     models.RAGDataTypeCode,
-		SourcePath:   sourcePath,
-		AutoReindex:  req.AutoReindex,
-		IndexPath:    indexPath,
+		CollectionID:       collectionID,
+		Name:               name,
+		DataType:           models.RAGDataTypeCode,
+		SourcePath:         sourcePath,
+		AutoReindex:        req.AutoReindex,
+		ServiceMode:        serviceMode,
+		VectorConnectionID: strings.TrimSpace(req.VectorConnectionID),
+		IndexPath:          indexPath,
 	}
 
-	if err := reindexCollection(*collection, sourcePath); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if models.UsesBleveService(serviceMode) {
+		if err := reindexCollection(*collection, sourcePath); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
 	}
 	if err := s.store.CreateRAGCollection(r.Context(), collection); err != nil {
 		_ = os.RemoveAll(collection.IndexPath)
@@ -113,7 +124,9 @@ func (s *Server) handleCreateRAGCollection(w http.ResponseWriter, r *http.Reques
 	}
 
 	s.logAudit(r.Context(), nil, nil, "rag_collection_created", clientActor(r), collectionID)
-	s.logAudit(r.Context(), nil, nil, "rag_collection_indexed", clientActor(r), collectionID)
+	if models.UsesBleveService(serviceMode) {
+		s.logAudit(r.Context(), nil, nil, "rag_collection_indexed", clientActor(r), collectionID)
+	}
 	writeJSON(w, http.StatusCreated, mapRAGCollection(*collection))
 }
 
@@ -207,20 +220,31 @@ func (s *Server) handleUpdateRAGCollection(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, errors.New("source_path is required"))
 		return
 	}
+	serviceMode := models.NormalizeRAGServiceMode(strings.TrimSpace(req.ServiceMode))
+	if strings.TrimSpace(req.ServiceMode) == "" {
+		serviceMode = models.NormalizeRAGServiceMode(collection.ServiceMode)
+	}
 
 	updatedPreview := *collection
 	updatedPreview.Name = name
 	updatedPreview.SourcePath = sourcePath
 	updatedPreview.AutoReindex = req.AutoReindex
+	updatedPreview.ServiceMode = serviceMode
+	updatedPreview.VectorConnectionID = strings.TrimSpace(req.VectorConnectionID)
 
-	if err := reindexCollection(updatedPreview, sourcePath); err != nil {
-		writeError(w, http.StatusBadRequest, err)
-		return
+	if models.UsesBleveService(serviceMode) {
+		if err := reindexCollection(updatedPreview, sourcePath); err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
 	}
 
-	if err := s.store.UpdateRAGCollectionConfig(r.Context(), collectionID, name, sourcePath, req.AutoReindex); err != nil {
+	if err := s.store.UpdateRAGCollectionFullConfig(r.Context(), collectionID, name, sourcePath, req.AutoReindex, serviceMode, strings.TrimSpace(req.VectorConnectionID)); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
+	}
+	if !models.UsesBleveService(serviceMode) {
+		_ = os.RemoveAll(collection.IndexPath)
 	}
 
 	updatedCollection, err := s.store.GetRAGCollectionByCollectionID(r.Context(), collectionID)
@@ -234,7 +258,9 @@ func (s *Server) handleUpdateRAGCollection(w http.ResponseWriter, r *http.Reques
 	}
 
 	s.logAudit(r.Context(), nil, nil, "rag_collection_updated", clientActor(r), collectionID)
-	s.logAudit(r.Context(), nil, nil, "rag_collection_indexed", clientActor(r), collectionID)
+	if models.UsesBleveService(serviceMode) {
+		s.logAudit(r.Context(), nil, nil, "rag_collection_indexed", clientActor(r), collectionID)
+	}
 	writeJSON(w, http.StatusOK, mapRAGCollection(*updatedCollection))
 }
 
@@ -311,6 +337,11 @@ func (s *Server) handleProjectRAGCollectionDelete(w http.ResponseWriter, r *http
 }
 
 func (s *Server) handleIndexRAGCollection(w http.ResponseWriter, r *http.Request, collection models.RAGCollection) {
+	if !models.UsesBleveService(collection.ServiceMode) {
+		writeError(w, http.StatusConflict, errors.New("this knowledge base uses RagBox only; local Bleve indexing is disabled"))
+		return
+	}
+
 	var req indexRAGCollectionRequest
 	if err := decodeJSON(r.Body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -327,7 +358,7 @@ func (s *Server) handleIndexRAGCollection(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.store.UpdateRAGCollectionConfig(r.Context(), collection.CollectionID, collection.Name, dirPath, collection.AutoReindex); err != nil {
+	if err := s.store.UpdateRAGCollectionConfig(r.Context(), collection.CollectionID, collection.Name, dirPath, collection.AutoReindex, collection.VectorConnectionID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -341,6 +372,11 @@ func (s *Server) handleIndexRAGCollection(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleSearchRAGCollection(w http.ResponseWriter, r *http.Request, collection models.RAGCollection) {
+	if !models.UsesBleveService(collection.ServiceMode) {
+		writeError(w, http.StatusConflict, errors.New("this knowledge base uses RagBox only; local Bleve search is disabled"))
+		return
+	}
+
 	var req searchRAGCollectionRequest
 	if err := decodeJSON(r.Body, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -365,13 +401,15 @@ func (s *Server) handleSearchRAGCollection(w http.ResponseWriter, r *http.Reques
 
 func mapRAGCollection(collection models.RAGCollection) ragCollectionResponse {
 	return ragCollectionResponse{
-		ID:           collection.ID,
-		CollectionID: collection.CollectionID,
-		Name:         collection.Name,
-		DataType:     normalizedRAGDataType(collection.DataType),
-		SourcePath:   collection.SourcePath,
-		AutoReindex:  collection.AutoReindex,
-		IndexPath:    collection.IndexPath,
+		ID:                 collection.ID,
+		CollectionID:       collection.CollectionID,
+		Name:               collection.Name,
+		DataType:           normalizedRAGDataType(collection.DataType),
+		SourcePath:         collection.SourcePath,
+		AutoReindex:        collection.AutoReindex,
+		ServiceMode:        models.NormalizeRAGServiceMode(collection.ServiceMode),
+		VectorConnectionID: strings.TrimSpace(collection.VectorConnectionID),
+		IndexPath:          collection.IndexPath,
 	}
 }
 

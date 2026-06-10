@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 
 export GOCACHE="$ROOT/.gocache"
-RELEASE_DIR="$ROOT/release"
+RELEASE_DIR="${RELEASE_DIR:-$ROOT/release}"
 
 mkdir -p "$RELEASE_DIR"
 

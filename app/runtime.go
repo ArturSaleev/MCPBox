@@ -118,6 +118,7 @@ func Run(options Options) error {
 		ConnectPort:         listen.mcpPort,
 		UIFS:                options.Edition.UIFS,
 		HTTPRegistrars:      toHTTPRegistrars(runtimeContext, options.Edition.HTTPRegistrars),
+		ProjectAuthorizer:   options.Edition.ConnectAuthorizer,
 	})
 
 	adminAddr := joinListenAddress(listen.adminHost, listen.adminPort)

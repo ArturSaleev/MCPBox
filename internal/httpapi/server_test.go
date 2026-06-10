@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ArturSaleev/MCPBox/connectruntime"
 	"github.com/ArturSaleev/MCPBox/internal/installer"
 	"github.com/ArturSaleev/MCPBox/internal/models"
 	"github.com/ArturSaleev/MCPBox/internal/orchestrator"
@@ -162,6 +163,120 @@ func TestProjectEndpointIgnoresStoppedSTDIOConnectors(t *testing.T) {
 
 	if payload[0].ConnectionReady {
 		t.Fatal("ConnectionReady = true, want false for stopped stdio server")
+	}
+}
+
+func TestProjectIdentityVerificationFlagRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/projects", bytes.NewBufferString(`{
+		"name":"Secure Workspace",
+		"description":"Requires verified identity",
+		"identity_verification_enabled":true
+	}`))
+	createResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(createResponse, createRequest)
+
+	if createResponse.Code != http.StatusCreated {
+		t.Fatalf("create project status = %d, body = %s", createResponse.Code, createResponse.Body.String())
+	}
+
+	var created models.Project
+	if err := json.Unmarshal(createResponse.Body.Bytes(), &created); err != nil {
+		t.Fatalf("json.Unmarshal(create) error = %v", err)
+	}
+	if !created.IdentityVerification {
+		t.Fatal("created.IdentityVerification = false, want true")
+	}
+
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/projects", nil)
+	listResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(listResponse, listRequest)
+
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("list projects status = %d, body = %s", listResponse.Code, listResponse.Body.String())
+	}
+
+	var listed []projectStatusResponse
+	if err := json.Unmarshal(listResponse.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("json.Unmarshal(list) error = %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("len(listed) = %d, want 1", len(listed))
+	}
+	if !listed[0].IdentityVerificationEnabled {
+		t.Fatal("listed[0].IdentityVerificationEnabled = false, want true")
+	}
+
+	updateRequest := httptest.NewRequest(http.MethodPut, "/api/projects/"+jsonNumber(created.ID), bytes.NewBufferString(`{
+		"name":"Secure Workspace",
+		"description":"Updated",
+		"root_path":"",
+		"prompt":"",
+		"identity_verification_enabled":false
+	}`))
+	updateResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(updateResponse, updateRequest)
+
+	if updateResponse.Code != http.StatusOK {
+		t.Fatalf("update project status = %d, body = %s", updateResponse.Code, updateResponse.Body.String())
+	}
+
+	var updated projectStatusResponse
+	if err := json.Unmarshal(updateResponse.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("json.Unmarshal(update) error = %v", err)
+	}
+	if updated.IdentityVerificationEnabled {
+		t.Fatal("updated.IdentityVerificationEnabled = true, want false")
+	}
+}
+
+func TestConnectProjectAuthorizerCanRejectRequest(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	project := &models.Project{Name: "Secure Workspace"}
+	if err := store.CreateProject(ctx, project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	api := NewServerWithInstaller(
+		store,
+		orchestrator.NewRegistry(context.Background()),
+		nil,
+		Options{
+			ProjectAuthorizer: func(_ *http.Request, current connectruntime.Project) (*connectruntime.Access, error) {
+				if current.ID != project.ID {
+					t.Fatalf("authorizer project id = %d, want %d", current.ID, project.ID)
+				}
+				return nil, &connectruntime.AuthorizationError{
+					StatusCode: http.StatusUnauthorized,
+					Message:    "missing runtime bearer token",
+				}
+			},
+		},
+	)
+
+	request := httptest.NewRequest(http.MethodPost, "/mcp/"+project.Token, bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+	response := httptest.NewRecorder()
+	api.ConnectHandler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("connect status = %d, body = %s", response.Code, response.Body.String())
 	}
 }
 
