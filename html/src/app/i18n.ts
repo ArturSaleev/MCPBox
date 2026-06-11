@@ -231,6 +231,7 @@ export type Dictionary = {
     advancedModeEnabled: string;
     localCatalogFileSelected: (name: string) => string;
     localCatalogFileMissing: string;
+    catalogSynced: (count: number) => string;
     selectProjectBeforeInstall: string;
     noDescriptionProvided: string;
     upstreamAuthNotice: string;
@@ -569,6 +570,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       advancedModeEnabled: 'Advanced mode enabled. Press Cmd/Ctrl + Shift + U to hide.',
       localCatalogFileSelected: (name: string) => `Selected file: ${name}`,
       localCatalogFileMissing: 'Choose a local catalog JSON file before syncing.',
+      catalogSynced: (count: number) => `Catalog synced: ${count} items`,
       selectProjectBeforeInstall:
         'Create or select a project before installing integrations.',
       noDescriptionProvided: 'No description provided.',
@@ -927,6 +929,7 @@ export const dictionaries: Record<Language, Dictionary> = {
         'Расширенный режим включён. Нажмите Cmd/Ctrl + Shift + U, чтобы скрыть поле.',
       localCatalogFileSelected: (name: string) => `Выбран файл: ${name}`,
       localCatalogFileMissing: 'Сначала выберите локальный JSON-файл каталога.',
+      catalogSynced: (count: number) => `Каталог синхронизирован: ${count} элементов`,
       selectProjectBeforeInstall:
         'Выберите проект в боковой панели перед установкой интеграций.',
       noDescriptionProvided: 'Описание отсутствует.',

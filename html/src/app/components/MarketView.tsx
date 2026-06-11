@@ -428,6 +428,9 @@ export function MarketView({
                         type="file"
                         accept="application/json,.json"
                         className="hidden"
+                        onClick={(event) => {
+                          event.currentTarget.value = '';
+                        }}
                         onChange={(event) => onPickLocalCatalogFile(event.target.files?.[0] ?? null)}
                       />
                     </label>

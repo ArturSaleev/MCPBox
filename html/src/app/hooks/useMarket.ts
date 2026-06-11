@@ -15,7 +15,7 @@ function normalizeCatalogSourceURL(url: string) {
   return trimmed;
 }
 
-export function useMarket(projects: ProjectStatus[], messages: { requestFailed: string; packageInUseCannotUninstall: string; packageInstalled: string; packageUninstalled: string; catalogSynced: string }) {
+export function useMarket(projects: ProjectStatus[], messages: { requestFailed: string; packageInUseCannotUninstall: string; packageInstalled: string; packageUninstalled: string; catalogSynced: (count: number) => string; localCatalogFileMissing: string }) {
   const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
   const [catalogSettings, setCatalogSettings] = useState<CatalogSettings | null>(null);
   const [installedPackages, setInstalledPackages] = useState<InstalledPackage[]>([]);
@@ -38,16 +38,8 @@ export function useMarket(projects: ProjectStatus[], messages: { requestFailed: 
     try {
       const normalizedURL = normalizeCatalogSourceURL(catalogURL);
       const response = await apiRequest<{ items: CatalogItem[]; settings: CatalogSettings }>(
-        catalogSourceMode === 'file'
-          ? '/api/catalog/file'
-          : `/api/catalog?url=${encodeURIComponent(normalizedURL)}`,
+        '/api/catalog/items',
         () => messages.requestFailed,
-        catalogSourceMode === 'file'
-          ? {
-              method: 'POST',
-              body: JSON.stringify({ content: localCatalogContent }),
-            }
-          : undefined,
       );
       setCatalogItems(response.items);
       setCatalogSettings(response.settings);
@@ -73,12 +65,23 @@ export function useMarket(projects: ProjectStatus[], messages: { requestFailed: 
   async function syncCatalog() {
     setCatalogSyncing(true);
     try {
+      if (catalogSourceMode === 'file' && localCatalogContent.trim() === '') {
+        toast.error(messages.localCatalogFileMissing);
+        return;
+      }
       const normalizedURL = normalizeCatalogSourceURL(catalogURL);
-      await apiRequest<void>(`/api/catalog/sync?url=${encodeURIComponent(normalizedURL)}`, () => messages.requestFailed, {
+      const response = await apiRequest<{ items: CatalogItem[]; settings: CatalogSettings }>('/api/catalog/sync', () => messages.requestFailed, {
         method: 'POST',
+        body: JSON.stringify(
+          catalogSourceMode === 'file'
+            ? { manifest_content: localCatalogContent, file_name: localCatalogFileName }
+            : { url: normalizedURL || defaultCatalogSourceURL },
+        ),
       });
-      await loadCatalog();
-      toast.success(messages.catalogSynced);
+      setCatalogItems(response.items);
+      setCatalogSettings(response.settings);
+      await loadInstalledPackages();
+      toast.success(messages.catalogSynced(response.items.length));
     } catch (syncError) {
       toast.error(messages.requestFailed);
     } finally {
@@ -93,18 +96,29 @@ export function useMarket(projects: ProjectStatus[], messages: { requestFailed: 
       return;
     }
 
-    setLocalCatalogFileName(file.name);
-    const content = await file.text();
-    setLocalCatalogContent(content);
-    setCatalogSourceMode('file');
+    try {
+      const content = await file.text();
+      if (content.trim() === '') {
+        toast.error(messages.localCatalogFileMissing);
+        setLocalCatalogFileName('');
+        setLocalCatalogContent('');
+        return;
+      }
+      setLocalCatalogFileName(file.name);
+      setLocalCatalogContent(content);
+      setCatalogSourceMode('file');
+    } catch (readError) {
+      toast.error(readError instanceof Error ? readError.message : messages.localCatalogFileMissing);
+      setLocalCatalogFileName('');
+      setLocalCatalogContent('');
+    }
   }
 
   async function installCatalogPackage(item: CatalogItem) {
     setInstallingCatalogItemId(item.id);
     try {
-      await apiRequest<void>('/api/catalog/install', () => messages.requestFailed, {
+      await apiRequest<void>(`/api/catalog/items/${item.id}/install`, () => messages.requestFailed, {
         method: 'POST',
-        body: JSON.stringify({ catalog_item_id: item.id }),
       });
       await loadInstalledPackages();
       toast.success(messages.packageInstalled);
@@ -116,11 +130,6 @@ export function useMarket(projects: ProjectStatus[], messages: { requestFailed: 
   }
 
   async function uninstallCatalogPackage(item: CatalogItem, pkg: InstalledPackage) {
-    if (pkg.project_use_count > 0) {
-      toast.error(messages.packageInUseCannotUninstall);
-      return false;
-    }
-
     setUninstallingCatalogItemId(item.id);
     try {
       await apiRequest<void>(`/api/packages/${pkg.id}`, () => messages.requestFailed, {
@@ -144,11 +153,11 @@ export function useMarket(projects: ProjectStatus[], messages: { requestFailed: 
   ) {
     setAddingCatalogItemId(item.id);
     try {
-      await apiRequest<void>('/api/catalog/perform-install', () => messages.requestFailed, {
+      await apiRequest<void>(`/api/catalog/items/${item.id}/add-to-project`, () => messages.requestFailed, {
         method: 'POST',
         body: JSON.stringify({
-          catalog_item_id: item.id,
           project_id: projectId,
+          name: item.name,
           config,
         }),
       });

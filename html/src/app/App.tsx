@@ -742,8 +742,11 @@ export default function App() {
       setCatalogSettings(response.settings);
       await loadInstalledPackages();
       await loadLogs({ silent: true });
+      toast.success(messages.catalogSynced(response.items.length));
     } catch (syncError) {
-      toast.error(syncError instanceof Error ? syncError.message : 'Failed to sync catalog');
+      const message = syncError instanceof Error ? syncError.message : 'Failed to sync catalog';
+      toast.error(message);
+      setActionError(message);
     } finally {
       setCatalogSyncing(false);
     }
@@ -755,10 +758,22 @@ export default function App() {
       setLocalCatalogContent('');
       return;
     }
-    const text = await file.text();
-    setLocalCatalogFileName(file.name);
-    setLocalCatalogContent(text);
-    setCatalogSourceMode('file');
+    try {
+      const text = await file.text();
+      if (text.trim() === '') {
+        toast.error(messages.localCatalogFileMissing);
+        setLocalCatalogFileName('');
+        setLocalCatalogContent('');
+        return;
+      }
+      setLocalCatalogFileName(file.name);
+      setLocalCatalogContent(text);
+      setCatalogSourceMode('file');
+    } catch (readError) {
+      toast.error(readError instanceof Error ? readError.message : messages.localCatalogFileMissing);
+      setLocalCatalogFileName('');
+      setLocalCatalogContent('');
+    }
   }
 
   async function installCatalogPackage(item: CatalogItem) {
