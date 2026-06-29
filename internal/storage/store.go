@@ -122,6 +122,17 @@ func resolveDataRoot(dsn string) string {
 }
 
 func migrateLegacyProjectSchema(db *gorm.DB) error {
+	if db.Migrator().HasTable(&models.Project{}) && !db.Migrator().HasColumn(&models.Project{}, "oauth_redirect_uri") {
+		if err := db.Exec(`ALTER TABLE projects ADD COLUMN oauth_redirect_uri TEXT`).Error; err != nil {
+			return err
+		}
+	}
+	if db.Migrator().HasTable(&models.Project{}) && !db.Migrator().HasColumn(&models.Project{}, "prompt_profiles_json") {
+		if err := db.Exec(`ALTER TABLE projects ADD COLUMN prompt_profiles_json TEXT`).Error; err != nil {
+			return err
+		}
+	}
+
 	if !db.Migrator().HasColumn(&models.Project{}, "primary_server_id") {
 		return nil
 	}
@@ -323,14 +334,16 @@ func (s *Store) CreateProject(ctx context.Context, project *models.Project) erro
 	return s.db.WithContext(ctx).Create(project).Error
 }
 
-func (s *Store) UpdateProject(ctx context.Context, projectID uint, name, description, rootPath, prompt string, identityVerification bool, bearerAuthEnabled bool) error {
+func (s *Store) UpdateProject(ctx context.Context, projectID uint, name, description, rootPath, prompt, promptProfilesJSON string, identityVerification bool, bearerAuthEnabled bool, oauthRedirectURI string) error {
 	updates := map[string]any{
 		"name":                  name,
 		"description":           description,
 		"root_path":             rootPath,
 		"prompt":                prompt,
+		"prompt_profiles_json":  promptProfilesJSON,
 		"identity_verification": identityVerification,
 		"bearer_auth_enabled":   bearerAuthEnabled,
+		"oauth_redirect_uri":    strings.TrimSpace(oauthRedirectURI),
 	}
 
 	if bearerAuthEnabled {

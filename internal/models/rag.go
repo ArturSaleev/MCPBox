@@ -44,6 +44,13 @@ func NormalizeRAGServiceMode(value string) string {
 	}
 }
 
+func NormalizeAutoReindex(value bool, serviceMode string) bool {
+	if !value {
+		return false
+	}
+	return NormalizeRAGServiceMode(serviceMode) == RAGServiceModeBleveOnly
+}
+
 func UsesBleveService(mode string) bool {
 	switch NormalizeRAGServiceMode(mode) {
 	case RAGServiceModeBleveOnly, RAGServiceModeDual:

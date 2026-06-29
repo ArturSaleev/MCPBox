@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/csv"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,6 +17,8 @@ import (
 
 	"github.com/ledongthuc/pdf"
 )
+
+var ErrNoExtractableText = errors.New("no extractable text found")
 
 type ExtractedDocument struct {
 	FilePath  string
@@ -68,7 +71,7 @@ func extractSingleFragment(path, section string, extractor func(string) (string,
 	}
 	content = strings.TrimSpace(normalizeExtractedText(content))
 	if content == "" {
-		return nil, fmt.Errorf("no extractable text found")
+		return nil, ErrNoExtractableText
 	}
 	return []ExtractedFragment{{Section: section, Content: content}}, nil
 }
@@ -165,7 +168,7 @@ func extractXLSX(path string) ([]ExtractedFragment, error) {
 		})
 	}
 	if len(fragments) == 0 {
-		return nil, fmt.Errorf("no extractable text found")
+		return nil, ErrNoExtractableText
 	}
 	return fragments, nil
 }
@@ -262,7 +265,7 @@ func extractPPTX(path string) ([]ExtractedFragment, error) {
 		})
 	}
 	if len(fragments) == 0 {
-		return nil, fmt.Errorf("no extractable text found")
+		return nil, ErrNoExtractableText
 	}
 	return fragments, nil
 }
@@ -297,7 +300,7 @@ func extractPDF(path string) ([]ExtractedFragment, error) {
 	}
 
 	if len(fragments) == 0 {
-		return nil, fmt.Errorf("no extractable text found")
+		return nil, ErrNoExtractableText
 	}
 	for i := range fragments {
 		fragments[i].Content = normalizeExtractedText(fragments[i].Content)

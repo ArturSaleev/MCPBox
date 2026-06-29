@@ -185,6 +185,39 @@ func RetryGatewayPayment() {
 	}
 }
 
+func TestCollectionSkipsFilesWithoutExtractableText(t *testing.T) {
+	t.Parallel()
+
+	rootDir := t.TempDir()
+	indexPath := filepath.Join(rootDir, "indexes", "skip-empty.bleve")
+	projectDir := filepath.Join(rootDir, "project")
+	mustMkdirAll(t, filepath.Join(projectDir, "docs"))
+
+	mustWriteFile(t, filepath.Join(projectDir, "docs", "Guidelines.md"), "")
+	mustWriteFile(t, filepath.Join(projectDir, "docs", "billing.md"), `Payment rules for billing retry`)
+
+	collection, err := NewCollection("skip-empty", "Skip Empty", indexPath)
+	if err != nil {
+		t.Fatalf("NewCollection() error = %v", err)
+	}
+	defer func() { _ = collection.Close() }()
+
+	if err := collection.IndexFolder(projectDir); err != nil {
+		t.Fatalf("IndexFolder() error = %v", err)
+	}
+
+	assertSearchContainsFile(t, collection, "billing retry", "billing.md")
+	results, err := collection.Search("Guidelines", 5)
+	if err != nil {
+		t.Fatalf("Search(Guidelines) error = %v", err)
+	}
+	for _, result := range results {
+		if strings.HasSuffix(result.FilePath, "Guidelines.md") {
+			t.Fatalf("empty file was indexed: %q", result.FilePath)
+		}
+	}
+}
+
 func TestChunkTextSplitsLongFilesWithOverlap(t *testing.T) {
 	t.Parallel()
 

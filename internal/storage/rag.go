@@ -45,7 +45,7 @@ func (s *Store) UpdateRAGCollectionConfig(ctx context.Context, collectionID, nam
 		Updates(map[string]any{
 			"name":                 name,
 			"source_path":          sourcePath,
-			"auto_reindex":         autoReindex,
+			"auto_reindex":         models.NormalizeAutoReindex(autoReindex, models.RAGServiceModeBleveOnly),
 			"vector_connection_id": vectorConnectionID,
 		}).Error
 }
@@ -57,7 +57,7 @@ func (s *Store) UpdateRAGCollectionFullConfig(ctx context.Context, collectionID,
 		Updates(map[string]any{
 			"name":                 name,
 			"source_path":          sourcePath,
-			"auto_reindex":         autoReindex,
+			"auto_reindex":         models.NormalizeAutoReindex(autoReindex, serviceMode),
 			"service_mode":         models.NormalizeRAGServiceMode(serviceMode),
 			"vector_connection_id": vectorConnectionID,
 		}).Error
@@ -66,7 +66,7 @@ func (s *Store) UpdateRAGCollectionFullConfig(ctx context.Context, collectionID,
 func (s *Store) ListAutoReindexRAGCollections(ctx context.Context) ([]models.RAGCollection, error) {
 	var collections []models.RAGCollection
 	err := s.db.WithContext(ctx).
-		Where("auto_reindex = ? AND TRIM(COALESCE(source_path, '')) <> '' AND COALESCE(service_mode, '') <> ?", true, models.RAGServiceModeRagBoxOnly).
+		Where("auto_reindex = ? AND COALESCE(service_mode, ?) = ?", true, models.RAGServiceModeBleveOnly, models.RAGServiceModeBleveOnly).
 		Order("id asc").
 		Find(&collections).Error
 	return collections, err

@@ -44,68 +44,14 @@ func (s *Store) GetCatalogItem(ctx context.Context, id string) (*models.Integrat
 
 func (s *Store) UpsertCatalogItems(ctx context.Context, items []models.IntegrationCatalogItem, metadata CatalogSyncMetadata) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := pruneUninstalledCatalogItems(tx); err != nil {
+			return err
+		}
+
 		for _, item := range items {
 			if err := tx.Clauses(clause.OnConflict{
-				Columns: []clause.Column{{Name: "id"}},
-				DoUpdates: clause.AssignmentColumns([]string{
-					"name",
-					"category",
-					"description",
-					"icon",
-					"icon_url",
-					"runtime_type",
-					"runtime_version",
-					"source_type",
-					"source_package",
-					"source_version",
-					"source_url",
-					"install_strategy",
-					"install_metadata_json",
-					"launch_command",
-					"launch_args_json",
-					"launch_working_dir",
-					"launch_entry_point",
-					"shared_install",
-					"supports_multi_project",
-					"transport",
-					"mcp_url",
-					"command",
-					"args_json",
-					"env_json",
-					"default_env_json",
-					"env_schema_json",
-					"env_passthrough_json",
-					"working_dir",
-					"default_auto_start",
-					"auth_type",
-					"auth_provider",
-					"oauth_authorize_url",
-					"oauth_token_url",
-					"oauth_refresh_url",
-					"oauth_use_pkce",
-					"oauth_scope_delimiter",
-					"oauth_client_auth_method",
-					"oauth_authorize_params_json",
-					"oauth_token_params_json",
-					"default_oauth_scopes_json",
-					"default_headers_json",
-					"default_header_env_json",
-					"default_bearer_token_env_var",
-					"system_dependencies_json",
-					"config_schema_json",
-					"capabilities_json",
-					"tags_json",
-					"website",
-					"docs_url",
-					"enabled",
-					"version",
-					"manifest_source_url",
-					"manifest_generated_at",
-					"schema_version",
-					"last_synced_at",
-					"raw_json",
-					"updated_at",
-				}),
+				Columns:   []clause.Column{{Name: "id"}},
+				DoNothing: true,
 			}).Create(&item).Error; err != nil {
 				return err
 			}
@@ -126,6 +72,14 @@ func (s *Store) UpsertCatalogItems(ctx context.Context, items []models.Integrati
 			DoUpdates: clause.AssignmentColumns([]string{"catalog_source_url", "last_sync_at", "last_sync_status", "last_sync_error", "last_manifest_etag", "last_manifest_url", "last_schema_version", "updated_at"}),
 		}).Create(&settings).Error
 	})
+}
+
+func pruneUninstalledCatalogItems(tx *gorm.DB) error {
+	return tx.Model(&models.IntegrationCatalogItem{}).
+		Where("id NOT IN (?)", tx.Model(&models.InstalledPackage{}).Select("catalog_item_id").Where("status = ?", models.PackageStatusInstalled)).
+		Where("id NOT IN (?)", tx.Model(&models.InstalledIntegration{}).Select("catalog_item_id").Where("status = ?", models.PackageStatusInstalled)).
+		Where("id NOT IN (?)", tx.Model(&models.ProjectPackageInstance{}).Select("catalog_item_id").Where("status IN ?", []string{models.InstanceStatusReady, models.InstanceStatusConfigReady})).
+		Delete(&models.IntegrationCatalogItem{}).Error
 }
 
 func (s *Store) UpdateCatalogSyncStatus(ctx context.Context, metadata CatalogSyncMetadata) error {

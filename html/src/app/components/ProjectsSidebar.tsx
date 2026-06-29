@@ -27,6 +27,7 @@ type ProjectFormState = {
   identity_verification_enabled: boolean;
   bearer_auth_enabled: boolean;
   bearer_token: string;
+  oauth_redirect_uri: string;
 };
 
 type SidebarProject = {
@@ -37,6 +38,7 @@ type SidebarProject = {
   is_paused: boolean;
   bearer_auth_enabled?: boolean;
   bearer_token?: string;
+  oauth_redirect_uri?: string;
   servers: Array<{ status: string }>;
 };
 
@@ -219,9 +221,28 @@ export function ProjectsSidebar({
                       </label>
 
                       {projectForm.bearer_auth_enabled ? (
-                        <p className="text-xs leading-5 text-muted-foreground">
-                          {messages.bearerTokenGeneratedAfterCreate}
-                        </p>
+                        <div className="space-y-3">
+                          <p className="text-xs leading-5 text-muted-foreground">
+                            {messages.bearerTokenGeneratedAfterCreate}
+                          </p>
+                          <label className="block">
+                            <span className="text-sm font-medium">{labels.oauthCallbackURL}</span>
+                            <input
+                              value={projectForm.oauth_redirect_uri}
+                              onChange={(event) =>
+                                setProjectForm((current) => ({
+                                  ...current,
+                                  oauth_redirect_uri: event.target.value,
+                                }))
+                              }
+                              className="mt-2 h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
+                              placeholder="https://chatgpt.com/connector/oauth/..."
+                            />
+                            <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                              {messages.oauthCallbackURLDescription}
+                            </span>
+                          </label>
+                        </div>
                       ) : null}
                     </div>
 

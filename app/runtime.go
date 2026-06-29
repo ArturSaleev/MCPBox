@@ -306,7 +306,16 @@ func runRAGAutoReindexPass(ctx context.Context, store *storage.Store) {
 			continue
 		}
 
-		reindexErr := index.IndexFolder(collection.SourcePath)
+		roots := make([]string, 0, 2)
+		if sourcePath := strings.TrimSpace(collection.SourcePath); sourcePath != "" {
+			roots = append(roots, sourcePath)
+		}
+		managedPath := rag.ResolveManagedSourcePath(store.DataRoot(), collection.CollectionID)
+		if info, statErr := os.Stat(managedPath); statErr == nil && info.IsDir() {
+			roots = append(roots, managedPath)
+		}
+
+		reindexErr := index.IndexFolders(roots)
 		_ = index.Close()
 		if reindexErr != nil {
 			log.Printf("rag auto reindex failed for %s: %v", collection.CollectionID, reindexErr)

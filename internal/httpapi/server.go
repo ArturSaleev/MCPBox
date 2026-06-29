@@ -32,6 +32,109 @@ import (
 	"github.com/ArturSaleev/MCPBox/internal/storage"
 )
 
+func normalizeProjectPromptProfiles(profiles []models.ProjectPromptProfile) []models.ProjectPromptProfile {
+	if len(profiles) == 0 {
+		return nil
+	}
+
+	normalized := make([]models.ProjectPromptProfile, 0, len(profiles))
+	defaultAssigned := false
+	for _, profile := range profiles {
+		profile.ID = strings.TrimSpace(profile.ID)
+		profile.Name = strings.TrimSpace(profile.Name)
+		profile.Description = strings.TrimSpace(profile.Description)
+		profile.Prompt = strings.TrimSpace(profile.Prompt)
+		profile.ResponseFormat = strings.TrimSpace(strings.ToLower(profile.ResponseFormat))
+		profile.ResponseSchema = strings.TrimSpace(profile.ResponseSchema)
+		if profile.Name == "" || profile.Prompt == "" {
+			continue
+		}
+		if profile.ID == "" {
+			profile.ID = slugFromText(profile.Name)
+		}
+		if profile.ID == "" {
+			profile.ID = fmt.Sprintf("prompt-%d", len(normalized)+1)
+		}
+		if profile.ResponseFormat == "" {
+			profile.ResponseFormat = "text"
+		}
+		if profile.IsDefault && !defaultAssigned {
+			defaultAssigned = true
+		} else {
+			profile.IsDefault = false
+		}
+		normalized = append(normalized, profile)
+	}
+	return normalized
+}
+
+func validateProjectPromptProfiles(profiles []models.ProjectPromptProfile) error {
+	for index, profile := range profiles {
+		id := strings.TrimSpace(profile.ID)
+		name := strings.TrimSpace(profile.Name)
+		description := strings.TrimSpace(profile.Description)
+		prompt := strings.TrimSpace(profile.Prompt)
+		responseFormat := strings.TrimSpace(strings.ToLower(profile.ResponseFormat))
+		responseSchema := strings.TrimSpace(profile.ResponseSchema)
+		isEmpty := id == "" && name == "" && description == "" && prompt == "" && responseSchema == "" && (responseFormat == "" || responseFormat == "text") && !profile.IsDefault
+		if isEmpty {
+			continue
+		}
+		if name == "" {
+			return fmt.Errorf("prompt profile #%d: name is required", index+1)
+		}
+		if prompt == "" {
+			return fmt.Errorf("prompt profile #%d: prompt is required", index+1)
+		}
+	}
+	return nil
+}
+
+func encodeProjectPromptProfiles(profiles []models.ProjectPromptProfile) (string, error) {
+	normalized := normalizeProjectPromptProfiles(profiles)
+	if len(normalized) == 0 {
+		return "", nil
+	}
+	payload, err := json.Marshal(normalized)
+	if err != nil {
+		return "", err
+	}
+	return string(payload), nil
+}
+
+func decodeProjectPromptProfiles(raw string) []models.ProjectPromptProfile {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var profiles []models.ProjectPromptProfile
+	if err := json.Unmarshal([]byte(raw), &profiles); err != nil {
+		return nil
+	}
+	return normalizeProjectPromptProfiles(profiles)
+}
+
+func slugFromText(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" {
+		return ""
+	}
+	var builder strings.Builder
+	lastDash := false
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			builder.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			builder.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(builder.String(), "-")
+}
+
 type Server struct {
 	store               *storage.Store
 	registry            *orchestrator.Registry
@@ -76,15 +179,18 @@ type createProjectRequest struct {
 	RootPath                    string `json:"root_path"`
 	IdentityVerificationEnabled bool   `json:"identity_verification_enabled"`
 	BearerAuthEnabled           bool   `json:"bearer_auth_enabled"`
+	OAuthRedirectURI            string `json:"oauth_redirect_uri"`
 }
 
 type updateProjectRequest struct {
-	Name                        string `json:"name"`
-	Description                 string `json:"description"`
-	RootPath                    string `json:"root_path"`
-	Prompt                      string `json:"prompt"`
-	IdentityVerificationEnabled bool   `json:"identity_verification_enabled"`
-	BearerAuthEnabled           bool   `json:"bearer_auth_enabled"`
+	Name                        string                        `json:"name"`
+	Description                 string                        `json:"description"`
+	RootPath                    string                        `json:"root_path"`
+	Prompt                      string                        `json:"prompt"`
+	PromptProfiles              []models.ProjectPromptProfile `json:"prompt_profiles"`
+	IdentityVerificationEnabled bool                          `json:"identity_verification_enabled"`
+	BearerAuthEnabled           bool                          `json:"bearer_auth_enabled"`
+	OAuthRedirectURI            string                        `json:"oauth_redirect_uri"`
 }
 
 type duplicateProjectRequest struct {
@@ -203,6 +309,7 @@ type projectStatusResponse struct {
 	IdentityVerificationEnabled bool                           `json:"identity_verification_enabled"`
 	BearerAuthEnabled           bool                           `json:"bearer_auth_enabled"`
 	BearerToken                 string                         `json:"bearer_token"`
+	OAuthRedirectURI            string                         `json:"oauth_redirect_uri"`
 	LlamaCppModelPath           string                         `json:"llama_cpp_model_path"`
 	LlamaCppModelName           string                         `json:"llama_cpp_model_name"`
 	ConnectURL                  string                         `json:"connect_url"`
@@ -212,6 +319,7 @@ type projectStatusResponse struct {
 	RAGCollections              []ragCollectionResponse        `json:"rag_collections"`
 	InstalledIntegrations       []installedIntegrationResponse `json:"installed_integrations"`
 	Prompt                      string                         `json:"prompt"`
+	PromptProfiles              []models.ProjectPromptProfile  `json:"prompt_profiles"`
 }
 
 type serverStatusRecord struct {
@@ -364,7 +472,7 @@ func (s *Server) ConnectHandler() http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		if r.URL.Path == "/healthz" || isConnectPath(r.URL.Path) {
+		if r.URL.Path == "/healthz" || isConnectPath(r.URL.Path) || isConnectProtocolPath(r.URL.Path) {
 			withCORS(s.mux).ServeHTTP(w, r)
 			return
 		}
@@ -432,6 +540,7 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		RootPath:             strings.TrimSpace(req.RootPath),
 		IdentityVerification: req.IdentityVerificationEnabled,
 		BearerAuthEnabled:    req.BearerAuthEnabled,
+		OAuthRedirectURI:     strings.TrimSpace(req.OAuthRedirectURI),
 	}
 	if project.Name == "" {
 		writeError(w, http.StatusBadRequest, errors.New("name is required"))
@@ -669,6 +778,16 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("name is required"))
 		return
 	}
+	if err := validateProjectPromptProfiles(req.PromptProfiles); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	promptProfilesJSON, err := encodeProjectPromptProfiles(req.PromptProfiles)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("encode prompt profiles: %w", err))
+		return
+	}
 
 	if err := s.store.UpdateProject(
 		r.Context(),
@@ -677,8 +796,10 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 		strings.TrimSpace(req.Description),
 		strings.TrimSpace(req.RootPath),
 		strings.TrimSpace(req.Prompt),
+		promptProfilesJSON,
 		req.IdentityVerificationEnabled,
 		req.BearerAuthEnabled,
+		strings.TrimSpace(req.OAuthRedirectURI),
 	); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -1179,6 +1300,10 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !projectEndpointBearerAuthorized(r, *project) {
+		w.Header().Set(
+			"WWW-Authenticate",
+			fmt.Sprintf(`Bearer resource_metadata="%s"`, s.absoluteConnectURL(r, "/.well-known/oauth-protected-resource")),
+		)
 		writeError(w, http.StatusUnauthorized, errors.New("missing or invalid bearer token"))
 		return
 	}
@@ -1499,6 +1624,7 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 		IdentityVerificationEnabled: project.IdentityVerification,
 		BearerAuthEnabled:           project.BearerAuthEnabled,
 		BearerToken:                 project.BearerToken,
+		OAuthRedirectURI:            project.OAuthRedirectURI,
 		LlamaCppModelPath:           project.LlamaCppModelPath,
 		LlamaCppModelName:           project.LlamaCppModelName,
 		ConnectURL:                  firstOrEmpty(connectURLs),
@@ -1508,10 +1634,14 @@ func (s *Server) projectStatus(r *http.Request, project models.Project) projectS
 		RAGCollections:              make([]ragCollectionResponse, 0, len(project.RAGCollections)),
 		InstalledIntegrations:       mapInstalledIntegrations(project.InstalledIntegrations),
 		Prompt:                      project.Prompt,
+		PromptProfiles:              make([]models.ProjectPromptProfile, 0),
+	}
+	if promptProfiles := decodeProjectPromptProfiles(project.PromptProfilesJSON); len(promptProfiles) > 0 {
+		response.PromptProfiles = promptProfiles
 	}
 
 	for _, collection := range project.RAGCollections {
-		response.RAGCollections = append(response.RAGCollections, mapRAGCollection(collection))
+		response.RAGCollections = append(response.RAGCollections, s.mapRAGCollection(collection))
 	}
 
 	integrationsByServerID := make(map[uint]models.InstalledIntegration, len(project.InstalledIntegrations))
@@ -1895,6 +2025,10 @@ func (s *Server) absoluteConnectURL(r *http.Request, requestPath string) string 
 
 func isConnectPath(requestPath string) bool {
 	return strings.HasPrefix(requestPath, "/mcp/") || strings.HasPrefix(requestPath, "/connect/")
+}
+
+func isConnectProtocolPath(requestPath string) bool {
+	return strings.HasPrefix(requestPath, "/.well-known/") || strings.HasPrefix(requestPath, "/oauth/")
 }
 
 func isWildcardHost(host string) bool {

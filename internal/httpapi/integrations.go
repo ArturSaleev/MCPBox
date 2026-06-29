@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -23,6 +24,8 @@ import (
 type catalogManifest struct {
 	SchemaVersion string                `json:"schema_version"`
 	GeneratedAt   string                `json:"generated_at"`
+	CatalogSource json.RawMessage       `json:"_catalog_source"`
+	SourcesStats  json.RawMessage       `json:"_sources_stats"`
 	Items         []catalogManifestItem `json:"items"`
 }
 
@@ -30,6 +33,8 @@ const (
 	legacyCatalogSourceURL  = "https://webeasy.kz/mcpbox/catalog.json"
 	defaultCatalogSourceURL = "https://mcpbox.sh/catalog.json"
 )
+
+var catalogPlaceholderPattern = regexp.MustCompile(`\{([a-zA-Z0-9_]+)\}`)
 
 type catalogRuntimeSpec struct {
 	Type    string `json:"type"`
@@ -176,6 +181,7 @@ type catalogManifestItem struct {
 	DocsURL                  string                        `json:"docs_url"`
 	Enabled                  *bool                         `json:"enabled"`
 	Version                  string                        `json:"version"`
+	CatalogSource            json.RawMessage               `json:"_catalog_source"`
 }
 
 type catalogItemResponse struct {
@@ -718,11 +724,25 @@ func normalizeCatalogItem(
 	if name == "" {
 		return nil, fmt.Errorf("catalog item %s name is required", id)
 	}
+	sourceType := strings.TrimSpace(item.Source.Type)
+	sourcePackage := strings.TrimSpace(item.Source.Package)
+	sourceVersion := strings.TrimSpace(item.Source.Version)
+	sourceArtifactURL := strings.TrimSpace(item.Source.URL)
+	installStrategy := strings.TrimSpace(item.Install.Strategy)
+	command := strings.TrimSpace(item.Command)
 	transport := normalizedTransport(item.Transport)
+	mcpURL := strings.TrimSpace(item.MCPURL)
+	if transport == models.ServerTransportSTDIO &&
+		command == "" &&
+		strings.EqualFold(installStrategy, "remote_only") &&
+		strings.EqualFold(sourceType, "http") &&
+		sourceArtifactURL != "" {
+		transport = models.ServerTransportHTTPStream
+		mcpURL = sourceArtifactURL
+	}
 	if transport != models.ServerTransportHTTPStream && transport != models.ServerTransportSTDIO {
 		return nil, fmt.Errorf("catalog item %s has unsupported transport %q; use %q or %q", id, item.Transport, models.ServerTransportSTDIO, models.ServerTransportHTTPStream)
 	}
-	mcpURL := strings.TrimSpace(item.MCPURL)
 	if transport == models.ServerTransportHTTPStream {
 		if mcpURL == "" {
 			return nil, fmt.Errorf("catalog item %s mcp_url is required for %q transport", id, transport)
@@ -731,7 +751,7 @@ func normalizeCatalogItem(
 			return nil, fmt.Errorf("catalog item %s mcp_url must be a valid absolute URL", id)
 		}
 	} else {
-		if strings.TrimSpace(item.Command) == "" {
+		if command == "" {
 			return nil, fmt.Errorf("catalog item %s command is required for stdio transport", id)
 		}
 	}
@@ -767,11 +787,6 @@ func normalizeCatalogItem(
 
 	runtimeType := strings.TrimSpace(item.Runtime.Type)
 	runtimeVersion := strings.TrimSpace(item.Runtime.Version)
-	sourceType := strings.TrimSpace(item.Source.Type)
-	sourcePackage := strings.TrimSpace(item.Source.Package)
-	sourceVersion := strings.TrimSpace(item.Source.Version)
-	sourceArtifactURL := strings.TrimSpace(item.Source.URL)
-	installStrategy := strings.TrimSpace(item.Install.Strategy)
 	launchCommand := strings.TrimSpace(item.Launch.Command)
 	launchWorkingDir := strings.TrimSpace(item.Launch.WorkingDir)
 	launchEntryPoint := strings.TrimSpace(item.Launch.EntryPoint)
@@ -797,7 +812,7 @@ func normalizeCatalogItem(
 			}
 		}
 		if launchCommand == "" {
-			launchCommand = strings.TrimSpace(item.Command)
+			launchCommand = command
 		}
 		if launchCommand == "" && installStrategy != "docker_pull" {
 			return nil, fmt.Errorf("catalog item %s launch.command is required for stdio transport", id)
@@ -827,7 +842,7 @@ func normalizeCatalogItem(
 		SupportsMultiProject:     supportsMultiProject,
 		Transport:                transport,
 		MCPURL:                   mcpURL,
-		Command:                  strings.TrimSpace(item.Command),
+		Command:                  command,
 		ArgsJSON:                 encodeStringArrayJSON(item.Args),
 		EnvJSON:                  encodeKeyValuePairsJSON([]keyValuePair(item.Env)),
 		DefaultEnvJSON:           encodeKeyValuePairsJSON([]keyValuePair(item.DefaultEnv)),
@@ -932,6 +947,7 @@ func buildInstalledIntegration(
 		if installedPkg != nil {
 			installDir = strings.TrimSpace(installedPkg.InstallDir)
 		}
+		templateValues := catalogTemplateValues(config, installDir)
 		if strings.EqualFold(strings.TrimSpace(item.RuntimeType), "docker") || strings.EqualFold(strings.TrimSpace(item.InstallStrategy), "docker_pull") {
 			server.Command = "docker"
 			server.ArgsJSON = mustJSON(dockerRunArgs(item, config, envVars, installDir))
@@ -939,17 +955,13 @@ func buildInstalledIntegration(
 			server.EnvPassthroughJSON = "[]"
 			server.WorkingDir = ""
 		} else {
-			args := decodeJSONArray(item.ArgsJSON)
-			args = applyCatalogConfigArgs(item, config, args)
-			for index := range args {
-				args[index] = applyInstallDirTemplate(args[index], installDir)
-			}
+			args := applyCatalogTemplates(decodeJSONArray(item.ArgsJSON), templateValues)
 
-			server.Command = item.Command
+			server.Command = applyCatalogTemplate(item.Command, templateValues)
 			server.ArgsJSON = mustJSON(args)
 			server.EnvJSON = encodeKeyValuePairsJSON(append(decodeKeyValuePairsSafe(item.EnvJSON), envVars...))
 			server.EnvPassthroughJSON = normalizedStringJSON(item.EnvPassthroughJSON, "[]")
-			server.WorkingDir = applyInstallDirTemplate(item.WorkingDir, installDir)
+			server.WorkingDir = applyCatalogTemplate(item.WorkingDir, templateValues)
 
 			if installedPkg != nil {
 				switch strings.TrimSpace(installedPkg.InstallStrategy) {
@@ -1198,26 +1210,6 @@ func (s *Server) recordCatalogHealthFailure(
 	s.logAudit(ctx, &server.ProjectID, &server.ID, actionPrefix+"_health_check_failed", actor, detail)
 }
 
-func applyCatalogConfigArgs(item models.IntegrationCatalogItem, config map[string]any, args []string) []string {
-	itemID := strings.TrimSpace(strings.ToLower(item.ID))
-	switch itemID {
-	case "filesystem":
-		rootPath := strings.TrimSpace(readConfigString(config["root_path"]))
-		if rootPath == "" {
-			rootPath = strings.TrimSpace(readConfigString(config["project_path"]))
-		}
-		if rootPath == "" {
-			rootPath = strings.TrimSpace(readConfigString(config["workspace_path"]))
-		}
-		if rootPath == "" || containsString(args, rootPath) {
-			return args
-		}
-		return append(args, rootPath)
-	default:
-		return args
-	}
-}
-
 func cloneConfigMap(config map[string]any) map[string]any {
 	if len(config) == 0 {
 		return map[string]any{}
@@ -1281,12 +1273,61 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
-func applyInstallDirTemplate(value, installDir string) string {
+func catalogTemplateValues(config map[string]any, installDir string) map[string]string {
+	values := map[string]string{}
+	if installDir != "" {
+		values["install_dir"] = strings.TrimSpace(installDir)
+	}
+	for key, value := range config {
+		if nested, ok := value.(map[string]string); ok {
+			for nestedKey, nestedValue := range nested {
+				if trimmedKey := strings.TrimSpace(nestedKey); trimmedKey != "" {
+					values[trimmedKey] = strings.TrimSpace(nestedValue)
+				}
+			}
+			continue
+		}
+		if nested, ok := value.(map[string]any); ok {
+			for nestedKey, nestedValue := range nested {
+				if trimmedKey := strings.TrimSpace(nestedKey); trimmedKey != "" {
+					values[trimmedKey] = strings.TrimSpace(readConfigString(nestedValue))
+				}
+			}
+		}
+		if trimmedKey := strings.TrimSpace(key); trimmedKey != "" {
+			values[trimmedKey] = strings.TrimSpace(readConfigString(value))
+		}
+	}
+	return values
+}
+
+func applyCatalogTemplate(value string, templateValues map[string]string) string {
 	value = strings.TrimSpace(value)
-	if value == "" || installDir == "" {
+	if value == "" {
 		return value
 	}
-	return strings.ReplaceAll(value, "{install_dir}", installDir)
+	return catalogPlaceholderPattern.ReplaceAllStringFunc(value, func(match string) string {
+		parts := catalogPlaceholderPattern.FindStringSubmatch(match)
+		if len(parts) != 2 {
+			return match
+		}
+		resolved, ok := templateValues[parts[1]]
+		if !ok {
+			return ""
+		}
+		return strings.TrimSpace(resolved)
+	})
+}
+
+func applyCatalogTemplates(values []string, templateValues map[string]string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	resolved := make([]string, 0, len(values))
+	for _, value := range values {
+		resolved = append(resolved, applyCatalogTemplate(value, templateValues))
+	}
+	return resolved
 }
 
 func managedPythonPath(installDir string) string {
@@ -1305,7 +1346,7 @@ func managedBinaryPath(command string, installedPkg *models.InstalledPackage) st
 	installDir := strings.TrimSpace(installedPkg.InstallDir)
 	entryPoint := strings.TrimSpace(installedPkg.EntryPoint)
 	if installDir == "" || entryPoint == "" {
-		return applyInstallDirTemplate(command, installDir)
+		return applyCatalogTemplate(command, catalogTemplateValues(nil, installDir))
 	}
 
 	entryPath := filepath.Join(installDir, filepath.FromSlash(entryPoint))
@@ -1313,7 +1354,7 @@ func managedBinaryPath(command string, installedPkg *models.InstalledPackage) st
 		return entryPath
 	}
 	if strings.Contains(command, "{install_dir}") {
-		return applyInstallDirTemplate(command, installDir)
+		return applyCatalogTemplate(command, catalogTemplateValues(nil, installDir))
 	}
 
 	normalizedCommand := filepath.Clean(filepath.FromSlash(command))
@@ -1324,7 +1365,7 @@ func managedBinaryPath(command string, installedPkg *models.InstalledPackage) st
 		return entryPath
 	}
 
-	return applyInstallDirTemplate(command, installDir)
+	return applyCatalogTemplate(command, catalogTemplateValues(nil, installDir))
 }
 
 func isPythonCommand(command string) bool {
@@ -1358,19 +1399,19 @@ func dockerRunArgs(
 		image = strings.TrimSpace(item.SourceURL)
 	}
 	args = append(args, image)
+	templateValues := catalogTemplateValues(config, installDir)
 
 	containerCommand := strings.TrimSpace(item.Command)
 	if containerCommand == "" || strings.EqualFold(containerCommand, "docker") {
 		containerCommand = strings.TrimSpace(item.LaunchCommand)
 	}
 	if containerCommand != "" && !strings.EqualFold(containerCommand, "docker") {
-		args = append(args, applyInstallDirTemplate(containerCommand, installDir))
+		args = append(args, applyCatalogTemplate(containerCommand, templateValues))
 	}
 
-	containerArgs := decodeJSONArray(item.ArgsJSON)
-	containerArgs = applyCatalogConfigArgs(item, config, containerArgs)
+	containerArgs := applyCatalogTemplates(decodeJSONArray(item.ArgsJSON), templateValues)
 	for _, arg := range containerArgs {
-		args = append(args, applyInstallDirTemplate(arg, installDir))
+		args = append(args, arg)
 	}
 	return args
 }

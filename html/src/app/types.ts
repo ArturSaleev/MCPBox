@@ -1,3 +1,13 @@
+export type ProjectPromptProfile = {
+  id: string;
+  name: string;
+  description: string;
+  prompt: string;
+  response_format: string;
+  response_schema: string;
+  is_default: boolean;
+};
+
 export type ProjectStatus = {
   project_id: number;
   name: string;
@@ -8,6 +18,7 @@ export type ProjectStatus = {
   identity_verification_enabled: boolean;
   bearer_auth_enabled: boolean;
   bearer_token: string;
+  oauth_redirect_uri: string;
   llama_cpp_model_path: string;
   llama_cpp_model_name: string;
   connect_url: string;
@@ -18,6 +29,7 @@ export type ProjectStatus = {
   installed_integrations: InstalledIntegration[];
   package_instances?: ProjectPackageInstance[];
   prompt: string;
+  prompt_profiles: ProjectPromptProfile[];
 };
 
 export type ServerStatus = {
@@ -67,6 +79,7 @@ export type ProjectFormState = {
   identity_verification_enabled: boolean;
   bearer_auth_enabled: boolean;
   bearer_token: string;
+  oauth_redirect_uri: string;
 };
 
 export type ServerFormState = {

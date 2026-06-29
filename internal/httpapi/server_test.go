@@ -180,7 +180,9 @@ func TestProjectIdentityVerificationFlagRoundTrip(t *testing.T) {
 	createRequest := httptest.NewRequest(http.MethodPost, "/api/projects", bytes.NewBufferString(`{
 		"name":"Secure Workspace",
 		"description":"Requires verified identity",
-		"identity_verification_enabled":true
+		"identity_verification_enabled":true,
+		"bearer_auth_enabled":true,
+		"oauth_redirect_uri":"https://chatgpt.com/connector/oauth/callback-id"
 	}`))
 	createResponse := httptest.NewRecorder()
 	api.Handler().ServeHTTP(createResponse, createRequest)
@@ -195,6 +197,9 @@ func TestProjectIdentityVerificationFlagRoundTrip(t *testing.T) {
 	}
 	if !created.IdentityVerification {
 		t.Fatal("created.IdentityVerification = false, want true")
+	}
+	if created.OAuthRedirectURI != "https://chatgpt.com/connector/oauth/callback-id" {
+		t.Fatalf("created.OAuthRedirectURI = %q", created.OAuthRedirectURI)
 	}
 
 	listRequest := httptest.NewRequest(http.MethodGet, "/api/projects", nil)
@@ -215,13 +220,33 @@ func TestProjectIdentityVerificationFlagRoundTrip(t *testing.T) {
 	if !listed[0].IdentityVerificationEnabled {
 		t.Fatal("listed[0].IdentityVerificationEnabled = false, want true")
 	}
+	if listed[0].OAuthRedirectURI != "https://chatgpt.com/connector/oauth/callback-id" {
+		t.Fatalf("listed[0].OAuthRedirectURI = %q", listed[0].OAuthRedirectURI)
+	}
 
 	updateRequest := httptest.NewRequest(http.MethodPut, "/api/projects/"+jsonNumber(created.ID), bytes.NewBufferString(`{
 		"name":"Secure Workspace",
 		"description":"Updated",
 		"root_path":"",
 		"prompt":"",
-		"identity_verification_enabled":false
+		"prompt_profiles":[
+			{
+				"name":"Default chat",
+				"description":"Base flow",
+				"prompt":"Use concise responses.",
+				"response_format":"text",
+				"is_default":true
+			},
+			{
+				"name":"Fill form",
+				"prompt":"Return JSON only.",
+				"response_format":"json",
+				"response_schema":"{\"field\":\"string\"}"
+			}
+		],
+		"identity_verification_enabled":false,
+		"bearer_auth_enabled":true,
+		"oauth_redirect_uri":"https://chatgpt.com/connector/oauth/updated-callback-id"
 	}`))
 	updateResponse := httptest.NewRecorder()
 	api.Handler().ServeHTTP(updateResponse, updateRequest)
@@ -236,6 +261,64 @@ func TestProjectIdentityVerificationFlagRoundTrip(t *testing.T) {
 	}
 	if updated.IdentityVerificationEnabled {
 		t.Fatal("updated.IdentityVerificationEnabled = true, want false")
+	}
+	if updated.OAuthRedirectURI != "https://chatgpt.com/connector/oauth/updated-callback-id" {
+		t.Fatalf("updated.OAuthRedirectURI = %q", updated.OAuthRedirectURI)
+	}
+	if len(updated.PromptProfiles) != 2 {
+		t.Fatalf("len(updated.PromptProfiles) = %d", len(updated.PromptProfiles))
+	}
+	if updated.PromptProfiles[0].ID == "" || !updated.PromptProfiles[0].IsDefault {
+		t.Fatalf("updated.PromptProfiles[0] = %#v", updated.PromptProfiles[0])
+	}
+	if updated.PromptProfiles[1].ResponseFormat != "json" {
+		t.Fatalf("updated.PromptProfiles[1] = %#v", updated.PromptProfiles[1])
+	}
+}
+
+func TestProjectUpdateRejectsIncompletePromptProfile(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	project := &models.Project{Name: "Workspace"}
+	if err := store.CreateProject(ctx, project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	request := httptest.NewRequest(http.MethodPut, "/api/projects/"+jsonNumber(project.ID), bytes.NewBufferString(`{
+		"name":"Workspace",
+		"description":"",
+		"root_path":"",
+		"prompt":"",
+		"prompt_profiles":[
+			{
+				"name":"",
+				"description":"Base flow",
+				"prompt":"Use concise responses.",
+				"response_format":"text",
+				"is_default":true
+			}
+		],
+		"identity_verification_enabled":false,
+		"bearer_auth_enabled":false,
+		"oauth_redirect_uri":""
+	}`))
+	response := httptest.NewRecorder()
+	api.Handler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("update project status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), "prompt profile #1: name is required") {
+		t.Fatalf("response body = %s", response.Body.String())
 	}
 }
 
@@ -2916,9 +2999,9 @@ func TestFilesystemPackageAddToProjectPassesRootPathArgument(t *testing.T) {
 					"runtime":     map[string]any{"type": "none", "version": ""},
 					"source":      map[string]any{"type": "remote", "url": "https://example.com/filesystem"},
 					"install":     map[string]any{"strategy": "remote_only", "metadata": map[string]any{}},
-					"launch":      map[string]any{"command": "node", "args": []string{"dist/index.js"}, "working_dir": "{install_dir}", "entry_point": "dist/index.js"},
+					"launch":      map[string]any{"command": "node", "args": []string{"dist/index.js", "{root_path}"}, "working_dir": "{install_dir}", "entry_point": "dist/index.js"},
 					"command":     "node",
-					"args":        []string{"dist/index.js"},
+					"args":        []string{"dist/index.js", "{root_path}"},
 					"working_dir": "{install_dir}",
 					"auth_type":   "none",
 					"config_schema": map[string]any{
@@ -3054,5 +3137,99 @@ func TestFilesystemPackageAddToProjectPassesRootPathArgument(t *testing.T) {
 	}
 	if got := readConfigString(integrationConfig["root_path"]); got != "D:/Code/embedservice" {
 		t.Fatalf("integration root_path = %q, want updated path", got)
+	}
+}
+
+func TestCatalogPackageAddToProjectResolvesConfigPlaceholdersInArgs(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	project := &models.Project{Name: "Workspace"}
+	if err := store.CreateProject(ctx, project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	manifestServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"schema_version": "2026-05-20",
+			"generated_at":   "2026-05-20T10:00:00Z",
+			"items": []map[string]any{
+				{
+					"id":          "postgresql",
+					"name":        "PostgreSQL MCP",
+					"category":    "databases",
+					"description": "PostgreSQL server",
+					"transport":   "stdio",
+					"runtime":     map[string]any{"type": "none", "version": ""},
+					"source":      map[string]any{"type": "remote", "url": "https://example.com/postgresql"},
+					"install":     map[string]any{"strategy": "remote_only", "metadata": map[string]any{}},
+					"launch":      map[string]any{"command": "node", "args": []string{"dist/index.js", "{database_url}"}, "working_dir": "{install_dir}", "entry_point": "dist/index.js"},
+					"command":     "node",
+					"args":        []string{"dist/index.js", "{database_url}"},
+					"working_dir": "{install_dir}",
+					"auth_type":   "none",
+					"config_schema": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"database_url": map[string]any{"type": "string"},
+						},
+						"required": []string{"database_url"},
+					},
+					"enabled": true,
+					"version": "1.0.0",
+				},
+			},
+		})
+	}))
+	defer manifestServer.Close()
+
+	api := NewServerWithInstaller(
+		store,
+		orchestrator.NewRegistry(context.Background()),
+		installer.NewService(store, filepath.Join(t.TempDir(), "packages")),
+		Options{},
+	)
+
+	syncBody := bytes.NewBufferString(`{"url":"` + manifestServer.URL + `"}`)
+	syncRequest := httptest.NewRequest(http.MethodPost, "/api/catalog/sync", syncBody)
+	syncRequest.Host = "mcpbox.local:38180"
+	syncResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(syncResponse, syncRequest)
+	if syncResponse.Code != http.StatusOK {
+		t.Fatalf("catalog sync status = %d, body = %s", syncResponse.Code, syncResponse.Body.String())
+	}
+
+	installRequest := httptest.NewRequest(http.MethodPost, "/api/catalog/items/postgresql/install", nil)
+	installRequest.Host = "mcpbox.local:38180"
+	installResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(installResponse, installRequest)
+	if installResponse.Code != http.StatusOK {
+		t.Fatalf("package install status = %d, body = %s", installResponse.Code, installResponse.Body.String())
+	}
+
+	addBody := bytes.NewBufferString(`{"project_id":` + jsonNumber(project.ID) + `,"name":"PostgreSQL","config":{"database_url":"postgresql://postgres:secret@127.0.0.1:5432/app?sslmode=disable"}}`)
+	addRequest := httptest.NewRequest(http.MethodPost, "/api/catalog/items/postgresql/add-to-project", addBody)
+	addRequest.Host = "mcpbox.local:38180"
+	addResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(addResponse, addRequest)
+	if addResponse.Code != http.StatusCreated {
+		t.Fatalf("add to project status = %d, body = %s", addResponse.Code, addResponse.Body.String())
+	}
+
+	var payload projectStatusResponse
+	if err := json.Unmarshal(addResponse.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload.Servers) != 1 {
+		t.Fatalf("len(payload.Servers) = %d, want 1", len(payload.Servers))
+	}
+	if got := payload.Servers[0].Args; len(got) != 2 || got[1] != "postgresql://postgres:secret@127.0.0.1:5432/app?sslmode=disable" {
+		t.Fatalf("postgresql args = %#v, want database_url resolved", got)
 	}
 }

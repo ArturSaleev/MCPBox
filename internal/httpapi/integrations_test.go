@@ -234,6 +234,60 @@ func TestNormalizeCatalogItemAcceptsHTTPAlias(t *testing.T) {
 	}
 }
 
+func TestSyncCatalogManifestAcceptsCatalogSourceMetadata(t *testing.T) {
+	t.Parallel()
+
+	manifest := []byte(`{
+		"schema_version": "2026-06-11",
+		"generated_at": "2026-06-11T19:14:59Z",
+		"_catalog_source": {
+			"source": "market-parser"
+		},
+		"_sources_stats": {
+			"github-registry": 1
+		},
+		"items": [
+			{
+				"id": "generated-http",
+				"name": "Generated HTTP MCP",
+				"transport": "stdio",
+				"source": {
+					"type": "http",
+					"url": "https://example.com/mcp"
+				},
+				"install": {
+					"strategy": "remote_only"
+				},
+				"command": "",
+				"auth_type": "none",
+				"enabled": true,
+				"version": "1.0.0",
+				"_catalog_source": {
+					"source": "github-registry",
+					"url": "https://github.com/example/generated-http"
+				}
+			}
+		]
+	}`)
+
+	result, err := syncCatalogManifestFromBytes(manifest, "local-file://catalog.generated.json", "local-file://catalog.generated.json", "")
+	if err != nil {
+		t.Fatalf("syncCatalogManifestFromBytes() error = %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("len(result.Items) = %d, want 1", len(result.Items))
+	}
+	if result.Items[0].Transport != models.ServerTransportHTTPStream {
+		t.Fatalf("Transport = %q, want %q", result.Items[0].Transport, models.ServerTransportHTTPStream)
+	}
+	if result.Items[0].MCPURL != "https://example.com/mcp" {
+		t.Fatalf("MCPURL = %q, want source.url", result.Items[0].MCPURL)
+	}
+	if !strings.Contains(result.Items[0].RawJSON, `"_catalog_source"`) {
+		t.Fatalf("RawJSON does not preserve _catalog_source: %s", result.Items[0].RawJSON)
+	}
+}
+
 func boolPtr(value bool) *bool {
 	return &value
 }

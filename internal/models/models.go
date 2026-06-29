@@ -23,7 +23,9 @@ type Project struct {
 	IdentityVerification  bool                     `gorm:"not null;default:false" json:"identity_verification_enabled"`
 	BearerAuthEnabled     bool                     `gorm:"not null;default:false" json:"bearer_auth_enabled"`
 	BearerToken           string                   `gorm:"size:64" json:"bearer_token"`
+	OAuthRedirectURI      string                   `gorm:"column:oauth_redirect_uri;type:text" json:"oauth_redirect_uri"`
 	Prompt                string                   `gorm:"type:text" json:"prompt"`
+	PromptProfilesJSON    string                   `gorm:"column:prompt_profiles_json;type:text" json:"-"`
 	LlamaCppModelPath     string                   `gorm:"size:2048" json:"llama_cpp_model_path"`
 	LlamaCppModelName     string                   `gorm:"size:255" json:"llama_cpp_model_name"`
 	Servers               []MCPServer              `json:"servers,omitempty"`
@@ -32,6 +34,16 @@ type Project struct {
 	PackageInstances      []ProjectPackageInstance `json:"package_instances,omitempty"`
 	CreatedAt             time.Time                `json:"created_at"`
 	UpdatedAt             time.Time                `json:"updated_at"`
+}
+
+type ProjectPromptProfile struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Description    string `json:"description,omitempty"`
+	Prompt         string `json:"prompt"`
+	ResponseFormat string `json:"response_format,omitempty"`
+	ResponseSchema string `json:"response_schema,omitempty"`
+	IsDefault      bool   `json:"is_default,omitempty"`
 }
 
 type MCPServer struct {

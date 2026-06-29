@@ -8,6 +8,9 @@ export type ProjectFormState = {
   description: string;
   root_path: string;
   identity_verification_enabled: boolean;
+  bearer_auth_enabled: boolean;
+  bearer_token: string;
+  oauth_redirect_uri: string;
 };
 
 export type ServerFormState = {
@@ -43,6 +46,9 @@ const emptyProjectForm: ProjectFormState = {
   description: '',
   root_path: '',
   identity_verification_enabled: false,
+  bearer_auth_enabled: false,
+  bearer_token: '',
+  oauth_redirect_uri: '',
 };
 
 const emptyServerForm: ServerFormState = {

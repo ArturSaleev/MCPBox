@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ArturSaleev/MCPBox/internal/models"
 	"github.com/glebarez/sqlite"
@@ -49,6 +50,136 @@ func TestAddServerPersistsMultipleProjectServers(t *testing.T) {
 	}
 	if len(loadedProject.Servers) != 2 {
 		t.Fatalf("len(loadedProject.Servers) = %d, want 2", len(loadedProject.Servers))
+	}
+}
+
+func TestCatalogSyncPrunesUninstalledItemsBeforeInsertingNewCatalog(t *testing.T) {
+	t.Parallel()
+
+	store, err := NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	project := &models.Project{Name: "Workspace"}
+	if err := store.CreateProject(ctx, project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	initialItems := []models.IntegrationCatalogItem{
+		testCatalogItem("old-remove", "Broken MCP"),
+		testCatalogItem("old-failed", "Failed Package"),
+		testCatalogItem("old-package", "Installed Package"),
+		testCatalogItem("old-integration", "Project Integration"),
+		testCatalogItem("old-instance", "Project Package Instance"),
+	}
+	if err := store.UpsertCatalogItems(ctx, initialItems, testCatalogSyncMetadata("initial")); err != nil {
+		t.Fatalf("UpsertCatalogItems(initial) error = %v", err)
+	}
+
+	installedPackage := &models.InstalledPackage{
+		CatalogItemID:   "old-package",
+		Name:            "Installed Package",
+		Version:         "1.0.0",
+		RuntimeType:     "node",
+		SourceType:      "npm",
+		InstallStrategy: "npm",
+		InstallDir:      filepath.Join(t.TempDir(), "packages", "old-package"),
+		Status:          models.PackageStatusInstalled,
+	}
+	if err := store.CreateInstalledPackage(ctx, installedPackage); err != nil {
+		t.Fatalf("CreateInstalledPackage(old-package) error = %v", err)
+	}
+
+	failedPackage := &models.InstalledPackage{
+		CatalogItemID:   "old-failed",
+		Name:            "Failed Package",
+		Version:         "1.0.0",
+		RuntimeType:     "node",
+		SourceType:      "npm",
+		InstallStrategy: "npm",
+		InstallDir:      filepath.Join(t.TempDir(), "packages", "old-failed"),
+		Status:          models.PackageStatusFailed,
+	}
+	if err := store.CreateInstalledPackage(ctx, failedPackage); err != nil {
+		t.Fatalf("CreateInstalledPackage(old-failed) error = %v", err)
+	}
+
+	integration := &models.InstalledIntegration{
+		ProjectID:     project.ID,
+		CatalogItemID: "old-integration",
+		Name:          "Project Integration",
+		Transport:     models.ServerTransportSTDIO,
+		Status:        "installed",
+		Enabled:       true,
+	}
+	if err := store.db.WithContext(ctx).Create(integration).Error; err != nil {
+		t.Fatalf("create installed integration error = %v", err)
+	}
+
+	instancePackage := &models.InstalledPackage{
+		CatalogItemID:   "instance-runtime",
+		Name:            "Instance Runtime",
+		Version:         "1.0.0",
+		RuntimeType:     "node",
+		SourceType:      "npm",
+		InstallStrategy: "npm",
+		InstallDir:      filepath.Join(t.TempDir(), "packages", "instance-runtime"),
+		Status:          models.PackageStatusInstalled,
+	}
+	if err := store.CreateInstalledPackage(ctx, instancePackage); err != nil {
+		t.Fatalf("CreateInstalledPackage(instance-runtime) error = %v", err)
+	}
+	instance := &models.ProjectPackageInstance{
+		ProjectID:          project.ID,
+		InstalledPackageID: instancePackage.ID,
+		CatalogItemID:      "old-instance",
+		Name:               "Project Package Instance",
+		Status:             models.InstanceStatusReady,
+	}
+	if err := store.CreateProjectPackageInstance(ctx, instance); err != nil {
+		t.Fatalf("CreateProjectPackageInstance() error = %v", err)
+	}
+
+	nextItems := []models.IntegrationCatalogItem{
+		testCatalogItem("old-package", "Installed Package Updated"),
+		testCatalogItem("new-item", "New MCP"),
+	}
+	if err := store.UpsertCatalogItems(ctx, nextItems, testCatalogSyncMetadata("next")); err != nil {
+		t.Fatalf("UpsertCatalogItems(next) error = %v", err)
+	}
+
+	items, err := store.ListCatalogItems(ctx, false)
+	if err != nil {
+		t.Fatalf("ListCatalogItems() error = %v", err)
+	}
+
+	itemsByID := make(map[string]models.IntegrationCatalogItem, len(items))
+	for _, item := range items {
+		if _, exists := itemsByID[item.ID]; exists {
+			t.Fatalf("duplicate catalog item id %q", item.ID)
+		}
+		itemsByID[item.ID] = item
+	}
+
+	if _, exists := itemsByID["old-remove"]; exists {
+		t.Fatal("old-remove should be pruned because it is not in the latest sync and is not installed")
+	}
+	if _, exists := itemsByID["old-failed"]; exists {
+		t.Fatal("old-failed should be pruned because failed package records are not kept as installed")
+	}
+	if itemsByID["old-package"].Name != "Installed Package" {
+		t.Fatalf("old-package name = %q, want installed catalog data to stay untouched", itemsByID["old-package"].Name)
+	}
+	for _, id := range []string{"old-package", "old-integration", "old-instance", "new-item"} {
+		if _, exists := itemsByID[id]; !exists {
+			t.Fatalf("catalog item %q missing after sync", id)
+		}
+	}
+	if len(itemsByID) != 4 {
+		t.Fatalf("catalog item count = %d, want 4 (%v)", len(itemsByID), itemsByID)
 	}
 }
 
@@ -141,6 +272,34 @@ func TestInstalledPackageCanBeReusedAcrossProjects(t *testing.T) {
 	}
 	if len(packages[0].ProjectInstances) != 2 {
 		t.Fatalf("len(package project instances) = %d, want 2", len(packages[0].ProjectInstances))
+	}
+}
+
+func testCatalogItem(id, name string) models.IntegrationCatalogItem {
+	return models.IntegrationCatalogItem{
+		ID:              id,
+		Name:            name,
+		RuntimeType:     "node",
+		SourceType:      "npm",
+		SourcePackage:   "@example/" + id,
+		InstallStrategy: "npm",
+		Transport:       models.ServerTransportSTDIO,
+		Command:         "node",
+		ArgsJSON:        `["dist/index.js"]`,
+		Enabled:         true,
+		Version:         "1.0.0",
+		LastSyncedAt:    time.Now().UTC(),
+		RawJSON:         `{}`,
+	}
+}
+
+func testCatalogSyncMetadata(source string) CatalogSyncMetadata {
+	now := time.Now().UTC()
+	return CatalogSyncMetadata{
+		SourceURL:      source,
+		ManifestURL:    source,
+		LastSyncAt:     now,
+		LastSyncStatus: "success",
 	}
 }
 
@@ -311,6 +470,88 @@ func TestNewStoreDropsLegacyPrimaryServerColumn(t *testing.T) {
 
 	if store.db.Migrator().HasColumn(&models.Project{}, "primary_server_id") {
 		t.Fatal("primary_server_id column still exists after migration")
+	}
+}
+
+func TestNewStoreMigratesLegacyProjectPromptProfilesColumn(t *testing.T) {
+	t.Parallel()
+
+	dsn := filepath.Join(t.TempDir(), "mcpbox.db")
+	legacyDB, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+
+	if err := legacyDB.Exec(`
+		CREATE TABLE projects (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			description TEXT,
+			root_path TEXT,
+			token TEXT NOT NULL,
+			is_paused NUMERIC NOT NULL DEFAULT 0,
+			identity_verification NUMERIC NOT NULL DEFAULT 0,
+			bearer_auth_enabled NUMERIC NOT NULL DEFAULT 0,
+			bearer_token TEXT,
+			prompt TEXT,
+			llama_cpp_model_path TEXT,
+			llama_cpp_model_name TEXT,
+			created_at DATETIME,
+			updated_at DATETIME
+		)
+	`).Error; err != nil {
+		t.Fatalf("create legacy projects table error = %v", err)
+	}
+
+	sqlDB, err := legacyDB.DB()
+	if err != nil {
+		t.Fatalf("legacyDB.DB() error = %v", err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatalf("legacy sql DB close error = %v", err)
+	}
+
+	store, err := NewStore(dsn)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	if !store.db.Migrator().HasColumn(&models.Project{}, "prompt_profiles_json") {
+		t.Fatal("prompt_profiles_json column missing after migration")
+	}
+
+	project := &models.Project{
+		Name:   "Legacy Workspace",
+		Token:  "legacy-token",
+		Prompt: "base prompt",
+	}
+	if err := store.CreateProject(context.Background(), project); err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+
+	promptProfilesJSON := `[{"id":"profile-1","name":"Structured output","prompt":"Return JSON only.","response_format":"json","is_default":true}]`
+	if err := store.UpdateProject(
+		context.Background(),
+		project.ID,
+		"Legacy Workspace",
+		"",
+		"",
+		"base prompt",
+		promptProfilesJSON,
+		false,
+		false,
+		"",
+	); err != nil {
+		t.Fatalf("UpdateProject() error = %v", err)
+	}
+
+	var saved string
+	if err := store.db.Raw(`SELECT prompt_profiles_json FROM projects WHERE id = ?`, project.ID).Scan(&saved).Error; err != nil {
+		t.Fatalf("raw select prompt_profiles_json error = %v", err)
+	}
+	if saved != promptProfilesJSON {
+		t.Fatalf("prompt_profiles_json = %q, want %q", saved, promptProfilesJSON)
 	}
 }
 

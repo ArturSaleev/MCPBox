@@ -48,6 +48,7 @@ type ragCollectionResponse struct {
 	Name               string `json:"name"`
 	DataType           string `json:"data_type"`
 	SourcePath         string `json:"source_path"`
+	ManagedSourcePath  string `json:"managed_source_path"`
 	AutoReindex        bool   `json:"auto_reindex"`
 	ServiceMode        string `json:"service_mode"`
 	VectorConnectionID string `json:"vector_connection_id"`
@@ -67,7 +68,7 @@ func (s *Server) handleListRAGCollections(w http.ResponseWriter, r *http.Request
 
 	response := make([]ragCollectionResponse, 0, len(collections))
 	for _, collection := range collections {
-		response = append(response, mapRAGCollection(collection))
+		response = append(response, s.mapRAGCollection(collection))
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"items": response})
@@ -86,10 +87,6 @@ func (s *Server) handleCreateRAGCollection(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	sourcePath := strings.TrimSpace(req.SourcePath)
-	if sourcePath == "" {
-		writeError(w, http.StatusBadRequest, errors.New("source_path is required"))
-		return
-	}
 	serviceMode := models.NormalizeRAGServiceMode(strings.TrimSpace(req.ServiceMode))
 
 	collectionID := uuid.NewString()
@@ -99,26 +96,32 @@ func (s *Server) handleCreateRAGCollection(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
+	managedSourcePath, err := s.ensureRAGManagedSourcePath(collectionID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 
 	collection := &models.RAGCollection{
 		CollectionID:       collectionID,
 		Name:               name,
 		DataType:           models.RAGDataTypeCode,
 		SourcePath:         sourcePath,
-		AutoReindex:        req.AutoReindex,
+		AutoReindex:        models.NormalizeAutoReindex(req.AutoReindex, serviceMode),
 		ServiceMode:        serviceMode,
 		VectorConnectionID: strings.TrimSpace(req.VectorConnectionID),
 		IndexPath:          indexPath,
 	}
 
 	if models.UsesBleveService(serviceMode) {
-		if err := reindexCollection(*collection, sourcePath); err != nil {
+		if err := s.reindexStoredCollection(*collection); err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
 	}
 	if err := s.store.CreateRAGCollection(r.Context(), collection); err != nil {
 		_ = os.RemoveAll(collection.IndexPath)
+		_ = os.RemoveAll(managedSourcePath)
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
@@ -127,7 +130,7 @@ func (s *Server) handleCreateRAGCollection(w http.ResponseWriter, r *http.Reques
 	if models.UsesBleveService(serviceMode) {
 		s.logAudit(r.Context(), nil, nil, "rag_collection_indexed", clientActor(r), collectionID)
 	}
-	writeJSON(w, http.StatusCreated, mapRAGCollection(*collection))
+	writeJSON(w, http.StatusCreated, s.mapRAGCollection(*collection))
 }
 
 func (s *Server) handleRAGCollectionAction(w http.ResponseWriter, r *http.Request) {
@@ -150,6 +153,8 @@ func (s *Server) handleRAGCollectionAction(w http.ResponseWriter, r *http.Reques
 	switch tail {
 	case "index":
 		s.handleIndexRAGCollection(w, r, *collection)
+	case "reindex":
+		s.handleReindexRAGCollection(w, r, *collection)
 	case "search":
 		s.handleSearchRAGCollection(w, r, *collection)
 	default:
@@ -216,24 +221,24 @@ func (s *Server) handleUpdateRAGCollection(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	sourcePath := strings.TrimSpace(req.SourcePath)
-	if sourcePath == "" {
-		writeError(w, http.StatusBadRequest, errors.New("source_path is required"))
-		return
-	}
 	serviceMode := models.NormalizeRAGServiceMode(strings.TrimSpace(req.ServiceMode))
 	if strings.TrimSpace(req.ServiceMode) == "" {
 		serviceMode = models.NormalizeRAGServiceMode(collection.ServiceMode)
+	}
+	if _, err := s.ensureRAGManagedSourcePath(collection.CollectionID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
 	}
 
 	updatedPreview := *collection
 	updatedPreview.Name = name
 	updatedPreview.SourcePath = sourcePath
-	updatedPreview.AutoReindex = req.AutoReindex
+	updatedPreview.AutoReindex = models.NormalizeAutoReindex(req.AutoReindex, serviceMode)
 	updatedPreview.ServiceMode = serviceMode
 	updatedPreview.VectorConnectionID = strings.TrimSpace(req.VectorConnectionID)
 
 	if models.UsesBleveService(serviceMode) {
-		if err := reindexCollection(updatedPreview, sourcePath); err != nil {
+		if err := s.reindexStoredCollection(updatedPreview); err != nil {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
@@ -261,7 +266,7 @@ func (s *Server) handleUpdateRAGCollection(w http.ResponseWriter, r *http.Reques
 	if models.UsesBleveService(serviceMode) {
 		s.logAudit(r.Context(), nil, nil, "rag_collection_indexed", clientActor(r), collectionID)
 	}
-	writeJSON(w, http.StatusOK, mapRAGCollection(*updatedCollection))
+	writeJSON(w, http.StatusOK, s.mapRAGCollection(*updatedCollection))
 }
 
 func (s *Server) handleProjectRAGCollectionAction(w http.ResponseWriter, r *http.Request, projectID uint) {
@@ -353,13 +358,17 @@ func (s *Server) handleIndexRAGCollection(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, errors.New("dir_path is required"))
 		return
 	}
-
-	if err := reindexCollection(collection, dirPath); err != nil {
-		writeError(w, http.StatusBadRequest, err)
+	if _, err := s.ensureRAGManagedSourcePath(collection.CollectionID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	if err := s.store.UpdateRAGCollectionConfig(r.Context(), collection.CollectionID, collection.Name, dirPath, collection.AutoReindex, collection.VectorConnectionID); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	collection.SourcePath = dirPath
+	if err := s.reindexStoredCollection(collection); err != nil {
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 
@@ -368,6 +377,27 @@ func (s *Server) handleIndexRAGCollection(w http.ResponseWriter, r *http.Request
 		"collection_id": collection.CollectionID,
 		"indexed":       true,
 		"dir_path":      dirPath,
+	})
+}
+
+func (s *Server) handleReindexRAGCollection(w http.ResponseWriter, r *http.Request, collection models.RAGCollection) {
+	if !models.UsesBleveService(collection.ServiceMode) {
+		writeError(w, http.StatusConflict, errors.New("this knowledge base uses RagBox only; local Bleve indexing is disabled"))
+		return
+	}
+	if _, err := s.ensureRAGManagedSourcePath(collection.CollectionID); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if err := s.reindexStoredCollection(collection); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	s.logAudit(r.Context(), nil, nil, "rag_collection_indexed", clientActor(r), collection.CollectionID)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"collection_id": collection.CollectionID,
+		"indexed":       true,
 	})
 }
 
@@ -399,13 +429,14 @@ func (s *Server) handleSearchRAGCollection(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, ragSearchResponse{Items: items})
 }
 
-func mapRAGCollection(collection models.RAGCollection) ragCollectionResponse {
+func (s *Server) mapRAGCollection(collection models.RAGCollection) ragCollectionResponse {
 	return ragCollectionResponse{
 		ID:                 collection.ID,
 		CollectionID:       collection.CollectionID,
 		Name:               collection.Name,
 		DataType:           normalizedRAGDataType(collection.DataType),
 		SourcePath:         collection.SourcePath,
+		ManagedSourcePath:  s.resolveRAGManagedSourcePath(collection.CollectionID),
 		AutoReindex:        collection.AutoReindex,
 		ServiceMode:        models.NormalizeRAGServiceMode(collection.ServiceMode),
 		VectorConnectionID: strings.TrimSpace(collection.VectorConnectionID),
@@ -413,14 +444,14 @@ func mapRAGCollection(collection models.RAGCollection) ragCollectionResponse {
 	}
 }
 
-func reindexCollection(collection models.RAGCollection, dirPath string) error {
+func (s *Server) reindexStoredCollection(collection models.RAGCollection) error {
 	index, err := rag.NewCollection(collection.CollectionID, collection.Name, collection.IndexPath)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = index.Close() }()
 
-	return index.IndexFolder(dirPath)
+	return index.IndexFolders(s.ragCollectionSourceRoots(collection))
 }
 
 func (s *Server) resolveRAGIndexPath(indexPath, collectionID string) (string, error) {
@@ -438,17 +469,35 @@ func (s *Server) resolveRAGIndexPath(indexPath, collectionID string) (string, er
 		}
 		baseRoot = cwd
 	}
-	return filepath.Join(baseRoot, "knowledge_base", "indexes", sanitizeRAGPathSegment(collectionID)), nil
+	return rag.ResolveIndexPath(baseRoot, collectionID), nil
 }
 
-func sanitizeRAGPathSegment(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
-		return "collection"
+func (s *Server) resolveRAGManagedSourcePath(collectionID string) string {
+	baseRoot := "."
+	if s != nil && s.store != nil && strings.TrimSpace(s.store.DataRoot()) != "" {
+		baseRoot = s.store.DataRoot()
 	}
+	return rag.ResolveManagedSourcePath(baseRoot, collectionID)
+}
 
-	replacer := strings.NewReplacer("/", "-", "\\", "-", ":", "-", "*", "-", "?", "-", "\"", "-", "<", "-", ">", "-", "|", "-", " ", "-")
-	return replacer.Replace(value)
+func (s *Server) ensureRAGManagedSourcePath(collectionID string) (string, error) {
+	path := s.resolveRAGManagedSourcePath(collectionID)
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func (s *Server) ragCollectionSourceRoots(collection models.RAGCollection) []string {
+	roots := make([]string, 0, 2)
+	if sourcePath := strings.TrimSpace(collection.SourcePath); sourcePath != "" {
+		roots = append(roots, sourcePath)
+	}
+	managedPath := s.resolveRAGManagedSourcePath(collection.CollectionID)
+	if info, err := os.Stat(managedPath); err == nil && info.IsDir() {
+		roots = append(roots, managedPath)
+	}
+	return roots
 }
 
 func parseUintParam(raw string) (uint, error) {

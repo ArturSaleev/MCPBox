@@ -7,11 +7,16 @@ export async function apiRequest<T>(
   requestFailedMessage: (status: number) => string,
   init?: RequestInit,
 ): Promise<T> {
+  const isFormDataBody = typeof FormData !== 'undefined' && init?.body instanceof FormData;
   const response = await fetch(input, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
+    headers: isFormDataBody
+      ? {
+          ...(init?.headers ?? {}),
+        }
+      : {
+          'Content-Type': 'application/json',
+          ...(init?.headers ?? {}),
+        },
     ...init,
   });
 

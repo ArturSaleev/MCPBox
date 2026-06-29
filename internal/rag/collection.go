@@ -119,29 +119,58 @@ func (c *Collection) Close() error {
 // IndexFolder walks through the provided directory and indexes supported text/code files.
 // Files are split into overlapping chunks to preserve surrounding context for search results.
 func (c *Collection) IndexFolder(dirPath string) error {
+	return c.IndexFolders([]string{dirPath})
+}
+
+// IndexFolders rebuilds the collection index from one or more source directories.
+func (c *Collection) IndexFolders(dirPaths []string) error {
 	if c == nil || c.index == nil {
 		return errors.New("collection index is not initialized")
-	}
-
-	dirPath = strings.TrimSpace(dirPath)
-	if dirPath == "" {
-		return errors.New("directory path is required")
-	}
-
-	info, err := os.Stat(dirPath)
-	if err != nil {
-		return fmt.Errorf("stat directory: %w", err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("path is not a directory: %s", dirPath)
 	}
 	if err := c.clearIndex(); err != nil {
 		return err
 	}
 
 	batch := c.index.NewBatch()
+	indexedAny := false
+	for _, dirPath := range dirPaths {
+		dirPath = strings.TrimSpace(dirPath)
+		if dirPath == "" {
+			continue
+		}
 
-	err = filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, walkErr error) error {
+		info, err := os.Stat(dirPath)
+		if err != nil {
+			return fmt.Errorf("stat directory: %w", err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("path is not a directory: %s", dirPath)
+		}
+
+		indexedAny = true
+		if err := c.indexFolderIntoBatch(dirPath, batch); err != nil {
+			return err
+		}
+		if batch.Size() >= 100 {
+			if err := c.index.Batch(batch); err != nil {
+				return fmt.Errorf("flush index batch: %w", err)
+			}
+			batch = c.index.NewBatch()
+		}
+	}
+
+	if !indexedAny || batch.Size() == 0 {
+		return nil
+	}
+	if err := c.index.Batch(batch); err != nil {
+		return fmt.Errorf("final index batch flush: %w", err)
+	}
+
+	return nil
+}
+
+func (c *Collection) indexFolderIntoBatch(dirPath string, batch *bleve.Batch) error {
+	return filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -158,6 +187,9 @@ func (c *Collection) IndexFolder(dirPath string) error {
 
 		document, err := extractDocument(path)
 		if err != nil {
+			if errors.Is(err, ErrNoExtractableText) {
+				return nil
+			}
 			return fmt.Errorf("extract file %s: %w", path, err)
 		}
 
@@ -175,29 +207,11 @@ func (c *Collection) IndexFolder(dirPath string) error {
 					return fmt.Errorf("index chunk %s: %w", chunk.ID, err)
 				}
 				chunkIndex++
-				if batch.Size() >= 100 {
-					if err := c.index.Batch(batch); err != nil {
-						return fmt.Errorf("flush index batch: %w", err)
-					}
-					batch = c.index.NewBatch()
-				}
 			}
 		}
 
 		return nil
 	})
-	if err != nil {
-		return err
-	}
-
-	if batch.Size() == 0 {
-		return nil
-	}
-	if err := c.index.Batch(batch); err != nil {
-		return fmt.Errorf("final index batch flush: %w", err)
-	}
-
-	return nil
 }
 
 func shouldSkipDir(path string, entry fs.DirEntry) bool {

@@ -82,6 +82,15 @@ type ProjectStatus = {
   rag_collections: RAGCollection[];
   installed_integrations: Array<{ catalog_item_id: string }>;
   prompt: string;
+  prompt_profiles: Array<{
+    id: string;
+    name: string;
+    description: string;
+    prompt: string;
+    response_format: string;
+    response_schema: string;
+    is_default: boolean;
+  }>;
 };
 
 type ServerFormState = {
@@ -301,7 +310,10 @@ type ProjectsViewProps = {
   authServer: AuthServer | null;
   connectOAuth: (serverId: number) => void | Promise<void>;
   disconnectOAuth: (serverId: number) => void | Promise<void>;
-  updateProjectPrompt: (prompt: string) => void | Promise<void>;
+  updateProjectPrompt: (
+    prompt: string,
+    promptProfiles: ProjectStatus['prompt_profiles'],
+  ) => void | Promise<void>;
   updatingPrompt: boolean;
 };
 
@@ -342,6 +354,7 @@ export function ProjectsView({
   setConnectionURLsExpanded,
   copyConnectURL,
   copied,
+  regenerateEndpointToken,
   busyProjectId,
   setProjectPaused,
   startDuplicateProject,
@@ -469,6 +482,7 @@ export function ProjectsView({
         setConnectionURLsExpanded={setConnectionURLsExpanded}
         copyConnectURL={copyConnectURL}
         copied={copied}
+        regenerateEndpointToken={regenerateEndpointToken}
         busyProjectId={busyProjectId}
         setProjectPaused={setProjectPaused}
         startDuplicateProject={startDuplicateProject}
@@ -507,7 +521,7 @@ export function ProjectsView({
             <span className="flex items-center gap-2">
               <span>Prompt</span>
               <span className="rounded-full bg-background/80 px-2 py-0.5 text-xs text-foreground/70 data-[state=active]:bg-white/20 data-[state=active]:text-white">
-                {selectedProject.prompt.trim() ? '1' : '0'}
+                {(selectedProject.prompt.trim() ? 1 : 0) + (selectedProject.prompt_profiles?.length ?? 0)}
               </span>
             </span>
           </TabsTrigger>

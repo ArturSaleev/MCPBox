@@ -282,6 +282,53 @@ func retryPayments() {
 	}
 }
 
+func TestRAGCollectionCreateWithoutSourcePathCreatesManagedFolder(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+
+	createBody := bytes.NewBufferString(`{"name":"Managed KB","source_path":"","auto_reindex":false}`)
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/rag/collections", createBody)
+	createResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(createResponse, createRequest)
+
+	if createResponse.Code != http.StatusCreated {
+		t.Fatalf("create collection status = %d, body = %s", createResponse.Code, createResponse.Body.String())
+	}
+
+	var createdCollection struct {
+		CollectionID      string `json:"collection_id"`
+		SourcePath        string `json:"source_path"`
+		ManagedSourcePath string `json:"managed_source_path"`
+		IndexPath         string `json:"index_path"`
+	}
+	if err := json.Unmarshal(createResponse.Body.Bytes(), &createdCollection); err != nil {
+		t.Fatalf("json.Unmarshal(create) error = %v", err)
+	}
+
+	if createdCollection.SourcePath != "" {
+		t.Fatalf("source_path = %q, want empty", createdCollection.SourcePath)
+	}
+	if createdCollection.ManagedSourcePath == "" {
+		t.Fatal("managed_source_path is empty")
+	}
+	if !strings.Contains(createdCollection.ManagedSourcePath, filepath.Join("knowledge_base", "managed")) {
+		t.Fatalf("managed_source_path = %q, want path under knowledge_base/managed", createdCollection.ManagedSourcePath)
+	}
+	if _, err := os.Stat(createdCollection.ManagedSourcePath); err != nil {
+		t.Fatalf("expected managed_source_path to exist, stat error = %v", err)
+	}
+	if _, err := os.Stat(createdCollection.IndexPath); err != nil {
+		t.Fatalf("expected empty Bleve index path to exist, stat error = %v", err)
+	}
+}
+
 func escapeJSON(value string) string {
 	return strings.ReplaceAll(value, `\`, `\\`)
 }

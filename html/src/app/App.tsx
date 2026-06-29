@@ -18,6 +18,7 @@ import logo from '../styles/logo.png';
 import { AppShell } from './components/AppShell';
 import type {
   ProjectStatus,
+  ProjectPromptProfile,
   ServerStatus,
   RAGCollection,
   RAGSearchResult,
@@ -114,6 +115,7 @@ const emptyProjectForm: ProjectFormState = {
   identity_verification_enabled: false,
   bearer_auth_enabled: false,
   bearer_token: '',
+  oauth_redirect_uri: '',
 };
 
 const emptyServerForm: ServerFormState = {
@@ -918,6 +920,7 @@ export default function App() {
         root_path: projectForm.root_path,
         identity_verification_enabled: projectForm.identity_verification_enabled,
         bearer_auth_enabled: projectForm.bearer_auth_enabled,
+        oauth_redirect_uri: projectForm.oauth_redirect_uri,
       };
 
       if (editingProjectId) {
@@ -955,7 +958,7 @@ export default function App() {
     }
   }
 
-  async function updateProjectPrompt(prompt: string) {
+  async function updateProjectPromptConfig(prompt: string, promptProfiles: ProjectPromptProfile[]) {
     if (!selectedProject) {
       return;
     }
@@ -974,7 +977,9 @@ export default function App() {
             root_path: selectedProject.root_path,
             identity_verification_enabled: selectedProject.identity_verification_enabled,
             bearer_auth_enabled: selectedProject.bearer_auth_enabled,
+            oauth_redirect_uri: selectedProject.oauth_redirect_uri,
             prompt,
+            prompt_profiles: promptProfiles,
           }),
         },
       );
@@ -1132,6 +1137,7 @@ export default function App() {
         ...current,
         bearer_auth_enabled: updatedProject.bearer_auth_enabled,
         bearer_token: updatedProject.bearer_token,
+        oauth_redirect_uri: updatedProject.oauth_redirect_uri,
       }));
       toast.success(messages.bearerTokenRegenerated);
       await loadLogs({ silent: true });
@@ -1398,6 +1404,7 @@ export default function App() {
       identity_verification_enabled: selectedProject.identity_verification_enabled,
       bearer_auth_enabled: selectedProject.bearer_auth_enabled,
       bearer_token: selectedProject.bearer_token,
+      oauth_redirect_uri: selectedProject.oauth_redirect_uri,
     });
     setEditingProjectId(selectedProject.project_id);
     setCreateProjectOpen(true);
@@ -2251,7 +2258,7 @@ export default function App() {
               authServer={authServer}
               connectOAuth={connectOAuth}
               disconnectOAuth={disconnectOAuth}
-              updateProjectPrompt={updateProjectPrompt}
+              updateProjectPrompt={updateProjectPromptConfig}
               updatingPrompt={updatingPrompt}
             />
           )}

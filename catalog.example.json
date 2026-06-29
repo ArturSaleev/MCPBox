@@ -11,12 +11,12 @@
       "runtime": { "type": "node", "version": ">=20" },
       "source": { "type": "npm", "package": "@modelcontextprotocol/server-filesystem", "version": "latest", "url": "" },
       "install": { "strategy": "npm", "metadata": { "registry": "https://registry.npmjs.org" } },
-      "launch": { "command": "node", "args": ["dist/index.js"], "working_dir": "{install_dir}", "entry_point": "dist/index.js" },
+      "launch": { "command": "node", "args": ["dist/index.js", "{root_path}"], "working_dir": "{install_dir}", "entry_point": "dist/index.js" },
       "shared_install": true,
       "supports_multi_project": true,
       "transport": "stdio",
       "command": "node",
-      "args": ["dist/index.js"],
+      "args": ["dist/index.js", "{root_path}"],
       "env": [],
       "env_passthrough": [],
       "working_dir": "{install_dir}",
@@ -47,12 +47,12 @@
       "runtime": { "type": "node", "version": ">=20" },
       "source": { "type": "npm", "package": "@modelcontextprotocol/server-fetch", "version": "latest", "url": "" },
       "install": { "strategy": "npm", "metadata": { "registry": "https://registry.npmjs.org" } },
-      "launch": { "command": "node", "args": ["dist/index.js"], "working_dir": "{install_dir}", "entry_point": "dist/index.js" },
+      "launch": { "command": "node", "args": ["dist/index.js", "{database_url}"], "working_dir": "{install_dir}", "entry_point": "dist/index.js" },
       "shared_install": true,
       "supports_multi_project": true,
       "transport": "stdio",
       "command": "node",
-      "args": ["dist/index.js"],
+      "args": ["dist/index.js", "{database_url}"],
       "env": [],
       "env_passthrough": [],
       "working_dir": "{install_dir}",
@@ -156,7 +156,7 @@
       "command": "node",
       "args": ["dist/index.js"],
       "env": [],
-      "env_passthrough": ["PGPASSWORD"],
+      "env_passthrough": [],
       "working_dir": "{install_dir}",
       "default_auto_start": false,
       "auth_type": "none",
@@ -167,13 +167,9 @@
       "config_schema": {
         "type": "object",
         "properties": {
-          "postgres_host": { "type": "string", "title": "Host", "default": "127.0.0.1" },
-          "postgres_port": { "type": "string", "title": "Port", "default": "5432" },
-          "postgres_user": { "type": "string", "title": "User", "default": "postgres" },
-          "postgres_password": { "type": "string", "title": "Password", "secret": true, "env_var": "PGPASSWORD" },
-          "postgres_database": { "type": "string", "title": "Database" }
+          "database_url": { "type": "string", "title": "PostgreSQL Connection URI", "secret": true, "description": "Example: postgresql://postgres:password@127.0.0.1:5432/app?sslmode=disable" }
         },
-        "required": ["postgres_host", "postgres_user", "postgres_database"]
+        "required": ["database_url"]
       },
       "health_check": { "enabled": true, "required": true, "timeout_seconds": 15 },
       "capabilities": ["postgresql", "database", "sql"],
@@ -592,6 +588,51 @@
       "version": "latest"
     },
     {
+      "id": "crystaldba-postgres-mcp",
+      "name": "Postgres MCP Pro (Docker)",
+      "category": "databases",
+      "description": "Crystal DBA Postgres MCP server with health checks, explain plans, index tuning, and configurable restricted or unrestricted SQL access.",
+      "icon_url": "https://www.postgresql.org/media/img/about/press/elephant.png",
+      "runtime": { "type": "docker", "version": ">=20.10" },
+      "source": { "type": "docker", "package": "crystaldba/postgres-mcp", "version": "latest", "url": "https://github.com/crystaldba/postgres-mcp" },
+      "install": { "strategy": "docker_pull", "metadata": { "registry": "docker.io" } },
+      "launch": {
+        "command": "docker",
+        "args": ["run", "-i", "--rm", "-e", "DATABASE_URI={database_uri}", "crystaldba/postgres-mcp", "--access-mode={access_mode}"],
+        "working_dir": "",
+        "entry_point": ""
+      },
+      "shared_install": true,
+      "supports_multi_project": false,
+      "transport": "stdio",
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-e", "DATABASE_URI={database_uri}", "crystaldba/postgres-mcp", "--access-mode={access_mode}"],
+      "env": [],
+      "env_passthrough": [],
+      "working_dir": "",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
+      "system_dependencies": [
+        { "executable": "docker", "min_version": "20.10.0", "critical": true, "install_hint": "Install Docker Engine or Docker Desktop" }
+      ],
+      "config_schema": {
+        "type": "object",
+        "properties": {
+          "database_uri": { "type": "string", "title": "PostgreSQL Connection URI", "description": "Example: postgresql://user:password@host:5432/dbname" },
+          "access_mode": { "type": "string", "title": "Access mode", "default": "restricted", "enum": ["restricted", "unrestricted"], "description": "Use restricted for read-only style production access, unrestricted for development write access." }
+        },
+        "required": ["database_uri"]
+      },
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 20 },
+      "capabilities": ["postgresql", "database", "docker", "sql", "analysis"],
+      "tags": ["postgresql", "database", "docker", "crystaldba"],
+      "website": "https://www.crystaldba.ai",
+      "docs_url": "https://github.com/crystaldba/postgres-mcp",
+      "enabled": true,
+      "version": "latest"
+    },
+    {
       "id": "mysql",
       "name": "MySQL MCP",
       "category": "databases",
@@ -688,6 +729,76 @@
       "docs_url": "https://github.com/mysql/mcp-server",
       "enabled": true,
       "version": "latest"
+    },
+    {
+      "id": "clickhouse",
+      "name": "ClickHouse MCP",
+      "category": "databases",
+      "description": "Official ClickHouse MCP server for querying ClickHouse with read-only mode by default and optional write access.",
+      "icon_url": "https://clickhouse.com/images/brand-assets/clickhouse-logo-symbol.svg",
+      "runtime": { "type": "python", "version": ">=3.10" },
+      "source": { "type": "python", "package": "mcp-clickhouse", "version": "0.4.0", "url": "https://github.com/ClickHouse/mcp-clickhouse" },
+      "install": { "strategy": "python_venv", "metadata": {} },
+      "launch": { "command": "python", "args": ["-m", "mcp_clickhouse.main"], "working_dir": "{install_dir}", "entry_point": "mcp_clickhouse.main" },
+      "shared_install": true,
+      "supports_multi_project": true,
+      "transport": "stdio",
+      "command": "python",
+      "args": ["-m", "mcp_clickhouse.main"],
+      "env": [],
+      "default_env": {
+        "CLICKHOUSE_PORT": "8443",
+        "CLICKHOUSE_SECURE": "true",
+        "CLICKHOUSE_VERIFY": "true",
+        "CLICKHOUSE_CONNECT_TIMEOUT": "30",
+        "CLICKHOUSE_SEND_RECEIVE_TIMEOUT": "30",
+        "CLICKHOUSE_ALLOW_WRITE_ACCESS": "false",
+        "CLICKHOUSE_ALLOW_DROP": "false"
+      },
+      "env_passthrough": [
+        "CLICKHOUSE_HOST",
+        "CLICKHOUSE_PORT",
+        "CLICKHOUSE_USER",
+        "CLICKHOUSE_PASSWORD",
+        "CLICKHOUSE_DATABASE",
+        "CLICKHOUSE_ROLE",
+        "CLICKHOUSE_SECURE",
+        "CLICKHOUSE_VERIFY",
+        "CLICKHOUSE_CONNECT_TIMEOUT",
+        "CLICKHOUSE_SEND_RECEIVE_TIMEOUT",
+        "CLICKHOUSE_ALLOW_WRITE_ACCESS",
+        "CLICKHOUSE_ALLOW_DROP"
+      ],
+      "env_schema": {
+        "type": "object",
+        "properties": {
+          "CLICKHOUSE_HOST": { "type": "string", "title": "ClickHouse Host", "default": "localhost" },
+          "CLICKHOUSE_PORT": { "type": "string", "title": "Port", "default": "8443" },
+          "CLICKHOUSE_USER": { "type": "string", "title": "User", "default": "default" },
+          "CLICKHOUSE_PASSWORD": { "type": "string", "title": "Password", "secret": true },
+          "CLICKHOUSE_DATABASE": { "type": "string", "title": "Database", "description": "Optional default database." },
+          "CLICKHOUSE_ROLE": { "type": "string", "title": "Role", "description": "Optional ClickHouse role." },
+          "CLICKHOUSE_SECURE": { "type": "string", "title": "Use TLS", "default": "true", "description": "Set false for local non-TLS ClickHouse." },
+          "CLICKHOUSE_VERIFY": { "type": "string", "title": "Verify TLS", "default": "true" },
+          "CLICKHOUSE_CONNECT_TIMEOUT": { "type": "string", "title": "Connect timeout", "default": "30" },
+          "CLICKHOUSE_SEND_RECEIVE_TIMEOUT": { "type": "string", "title": "Send/receive timeout", "default": "30" },
+          "CLICKHOUSE_ALLOW_WRITE_ACCESS": { "type": "string", "title": "Allow write access", "default": "false", "description": "Set true only if you want INSERT or DDL operations." },
+          "CLICKHOUSE_ALLOW_DROP": { "type": "string", "title": "Allow destructive operations", "default": "false", "description": "Set true only together with write access if DROP or TRUNCATE is required." }
+        },
+        "required": ["CLICKHOUSE_HOST", "CLICKHOUSE_USER"]
+      },
+      "working_dir": "{install_dir}",
+      "default_auto_start": false,
+      "auth_type": "none",
+      "auth_provider": "",
+      "config_schema": { "type": "object", "properties": {}, "required": [] },
+      "health_check": { "enabled": true, "required": true, "timeout_seconds": 15 },
+      "capabilities": ["clickhouse", "database", "sql", "python"],
+      "tags": ["official", "clickhouse", "database", "python"],
+      "website": "https://clickhouse.com",
+      "docs_url": "https://github.com/ClickHouse/mcp-clickhouse",
+      "enabled": true,
+      "version": "0.4.0"
     }
   ]
 }
