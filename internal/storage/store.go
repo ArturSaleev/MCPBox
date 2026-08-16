@@ -758,6 +758,18 @@ func (s *Store) CreateAuditLog(ctx context.Context, entry *models.AuditLog) erro
 	return s.db.WithContext(ctx).Create(entry).Error
 }
 
+// DeleteAuditLogs removes audit entries, optionally limited to one project.
+// A nil projectID intentionally clears the complete audit history.
+func (s *Store) DeleteAuditLogs(ctx context.Context, projectID *uint) (int64, error) {
+	query := s.db.WithContext(ctx).Model(&models.AuditLog{})
+	if projectID != nil {
+		query = query.Where("project_id = ?", *projectID)
+	}
+
+	result := query.Delete(&models.AuditLog{})
+	return result.RowsAffected, result.Error
+}
+
 func (s *Store) CreatePerformanceMetric(ctx context.Context, metric *models.PerformanceMetric) error {
 	return s.db.WithContext(ctx).Create(metric).Error
 }

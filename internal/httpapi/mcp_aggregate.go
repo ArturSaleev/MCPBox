@@ -260,7 +260,7 @@ func (s *Server) dispatchProjectJSONRPC(
 		// Add prompt tool at the beginning to encourage LLM to call it first
 		tools = append([]aggregateTool{s.projectPromptAggregateTool()}, tools...)
 		if len(project.RAGCollections) > 0 {
-			tools = append(tools, s.projectKnowledgeAggregateTool())
+			tools = append(tools, s.projectKnowledgeAggregateTool(project))
 		}
 		result := struct {
 			Tools []aggregatedToolResult `json:"tools"`
@@ -290,7 +290,17 @@ func (s *Server) dispatchProjectJSONRPC(
 		if params.Name == projectKnowledgeSearchToolName {
 			result, err := s.callProjectKnowledgeTool(ctx, project, params.Arguments)
 			if err != nil {
-				return nil, false, err
+				// Invalid search arguments and backend search failures are tool
+				// execution errors, not JSON-RPC transport failures. Return a normal
+				// MCP tool result so clients can feed the error back to the model and
+				// let it correct the call instead of aborting the whole chat.
+				result = map[string]any{
+					"content": []map[string]any{{
+						"type": "text",
+						"text": err.Error(),
+					}},
+					"isError": true,
+				}
 			}
 			return mustMarshal(projectResponseEnvelope{
 				JSONRPC: "2.0",
@@ -695,21 +705,41 @@ func (s *Server) aggregateTools(ctx context.Context, servers []models.MCPServer)
 	return tools, nil
 }
 
-func (s *Server) projectKnowledgeAggregateTool() aggregateTool {
+func (s *Server) projectKnowledgeAggregateTool(project models.Project) aggregateTool {
+	collectionIDs := make([]string, 0, len(project.RAGCollections))
+	for _, collection := range project.RAGCollections {
+		if id := strings.TrimSpace(collection.CollectionID); id != "" {
+			collectionIDs = append(collectionIDs, id)
+		}
+	}
+	inputSchema, _ := json.Marshal(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"query": map[string]any{
+				"type":        "string",
+				"minLength":   1,
+				"description": "What to search for in the connected project knowledge bases.",
+			},
+			"limit": map[string]any{
+				"type":        "integer",
+				"minimum":     1,
+				"maximum":     20,
+				"description": "Maximum number of chunks to return.",
+			},
+			"collections": map[string]any{
+				"type":        "array",
+				"items":       map[string]any{"type": "string", "enum": collectionIDs},
+				"description": "Optional subset of connected collection ids to search in. Omit to search all connected collections.",
+			},
+		},
+		"required": []string{"query"},
+	})
 	return aggregateTool{
 		Origin: orchestrator.InspectionTool{
 			Name:        projectKnowledgeSearchToolName,
 			Title:       "Project Knowledge Search",
 			Description: "Searches across all knowledge base collections connected to the current project.",
-			InputSchema: json.RawMessage(`{
-				"type":"object",
-				"properties":{
-					"query":{"type":"string","description":"What to search for in the connected project knowledge bases."},
-					"limit":{"type":"integer","minimum":1,"maximum":20,"description":"Maximum number of chunks to return."},
-					"collections":{"type":"array","items":{"type":"string"},"description":"Optional subset of connected collection ids to search in."}
-				},
-				"required":["query"]
-			}`),
+			InputSchema: inputSchema,
 		},
 		Alias: projectKnowledgeSearchToolName,
 	}

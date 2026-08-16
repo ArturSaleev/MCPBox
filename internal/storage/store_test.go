@@ -53,6 +53,53 @@ func TestAddServerPersistsMultipleProjectServers(t *testing.T) {
 	}
 }
 
+func TestDeleteAuditLogsOnlyDeletesSelectedProject(t *testing.T) {
+	t.Parallel()
+
+	store, err := NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+	firstProject := &models.Project{Name: "First"}
+	secondProject := &models.Project{Name: "Second"}
+	for _, project := range []*models.Project{firstProject, secondProject} {
+		if err := store.CreateProject(ctx, project); err != nil {
+			t.Fatalf("CreateProject() error = %v", err)
+		}
+	}
+	for _, projectID := range []uint{firstProject.ID, secondProject.ID} {
+		if err := store.CreateAuditLog(ctx, &models.AuditLog{ProjectID: &projectID, Action: "test"}); err != nil {
+			t.Fatalf("CreateAuditLog() error = %v", err)
+		}
+	}
+
+	deleted, err := store.DeleteAuditLogs(ctx, &firstProject.ID)
+	if err != nil {
+		t.Fatalf("DeleteAuditLogs() error = %v", err)
+	}
+	if deleted != 1 {
+		t.Fatalf("DeleteAuditLogs() deleted %d logs, want 1", deleted)
+	}
+
+	firstLogs, err := store.ListAuditLogs(ctx, &firstProject.ID, 10)
+	if err != nil {
+		t.Fatalf("ListAuditLogs(first) error = %v", err)
+	}
+	if len(firstLogs) != 0 {
+		t.Fatalf("len(firstLogs) = %d, want 0", len(firstLogs))
+	}
+	secondLogs, err := store.ListAuditLogs(ctx, &secondProject.ID, 10)
+	if err != nil {
+		t.Fatalf("ListAuditLogs(second) error = %v", err)
+	}
+	if len(secondLogs) != 1 {
+		t.Fatalf("len(secondLogs) = %d, want 1", len(secondLogs))
+	}
+}
+
 func TestCatalogSyncPrunesUninstalledItemsBeforeInsertingNewCatalog(t *testing.T) {
 	t.Parallel()
 

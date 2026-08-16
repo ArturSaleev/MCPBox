@@ -15,6 +15,7 @@ import (
 
 const (
 	ansiReset     = "\033[0m"
+	ansiClear     = "\033[2J\033[H"
 	ansiDim       = "\033[2m"
 	ansiBold      = "\033[1m"
 	ansiCyan      = "\033[36m"
@@ -79,7 +80,10 @@ func runInteractiveSession(ctx context.Context, opts Options) error {
 		in = os.Stdin
 	}
 
-	fmt.Fprintln(out, renderHeader("MCPBox Ollama Chat"))
+	if isInteractiveTerminal(out) {
+		fmt.Fprint(out, ansiClear)
+	}
+	fmt.Fprintln(out, renderHeader())
 	fmt.Fprintf(out, "%sModel:%s %s\n", styleDim(), styleReset(), strings.TrimSpace(opts.Model))
 	fmt.Fprintln(out, styleDim()+"Type your prompt and press Enter. Use /exit to quit."+styleReset())
 
@@ -154,8 +158,24 @@ func runInteractiveSession(ctx context.Context, opts Options) error {
 	}
 }
 
-func renderHeader(title string) string {
-	return styleBold() + title + styleReset()
+func renderHeader() string {
+	const logo = ` __  __  ____ ____  ____
+|  \/  |/ ___|  _ \| __ )  _____  __
+| |\/| | |   | |_) |  _ \ / _ \ \/ /
+| |  | | |___|  __/| |_) | (_) >  <
+|_|  |_|\____|_|   |____/ \___/_/\_\`
+
+	return ansiCyan + ansiBold + logo + ansiReset + "\n" +
+		ansiGreen + ansiBold + "Ollama Chat" + ansiReset
+}
+
+func isInteractiveTerminal(out io.Writer) bool {
+	file, ok := out.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
 }
 
 func renderPrompt() string {

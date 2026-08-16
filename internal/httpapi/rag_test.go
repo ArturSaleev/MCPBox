@@ -266,8 +266,24 @@ func retryPayments() {
 	if !bytes.Contains(toolsListResponse.Body.Bytes(), []byte(`"name":"search_project_knowledge"`)) {
 		t.Fatalf("tools/list body missing search_project_knowledge: %s", toolsListResponse.Body.String())
 	}
+	if !bytes.Contains(toolsListResponse.Body.Bytes(), []byte(`"minLength":1`)) ||
+		!bytes.Contains(toolsListResponse.Body.Bytes(), []byte(`"enum":["crm_gym"]`)) {
+		t.Fatalf("tools/list body missing constrained knowledge schema: %s", toolsListResponse.Body.String())
+	}
 
-	callBody := bytes.NewBufferString(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_project_knowledge","arguments":{"query":"payment gateway","limit":3}}}`)
+	invalidCallBody := bytes.NewBufferString(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_project_knowledge","arguments":{"query":"payment gateway","collections":["not-connected"]}}}`)
+	invalidCallRequest := httptest.NewRequest(http.MethodPost, "/mcp/"+project.Token, invalidCallBody)
+	invalidCallResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(invalidCallResponse, invalidCallRequest)
+	if invalidCallResponse.Code != http.StatusOK {
+		t.Fatalf("invalid tools/call status = %d, body = %s", invalidCallResponse.Code, invalidCallResponse.Body.String())
+	}
+	if !bytes.Contains(invalidCallResponse.Body.Bytes(), []byte(`"isError":true`)) ||
+		!bytes.Contains(invalidCallResponse.Body.Bytes(), []byte(`not-connected`)) {
+		t.Fatalf("invalid tools/call did not return an MCP tool error: %s", invalidCallResponse.Body.String())
+	}
+
+	callBody := bytes.NewBufferString(`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_project_knowledge","arguments":{"query":"payment gateway","limit":3}}}`)
 	callRequest := httptest.NewRequest(http.MethodPost, "/mcp/"+project.Token, callBody)
 	callResponse := httptest.NewRecorder()
 	api.Handler().ServeHTTP(callResponse, callRequest)

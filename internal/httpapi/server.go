@@ -485,6 +485,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("GET /api/meta", s.handleMeta)
 	s.mux.HandleFunc("GET /api/logs", s.handleListLogs)
+	s.mux.HandleFunc("DELETE /api/logs", s.handleDeleteLogs)
 	s.mux.HandleFunc("GET /api/logs/metrics", s.handleLogMetrics)
 	s.mux.HandleFunc("GET /api/ollama/status", s.handleOllamaStatus)
 	s.mux.HandleFunc("GET /api/llamacpp/status", s.handleLlamaCppStatus)
@@ -593,6 +594,22 @@ func (s *Server) handleListLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (s *Server) handleDeleteLogs(w http.ResponseWriter, r *http.Request) {
+	projectID, err := queryProjectID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
+
+	deleted, err := s.store.DeleteAuditLogs(r.Context(), projectID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": deleted})
 }
 
 func (s *Server) handleLogMetrics(w http.ResponseWriter, r *http.Request) {
