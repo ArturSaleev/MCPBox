@@ -53,6 +53,77 @@ func TestAddServerPersistsMultipleProjectServers(t *testing.T) {
 	}
 }
 
+func TestNewStoreRenamesLegacyProjectOAuthClientTableAndPreservesRows(t *testing.T) {
+	t.Parallel()
+
+	dsn := filepath.Join(t.TempDir(), "mcpbox.db")
+	legacyDB, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open legacy database: %v", err)
+	}
+	if err := legacyDB.Exec(`
+		CREATE TABLE project_o_auth_clients (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			project_id INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			redirect_uri TEXT NOT NULL,
+			token TEXT NOT NULL,
+			is_enabled NUMERIC NOT NULL DEFAULT 1,
+			created_at DATETIME,
+			updated_at DATETIME
+		)
+	`).Error; err != nil {
+		t.Fatalf("create legacy OAuth client table: %v", err)
+	}
+	for _, statement := range []string{
+		`CREATE INDEX idx_project_o_auth_clients_project_id ON project_o_auth_clients(project_id)`,
+		`CREATE UNIQUE INDEX idx_project_o_auth_clients_token ON project_o_auth_clients(token)`,
+		`CREATE UNIQUE INDEX idx_project_oauth_client_name ON project_o_auth_clients(project_id, name)`,
+	} {
+		if err := legacyDB.Exec(statement).Error; err != nil {
+			t.Fatalf("create legacy OAuth client index: %v", err)
+		}
+	}
+	if err := legacyDB.Exec(
+		`INSERT INTO project_o_auth_clients (project_id, name, redirect_uri, token, is_enabled) VALUES (?, ?, ?, ?, ?)`,
+		15,
+		"Artur",
+		"https://chatgpt.com/connector/oauth/callback",
+		"existing-client-token",
+		true,
+	).Error; err != nil {
+		t.Fatalf("insert legacy OAuth client: %v", err)
+	}
+	legacySQLDB, err := legacyDB.DB()
+	if err != nil {
+		t.Fatalf("legacy sql DB: %v", err)
+	}
+	if err := legacySQLDB.Close(); err != nil {
+		t.Fatalf("close legacy database: %v", err)
+	}
+
+	store, err := NewStore(dsn)
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	if !store.db.Migrator().HasTable("project_oauth_clients") {
+		t.Fatal("canonical project_oauth_clients table was not created")
+	}
+	if store.db.Migrator().HasTable("project_o_auth_clients") {
+		t.Fatal("legacy project_o_auth_clients table still exists")
+	}
+
+	client, err := store.GetProjectOAuthClientByName(context.Background(), 15, "Artur")
+	if err != nil {
+		t.Fatalf("GetProjectOAuthClientByName() error = %v", err)
+	}
+	if client.Token != "existing-client-token" || client.RedirectURI != "https://chatgpt.com/connector/oauth/callback" {
+		t.Fatalf("migrated client = %#v, want preserved token and callback", client)
+	}
+}
+
 func TestDeleteAuditLogsOnlyDeletesSelectedProject(t *testing.T) {
 	t.Parallel()
 

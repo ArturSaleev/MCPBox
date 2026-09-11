@@ -46,6 +46,27 @@ type ProjectPromptProfile struct {
 	IsDefault      bool   `json:"is_default,omitempty"`
 }
 
+// ProjectOAuthClient is a named OAuth connection allowed to access one project.
+// Token is intentionally stored as plain text so the local administrator can
+// reveal and copy it again from the admin UI.
+type ProjectOAuthClient struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	ProjectID   uint      `gorm:"not null;uniqueIndex:idx_project_oauth_client_name;index" json:"project_id"`
+	Name        string    `gorm:"size:255;not null;uniqueIndex:idx_project_oauth_client_name" json:"name"`
+	RedirectURI string    `gorm:"type:text;not null" json:"-"`
+	Token       string    `gorm:"size:96;not null;uniqueIndex" json:"-"`
+	IsEnabled   bool      `gorm:"not null;default:true" json:"is_enabled"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// TableName keeps OAuth as one word. Without this override GORM derives the
+// incompatible name project_o_auth_clients, while the OAuth protocol handlers
+// intentionally query project_oauth_clients.
+func (ProjectOAuthClient) TableName() string {
+	return "project_oauth_clients"
+}
+
 type MCPServer struct {
 	ID                       uint       `gorm:"primaryKey" json:"id"`
 	ProjectID                uint       `gorm:"index;not null" json:"project_id"`

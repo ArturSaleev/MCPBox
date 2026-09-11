@@ -135,7 +135,6 @@ export function ProjectsSidebar({
             </button>
           </div>
         </div>
-        <p className="mt-3 text-sm text-muted-foreground">{labels.appDescription}</p>
       </div>
 
       <div className="space-y-6 p-6">
@@ -221,28 +220,9 @@ export function ProjectsSidebar({
                       </label>
 
                       {projectForm.bearer_auth_enabled ? (
-                        <div className="space-y-3">
-                          <p className="text-xs leading-5 text-muted-foreground">
-                            {messages.bearerTokenGeneratedAfterCreate}
-                          </p>
-                          <label className="block">
-                            <span className="text-sm font-medium">{labels.oauthCallbackURL}</span>
-                            <input
-                              value={projectForm.oauth_redirect_uri}
-                              onChange={(event) =>
-                                setProjectForm((current) => ({
-                                  ...current,
-                                  oauth_redirect_uri: event.target.value,
-                                }))
-                              }
-                              className="mt-2 h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
-                              placeholder="https://chatgpt.com/connector/oauth/..."
-                            />
-                            <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                              {messages.oauthCallbackURLDescription}
-                            </span>
-                          </label>
-                        </div>
+                        <p className="text-xs leading-5 text-muted-foreground">
+                          {messages.bearerTokenGeneratedAfterCreate}
+                        </p>
                       ) : null}
                     </div>
 
@@ -333,12 +313,7 @@ export function ProjectsSidebar({
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="font-medium">{project.name}</div>
-                        <div className="mt-1 text-sm text-muted-foreground">
-                          {project.description || messages.workspaceGroupFallback}
-                        </div>
-                      </div>
+                      <div className="font-medium">{project.name}</div>
                       {project.connection_ready ? (
                         <Radio className="mt-0.5 h-4 w-4 text-status-running" />
                       ) : (

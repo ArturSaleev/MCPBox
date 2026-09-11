@@ -1,9 +1,10 @@
 import { useState } from 'react';
 
-import { AlertCircle, Bot, CheckCircle2, ChevronDown, ChevronUp, Copy, Eye, EyeOff, Info, LoaderCircle, Play, RefreshCw } from 'lucide-react';
+import { AlertCircle, Bot, CheckCircle2, Copy, Eye, EyeOff, Info, LoaderCircle, Play, RefreshCw } from 'lucide-react';
 
 import { dictionaries } from '../i18n';
 import { ProjectActionsPanel } from './ProjectActionsPanel';
+import { ProjectOAuthClientsDialog } from './ProjectOAuthClientsDialog';
 import {
   Dialog,
   DialogContent,
@@ -77,10 +78,8 @@ type ProjectLaunchPanelProps = {
   launchingLMStudioProjectId: number | null;
   OllamaIcon: (props: { className?: string }) => JSX.Element;
   alternativeConnectURLs: string[];
-  connectionURLsExpanded: boolean;
-  setConnectionURLsExpanded: (updater: (current: boolean) => boolean) => void;
-  copyConnectURL: () => void | Promise<void>;
-  copied: boolean;
+  oauthClientManagementEnabled: boolean;
+  copyConnectURL: (url?: string) => void | Promise<void>;
   regenerateEndpointToken: (projectId: number) => void | Promise<void>;
   busyProjectId: number | null;
   setProjectPaused: (projectId: number, paused: boolean) => void | Promise<void>;
@@ -122,10 +121,8 @@ export function ProjectLaunchPanel({
   launchingLMStudioProjectId,
   OllamaIcon,
   alternativeConnectURLs,
-  connectionURLsExpanded,
-  setConnectionURLsExpanded,
+  oauthClientManagementEnabled,
   copyConnectURL,
-  copied,
   regenerateEndpointToken,
   busyProjectId,
   setProjectPaused,
@@ -153,33 +150,30 @@ export function ProjectLaunchPanel({
                 {labels.projectOverview}
               </p>
               <h2 className="mt-2 text-3xl font-semibold">{selectedProject.name}</h2>
-              <p className="mt-2 max-w-2xl text-muted-foreground">
-                {selectedProject.description || messages.overviewFallbackDescription}
-              </p>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-4">
-              <div className="rounded-xl border border-border bg-background px-4 py-3">
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-background px-4 py-3">
                 <div className="text-sm text-muted-foreground">{labels.servers}</div>
-                <div className="mt-1 text-2xl font-semibold">
+                <div className="text-2xl font-semibold">
                   {selectedProject.servers.length}
                 </div>
               </div>
-              <div className="rounded-xl border border-border bg-background px-4 py-3">
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-background px-4 py-3">
                 <div className="text-sm text-muted-foreground">{labels.running}</div>
-                <div className="mt-1 text-2xl font-semibold">
+                <div className="text-2xl font-semibold">
                   {selectedProject.servers.filter((server) => server.status === 'Running').length}
                 </div>
               </div>
-              <div className="rounded-xl border border-border bg-background px-4 py-3">
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-background px-4 py-3">
                 <div className="text-sm text-muted-foreground">{labels.healthy}</div>
-                <div className="mt-1 text-2xl font-semibold">
+                <div className="text-2xl font-semibold">
                   {selectedProjectHealthyCount}
                 </div>
               </div>
-              <div className="rounded-xl border border-border bg-background px-4 py-3">
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-border bg-background px-4 py-3">
                 <div className="text-sm text-muted-foreground">{labels.connectedKnowledgeBases}</div>
-                <div className="mt-1 text-2xl font-semibold">
+                <div className="text-2xl font-semibold">
                   {selectedProject.rag_collections.length}
                 </div>
               </div>
@@ -193,7 +187,7 @@ export function ProjectLaunchPanel({
                   disabled={!selectedProject.connection_ready || selectedProject.is_paused}
                   className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-foreground px-4 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  <Play className="h-4 w-4" />
+                  <Bot className="h-4 w-4" />
                   {labels.launchProject}
                 </button>
               </DialogTrigger>
@@ -449,119 +443,136 @@ export function ProjectLaunchPanel({
       <section>
         <div className="rounded-2xl border border-border bg-card p-6">
           <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-lg font-semibold">{labels.connectionEndpoint}</h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {messages.connectionDescription}
-              </p>
-            </div>
-            <div
-              className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${
-                selectedProject.connection_ready
-                  ? 'border-status-running/30 bg-status-running/12 text-status-running'
-                  : 'border-amber-500/30 bg-amber-500/10 text-amber-600'
-              }`}
-            >
-              {selectedProject.connection_ready ? (
-                <CheckCircle2 className="h-3.5 w-3.5" />
-              ) : (
-                <AlertCircle className="h-3.5 w-3.5" />
-              )}
-              {selectedProject.connection_ready ? labels.ready : labels.notSelected}
-            </div>
-          </div>
-
-          <div className="mt-5 flex flex-col gap-3 rounded-xl border border-border bg-background p-4 sm:flex-row sm:items-center">
-            <code className="flex-1 overflow-x-auto text-sm text-electric-blue">
-              {selectedProject.connect_url}
-            </code>
-            <button
-              onClick={() => void copyConnectURL()}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent"
-            >
-              {copied ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-              {copied ? labels.copied : labels.copyUrl}
-            </button>
-          </div>
-
-          {endpointSecretEnabled ? (
-            <div className="mt-3 rounded-xl border border-border bg-background p-4">
-              <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                {labels.bearerToken}
-              </div>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <code
-                  className={`min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-card px-3 py-2 font-mono text-xs text-electric-blue transition-all ${endpointSecretVisible ? '' : 'blur-sm select-none'}`}
-                >
-                  {endpointSecret || messages.noValue}
-                </code>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setEndpointSecretVisible((current) => !current)}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border transition-colors hover:bg-accent"
-                    aria-label={endpointSecretVisible ? labels.hideToken : labels.showToken}
-                    title={endpointSecretVisible ? labels.hideToken : labels.showToken}
-                  >
-                    {endpointSecretVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void window.navigator.clipboard.writeText(endpointSecret)}
-                    disabled={!endpointSecret}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-                    aria-label={labels.copyToken}
-                    title={labels.copyToken}
-                  >
-                    <Copy className="h-4 w-4" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void regenerateEndpointToken(selectedProject.project_id)}
-                    disabled={busyProjectId === selectedProject.project_id}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-                    aria-label={labels.generateToken}
-                    title={labels.generateToken}
-                  >
-                    <RefreshCw className={`h-4 w-4 ${busyProjectId === selectedProject.project_id ? 'animate-spin' : ''}`} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          {alternativeConnectURLs.length > 0 ? (
-            <div className="mt-3 rounded-xl border border-border bg-background">
-              <button
-                type="button"
-                onClick={() => setConnectionURLsExpanded((current) => !current)}
-                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-medium transition-colors hover:bg-accent"
+            <h3 className="text-lg font-semibold">{labels.connectionEndpoint}</h3>
+            <div className="flex shrink-0 items-center gap-2">
+              <div
+                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${
+                  selectedProject.connection_ready
+                    ? 'border-status-running/30 bg-status-running/12 text-status-running'
+                    : 'border-amber-500/30 bg-amber-500/10 text-amber-600'
+                }`}
               >
-                <span>{messages.otherConnectionOptions}</span>
-                <span className="inline-flex items-center gap-2 text-muted-foreground">
-                  {connectionURLsExpanded ? labels.hide : labels.showMore}
-                  {connectionURLsExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                </span>
-              </button>
-              {connectionURLsExpanded ? (
-                <div className="border-t border-border px-4 py-4">
-                  <p className="text-sm text-muted-foreground">
-                    {messages.otherConnectionOptionsDescription}
-                  </p>
-                  <div className="mt-3 space-y-2">
-                    {alternativeConnectURLs.map((url) => (
-                      <code
-                        key={url}
-                        className="block overflow-x-auto rounded-lg border border-border bg-card px-3 py-2 text-xs text-electric-blue"
-                      >
-                        {url}
-                      </code>
-                    ))}
-                  </div>
-                </div>
+                {selectedProject.connection_ready ? (
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                ) : (
+                  <AlertCircle className="h-3.5 w-3.5" />
+                )}
+                {selectedProject.connection_ready ? labels.ready : labels.notSelected}
+              </div>
+
+              {endpointSecretEnabled && oauthClientManagementEnabled ? (
+                <ProjectOAuthClientsDialog
+                  projectId={selectedProject.project_id}
+                  labels={labels}
+                  messages={messages}
+                />
               ) : null}
+
+              <Dialog>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <DialogTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label={messages.otherConnectionOptions}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      >
+                        <Info className="h-4 w-4" />
+                      </button>
+                    </DialogTrigger>
+                  </TooltipTrigger>
+                  <TooltipContent>{messages.otherConnectionOptions}</TooltipContent>
+                </Tooltip>
+                <DialogContent className="sm:max-w-2xl">
+                  <DialogHeader>
+                    <DialogTitle>{labels.connectionEndpoint}</DialogTitle>
+                    <DialogDescription>{messages.connectionDescription}</DialogDescription>
+                  </DialogHeader>
+
+                  <div className="space-y-4">
+                    {endpointSecretEnabled ? (
+                      <div className="rounded-xl border border-border bg-background p-4">
+                        <div className="mb-2 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">
+                          {labels.bearerToken}
+                        </div>
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                          <code
+                            className={`min-w-0 flex-1 overflow-x-auto rounded-md border border-border bg-card px-3 py-2 font-mono text-xs text-electric-blue transition-all ${endpointSecretVisible ? '' : 'blur-sm select-none'}`}
+                          >
+                            {endpointSecret || messages.noValue}
+                          </code>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setEndpointSecretVisible((current) => !current)}
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border transition-colors hover:bg-accent"
+                              aria-label={endpointSecretVisible ? labels.hideToken : labels.showToken}
+                              title={endpointSecretVisible ? labels.hideToken : labels.showToken}
+                            >
+                              {endpointSecretVisible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void window.navigator.clipboard.writeText(endpointSecret)}
+                              disabled={!endpointSecret}
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                              aria-label={labels.copyToken}
+                              title={labels.copyToken}
+                            >
+                              <Copy className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void regenerateEndpointToken(selectedProject.project_id)}
+                              disabled={busyProjectId === selectedProject.project_id}
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-border transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                              aria-label={labels.generateToken}
+                              title={labels.generateToken}
+                            >
+                              <RefreshCw className={`h-4 w-4 ${busyProjectId === selectedProject.project_id ? 'animate-spin' : ''}`} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {alternativeConnectURLs.length > 0 ? (
+                      <div className="rounded-xl border border-border bg-background p-4">
+                        <div className="text-sm font-medium">{messages.otherConnectionOptions}</div>
+                        <div className="mt-3">
+                          <p className="text-sm text-muted-foreground">
+                            {messages.otherConnectionOptionsDescription}
+                          </p>
+                          <div className="mt-3 space-y-2">
+                            {alternativeConnectURLs.map((url) => (
+                              <button
+                                type="button"
+                                key={url}
+                                onClick={() => void copyConnectURL(url)}
+                                aria-label={labels.copyUrl}
+                                className="block w-full overflow-x-auto rounded-lg border border-border bg-card px-3 py-2 text-left text-xs text-electric-blue transition-colors hover:bg-accent"
+                              >
+                                <code>{url}</code>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </DialogContent>
+              </Dialog>
             </div>
-          ) : null}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void copyConnectURL()}
+            aria-label={labels.copyUrl}
+            className="mt-4 block w-full overflow-x-auto rounded-xl border border-border bg-background p-4 text-left transition-colors hover:bg-accent"
+          >
+            <code className="text-sm text-electric-blue">{selectedProject.connect_url}</code>
+          </button>
 
           {!selectedProject.connection_ready ? (
             <div className="mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700">

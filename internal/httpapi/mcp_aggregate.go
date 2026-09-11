@@ -257,8 +257,10 @@ func (s *Server) dispatchProjectJSONRPC(
 		if err != nil {
 			return nil, false, err
 		}
-		// Add prompt tool at the beginning to encourage LLM to call it first
-		tools = append([]aggregateTool{s.projectPromptAggregateTool()}, tools...)
+		if strings.TrimSpace(project.Prompt) != "" {
+			// Publish the project-rules tool only when it can return useful content.
+			tools = append([]aggregateTool{s.projectPromptAggregateTool()}, tools...)
+		}
 		if len(project.RAGCollections) > 0 {
 			tools = append(tools, s.projectKnowledgeAggregateTool(project))
 		}
@@ -309,6 +311,16 @@ func (s *Server) dispatchProjectJSONRPC(
 			}), true, nil
 		}
 		if params.Name == projectPromptToolName {
+			if strings.TrimSpace(project.Prompt) == "" {
+				return mustMarshal(projectResponseEnvelope{
+					JSONRPC: "2.0",
+					ID:      request.ID,
+					Error: &projectRPCError{
+						Code:    -32602,
+						Message: "project prompt is not configured",
+					},
+				}), true, nil
+			}
 			result := map[string]any{
 				"content": []map[string]any{
 					{
@@ -317,7 +329,7 @@ func (s *Server) dispatchProjectJSONRPC(
 					},
 				},
 			}
-			s.logAudit(ctx, &project.ID, nil, "tool_call_project_prompt", "mcp-client", mustJSON(map[string]any{
+			s.logAudit(ctx, &project.ID, nil, "tool_call_project_prompt", strings.TrimSpace(actor), mustJSON(map[string]any{
 				"tool": projectPromptToolName,
 			}))
 			return mustMarshal(projectResponseEnvelope{

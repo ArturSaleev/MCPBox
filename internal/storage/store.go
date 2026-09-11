@@ -56,7 +56,13 @@ func NewStore(dsn string) (*Store, error) {
 		return nil, err
 	}
 
+	if err := migrateLegacyProjectOAuthClientTable(db); err != nil {
+		return nil, err
+	}
 	if err := db.AutoMigrate(&models.Project{}, &models.MCPServer{}); err != nil {
+		return nil, err
+	}
+	if err := ensureProjectOAuthClientSchema(db); err != nil {
 		return nil, err
 	}
 	if err := db.AutoMigrate(&models.AuditLog{}); err != nil {
@@ -91,6 +97,83 @@ func NewStore(dsn string) (*Store, error) {
 		db:       db,
 		dataRoot: resolveDataRoot(dsn),
 	}, nil
+}
+
+func ensureProjectOAuthClientSchema(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&models.ProjectOAuthClient{}) {
+		return db.AutoMigrate(&models.ProjectOAuthClient{})
+	}
+
+	for _, statement := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_project_oauth_clients_project_id ON project_oauth_clients(project_id)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_project_oauth_clients_token ON project_oauth_clients(token)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_project_oauth_client_name ON project_oauth_clients(project_id, name)`,
+	} {
+		if err := db.Exec(statement).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func migrateLegacyProjectOAuthClientTable(db *gorm.DB) error {
+	const (
+		legacyTable    = "project_o_auth_clients"
+		canonicalTable = "project_oauth_clients"
+	)
+
+	if !db.Migrator().HasTable(legacyTable) {
+		return nil
+	}
+
+	canonicalExists := db.Migrator().HasTable(canonicalTable)
+	return db.Transaction(func(tx *gorm.DB) error {
+		if !canonicalExists {
+			if err := tx.Exec(`
+				CREATE TABLE project_oauth_clients (
+					id INTEGER PRIMARY KEY AUTOINCREMENT,
+					project_id INTEGER NOT NULL,
+					name TEXT NOT NULL,
+					redirect_uri TEXT NOT NULL,
+					token TEXT NOT NULL,
+					is_enabled NUMERIC NOT NULL DEFAULT true,
+					created_at DATETIME,
+					updated_at DATETIME
+				)
+			`).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec(`
+				INSERT INTO project_oauth_clients
+					(id, project_id, name, redirect_uri, token, is_enabled, created_at, updated_at)
+				SELECT id, project_id, name, redirect_uri, token, is_enabled, created_at, updated_at
+				FROM project_o_auth_clients
+			`).Error; err != nil {
+				return err
+			}
+		} else if err := tx.Exec(`
+			INSERT OR IGNORE INTO project_oauth_clients
+				(project_id, name, redirect_uri, token, is_enabled, created_at, updated_at)
+			SELECT project_id, name, redirect_uri, token, is_enabled, created_at, updated_at
+			FROM project_o_auth_clients
+		`).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Exec(`DROP TABLE project_o_auth_clients`).Error; err != nil {
+			return err
+		}
+		for _, statement := range []string{
+			`CREATE INDEX IF NOT EXISTS idx_project_oauth_clients_project_id ON project_oauth_clients(project_id)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_project_oauth_clients_token ON project_oauth_clients(token)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS idx_project_oauth_client_name ON project_oauth_clients(project_id, name)`,
+		} {
+			if err := tx.Exec(statement).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func resolveDataRoot(dsn string) string {
@@ -534,6 +617,91 @@ func (s *Store) GetProjectByToken(ctx context.Context, token string) (*models.Pr
 	return &project, err
 }
 
+func (s *Store) ListProjectOAuthClients(ctx context.Context, projectID uint) ([]models.ProjectOAuthClient, error) {
+	var clients []models.ProjectOAuthClient
+	err := s.db.WithContext(ctx).
+		Where("project_id = ?", projectID).
+		Order("id asc").
+		Find(&clients).Error
+	return clients, err
+}
+
+func (s *Store) CreateProjectOAuthClient(ctx context.Context, client *models.ProjectOAuthClient) error {
+	if client == nil {
+		return errors.New("oauth client is required")
+	}
+	if strings.TrimSpace(client.Token) == "" {
+		token, err := NewProjectOAuthClientToken()
+		if err != nil {
+			return err
+		}
+		client.Token = token
+	}
+	client.Name = strings.TrimSpace(client.Name)
+	client.RedirectURI = strings.TrimSpace(client.RedirectURI)
+	client.IsEnabled = true
+	return s.db.WithContext(ctx).Create(client).Error
+}
+
+func (s *Store) GetProjectOAuthClient(ctx context.Context, projectID, clientID uint) (*models.ProjectOAuthClient, error) {
+	var client models.ProjectOAuthClient
+	err := s.db.WithContext(ctx).
+		Where("project_id = ? AND id = ?", projectID, clientID).
+		First(&client).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &client, err
+}
+
+func (s *Store) GetProjectOAuthClientByName(ctx context.Context, projectID uint, name string) (*models.ProjectOAuthClient, error) {
+	var client models.ProjectOAuthClient
+	err := s.db.WithContext(ctx).
+		Where("project_id = ? AND name = ?", projectID, strings.TrimSpace(name)).
+		First(&client).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &client, err
+}
+
+func (s *Store) GetProjectOAuthClientByToken(ctx context.Context, projectID uint, token string) (*models.ProjectOAuthClient, error) {
+	var client models.ProjectOAuthClient
+	err := s.db.WithContext(ctx).
+		Where("project_id = ? AND token = ? AND is_enabled = ?", projectID, strings.TrimSpace(token), true).
+		First(&client).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &client, err
+}
+
+func (s *Store) SetProjectOAuthClientEnabled(ctx context.Context, projectID, clientID uint, enabled bool) error {
+	result := s.db.WithContext(ctx).Model(&models.ProjectOAuthClient{}).
+		Where("project_id = ? AND id = ?", projectID, clientID).
+		Update("is_enabled", enabled)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteProjectOAuthClient(ctx context.Context, projectID, clientID uint) error {
+	result := s.db.WithContext(ctx).
+		Where("project_id = ? AND id = ?", projectID, clientID).
+		Delete(&models.ProjectOAuthClient{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
 func (s *Store) AddServer(ctx context.Context, server *models.MCPServer) error {
 	return s.db.WithContext(ctx).Create(server).Error
 }
@@ -611,6 +779,9 @@ func (s *Store) DeleteProject(ctx context.Context, projectID uint) error {
 		if err := tx.Where("project_id = ?", projectID).Delete(&models.ProjectPackageInstance{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("project_id = ?", projectID).Delete(&models.ProjectOAuthClient{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("project_id = ?", projectID).Delete(&models.MCPServer{}).Error; err != nil {
 			return err
 		}
@@ -662,6 +833,15 @@ func NewProjectBearerToken() (string, error) {
 
 	encoded := base64.RawURLEncoding.EncodeToString(raw)
 	return "mcpbox_" + encoded, nil
+}
+
+func NewProjectOAuthClientToken() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+
+	return "mcpbox_client_" + base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
 func (s *Store) RegenerateProjectBearerToken(ctx context.Context, projectID uint) (string, error) {

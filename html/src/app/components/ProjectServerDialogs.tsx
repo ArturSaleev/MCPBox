@@ -1,6 +1,7 @@
 import { LoaderCircle, Pause, Play } from 'lucide-react';
 
 import { dictionaries } from '../i18n';
+import type { ServerStatus } from '../types';
 import {
   Dialog,
   DialogContent,
@@ -73,6 +74,7 @@ type ProjectServerDialogsProps = {
   inspectOpen: boolean;
   setInspectOpen: (open: boolean) => void;
   inspectionServerName: string;
+  inspectionServer: ServerStatus | null;
   inspectingServerId: number | null;
   inspectionError: string | null;
   inspection: ServerInspection | null;
@@ -101,6 +103,7 @@ export function ProjectServerDialogs({
   inspectOpen,
   setInspectOpen,
   inspectionServerName,
+  inspectionServer,
   inspectingServerId,
   inspectionError,
   inspection,
@@ -133,6 +136,61 @@ export function ProjectServerDialogs({
             </DialogTitle>
             <DialogDescription>{messages.inspectDescription}</DialogDescription>
           </DialogHeader>
+
+          {inspectionServer ? (
+            <section className="space-y-4 rounded-xl border border-border bg-background p-4 text-sm">
+              <div>
+                <div className="text-muted-foreground">
+                  {inspectionServer.transport === 'http_stream' ? labels.url : labels.launchCommand}
+                </div>
+                <code className="mt-1 block overflow-x-auto rounded-md bg-card px-3 py-2 text-xs text-electric-blue">
+                  {inspectionServer.transport === 'http_stream'
+                    ? inspectionServer.url
+                    : inspectionServer.launch_command_display || inspectionServer.launch_command}
+                </code>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                {inspectionServer.transport === 'stdio' ? (
+                  <div>
+                    <div className="text-muted-foreground">{labels.workingDirectory}</div>
+                    <div className="mt-1">{inspectionServer.working_dir || labels.notSpecified}</div>
+                  </div>
+                ) : inspectionServer.bearer_token_env_var ? (
+                  <div>
+                    <div className="text-muted-foreground">{labels.bearerTokenEnvironmentVariable}</div>
+                    <div className="mt-1">{inspectionServer.bearer_token_env_var}</div>
+                  </div>
+                ) : null}
+                <div>
+                  <div className="text-muted-foreground">{labels.lastCheck}</div>
+                  <div className="mt-1">
+                    {inspectionServer.health_checked_at
+                      ? new Date(inspectionServer.health_checked_at).toLocaleString()
+                      : labels.notSpecified}
+                  </div>
+                </div>
+              </div>
+
+              {inspectionServer.transport === 'http_stream' && inspectionServer.auth_type === 'oauth2' ? (
+                <div>
+                  <div className="text-muted-foreground">OAuth</div>
+                  <div className="mt-1">
+                    {inspectionServer.oauth_provider || 'custom'}
+                    {inspectionServer.oauth_connected_at
+                      ? ` · connected ${new Date(inspectionServer.oauth_connected_at).toLocaleString()}`
+                      : ''}
+                  </div>
+                </div>
+              ) : null}
+
+              {inspectionServer.health_error || inspectionServer.oauth_last_error ? (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-destructive">
+                  {inspectionServer.health_error || inspectionServer.oauth_last_error}
+                </div>
+              ) : null}
+            </section>
+          ) : null}
 
           {inspectingServerId ? (
             <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-4 py-5 text-sm text-muted-foreground">

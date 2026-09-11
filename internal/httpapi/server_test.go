@@ -45,6 +45,97 @@ func TestDisplayLaunchCommandMasksSensitiveArgs(t *testing.T) {
 	}
 }
 
+func TestAdminAPIAuthorizerProtectsSharedRoutesButLeavesPublicRoutesOpen(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	var requiredScope string
+	api := NewServerWithInstaller(store, orchestrator.NewRegistry(context.Background()), nil, Options{
+		EditionID: "pro",
+		AdminAPIAuthorizer: func(scope string, next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requiredScope = scope
+				if r.Header.Get("Authorization") != "Bearer pro-session" {
+					http.Error(w, "unauthorized", http.StatusUnauthorized)
+					return
+				}
+				next.ServeHTTP(w, r)
+			})
+		},
+		HTTPRegistrars: []func(*http.ServeMux){
+			func(mux *http.ServeMux) {
+				mux.HandleFunc("POST /api/pro/login", func(w http.ResponseWriter, _ *http.Request) {
+					w.WriteHeader(http.StatusNoContent)
+				})
+			},
+		},
+	})
+
+	publicMeta := httptest.NewRecorder()
+	api.Handler().ServeHTTP(publicMeta, httptest.NewRequest(http.MethodGet, "/api/meta", nil))
+	if publicMeta.Code != http.StatusOK {
+		t.Fatalf("public meta status = %d, want %d", publicMeta.Code, http.StatusOK)
+	}
+
+	publicLogin := httptest.NewRecorder()
+	api.Handler().ServeHTTP(publicLogin, httptest.NewRequest(http.MethodPost, "/api/pro/login", nil))
+	if publicLogin.Code != http.StatusNoContent {
+		t.Fatalf("public Pro login status = %d, want %d", publicLogin.Code, http.StatusNoContent)
+	}
+
+	blockedProjects := httptest.NewRecorder()
+	api.Handler().ServeHTTP(blockedProjects, httptest.NewRequest(http.MethodGet, "/api/projects", nil))
+	if blockedProjects.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated projects status = %d, want %d", blockedProjects.Code, http.StatusUnauthorized)
+	}
+
+	authorizedRequest := httptest.NewRequest(http.MethodGet, "/api/projects", nil)
+	authorizedRequest.Header.Set("Authorization", "Bearer pro-session")
+	authorizedProjects := httptest.NewRecorder()
+	api.Handler().ServeHTTP(authorizedProjects, authorizedRequest)
+	if authorizedProjects.Code != http.StatusOK {
+		t.Fatalf("authenticated projects status = %d, body = %s", authorizedProjects.Code, authorizedProjects.Body.String())
+	}
+	if requiredScope != "pro:read" {
+		t.Fatalf("projects required scope = %q, want pro:read", requiredScope)
+	}
+}
+
+func TestSharedAdminAPIScopeUsesAdminForSecretsAndDestructiveActions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		method string
+		path   string
+		want   string
+	}{
+		{method: http.MethodGet, path: "/api/meta", want: ""},
+		{method: http.MethodPost, path: "/api/pro/login", want: ""},
+		{method: http.MethodGet, path: "/api/projects", want: "pro:read"},
+		{method: http.MethodPost, path: "/api/projects", want: "pro:write"},
+		{method: http.MethodDelete, path: "/api/projects/15", want: "pro:admin"},
+		{method: http.MethodGet, path: "/api/projects/15/oauth-clients", want: "pro:read"},
+		{method: http.MethodPost, path: "/api/projects/15/oauth-clients", want: "pro:write"},
+		{method: http.MethodGet, path: "/api/projects/15/oauth-clients/2/token", want: "pro:admin"},
+		{method: http.MethodPost, path: "/api/projects/15/bearer-token", want: "pro:admin"},
+		{method: http.MethodGet, path: "/mcp/project-token", want: ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.method+" "+test.path, func(t *testing.T) {
+			request := httptest.NewRequest(test.method, test.path, nil)
+			if got := sharedAdminAPIScope(request); got != test.want {
+				t.Fatalf("sharedAdminAPIScope() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestProjectEndpointsExposeConnectURLForConfiguredServers(t *testing.T) {
 	t.Parallel()
 
@@ -98,7 +189,8 @@ func TestProjectEndpointsExposeConnectURLForConfiguredServers(t *testing.T) {
 	}
 
 	got := payload[0]
-	if got.ConnectURL != "http://mcpbox.local:38180/mcp" {
+	wantConnectURL := "http://mcpbox.local:38180/mcp/" + project.Token
+	if got.ConnectURL != wantConnectURL {
 		t.Fatalf("ConnectURL = %q", got.ConnectURL)
 	}
 	if len(got.ConnectURLs) == 0 {
@@ -492,6 +584,46 @@ func TestProjectConnectAggregatesToolsAcrossServers(t *testing.T) {
 		if !gotNames[name] {
 			t.Fatalf("tool %q not found in aggregated response: %#v", name, payload.Result.Tools)
 		}
+	}
+}
+
+func TestProjectConnectPublishesProjectRulesToolOnlyWhenPromptExists(t *testing.T) {
+	t.Parallel()
+
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
+	if err != nil {
+		t.Fatalf("NewStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+	project := models.Project{ID: 1, Name: "Workspace", Prompt: "Always verify the current project rules."}
+	response, hasResponse, err := api.dispatchProjectJSONRPC(
+		context.Background(),
+		"ChatGPT",
+		project,
+		nil,
+		[]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`),
+	)
+	if err != nil {
+		t.Fatalf("dispatchProjectJSONRPC() error = %v", err)
+	}
+	if !hasResponse {
+		t.Fatal("dispatchProjectJSONRPC() returned no response")
+	}
+
+	var payload struct {
+		Result struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(response, &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if len(payload.Result.Tools) != 1 || payload.Result.Tools[0].Name != projectPromptToolName {
+		t.Fatalf("tools = %#v, want only %q", payload.Result.Tools, projectPromptToolName)
 	}
 }
 
@@ -1226,11 +1358,26 @@ func TestProjectToolsCallWritesAuditLog(t *testing.T) {
 	}
 
 	api := NewServer(store, orchestrator.NewRegistry(context.Background()))
+	initializeRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/mcp/"+project.Token,
+		bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"ChatGPT","version":"1.0"}}}`),
+	)
+	initializeRequest.RemoteAddr = "127.0.0.1:54321"
+	initializeRequest.Header.Set("User-Agent", "OpenAI-MCP/1.0")
+	initializeResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(initializeResponse, initializeRequest)
+	if initializeResponse.Code != http.StatusOK {
+		t.Fatalf("initialize status = %d, body = %s", initializeResponse.Code, initializeResponse.Body.String())
+	}
+
 	toolsRequest := httptest.NewRequest(
 		http.MethodPost,
 		"/mcp/"+project.Token,
 		bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}`),
 	)
+	toolsRequest.RemoteAddr = "127.0.0.1:54321"
+	toolsRequest.Header.Set("User-Agent", "OpenAI-MCP/1.0")
 	toolsResponse := httptest.NewRecorder()
 	api.Handler().ServeHTTP(toolsResponse, toolsRequest)
 
@@ -1259,6 +1406,7 @@ func TestProjectToolsCallWritesAuditLog(t *testing.T) {
 		bytes.NewBufferString(fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"arguments":{"sql":"SELECT 1"}}}`, toolName)),
 	)
 	request.RemoteAddr = "127.0.0.1:54321"
+	request.Header.Set("User-Agent", "OpenAI-MCP/1.0")
 	response := httptest.NewRecorder()
 	api.Handler().ServeHTTP(response, request)
 
@@ -1284,7 +1432,7 @@ func TestProjectToolsCallWritesAuditLog(t *testing.T) {
 	if found.ServerID == nil || *found.ServerID != server.ID {
 		t.Fatalf("ServerID = %#v, want %d", found.ServerID, server.ID)
 	}
-	if found.Actor != "127.0.0.1" {
+	if found.Actor != "ChatGPT" {
 		t.Fatalf("Actor = %q", found.Actor)
 	}
 	if !strings.Contains(found.Detail, fmt.Sprintf(`"tool":%q`, toolName)) {

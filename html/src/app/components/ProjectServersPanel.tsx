@@ -3,6 +3,7 @@ import { useMemo, useState, type Dispatch, type FormEvent, type SetStateAction }
 import {
   CheckCircle2,
   Info,
+  KeyRound,
   LoaderCircle,
   Pause,
   Pencil,
@@ -35,6 +36,7 @@ import {
 } from './ui/dialog';
 import { Input } from './ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
 type KeyValuePair = {
   key: string;
@@ -375,12 +377,7 @@ export function ProjectServersPanel({
   return (
     <section className="rounded-2xl border border-border bg-card p-6">
       <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <h3 className="text-lg font-semibold">{labels.servers}</h3>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {messages.serverControlDescription}
-          </p>
-        </div>
+        <h3 className="text-lg font-semibold">{labels.servers}</h3>
         <Dialog
           open={addServerOpen}
           onOpenChange={(open) => {
@@ -395,7 +392,7 @@ export function ProjectServersPanel({
           }}
         >
           <DialogTrigger asChild>
-            <button className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90">
+            <button className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90">
               <Plus className="h-4 w-4" />
               {labels.addServer}
             </button>
@@ -865,186 +862,173 @@ export function ProjectServersPanel({
             return (
               <div key={server.id} className="rounded-xl border border-border bg-background p-5">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h4 className="font-semibold">{server.name}</h4>
-                      <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
-                        {server.transport === 'http_stream' ? labels.httpStreaming : labels.stdio}
-                      </span>
-                    </div>
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-semibold">{server.name}</h4>
+                    <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
+                      {server.transport === 'http_stream' ? labels.httpStreaming : labels.stdio}
+                    </span>
+                  </div>
 
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-medium ${statusTone(server.status)}`}>
-                        {statusIcon(server.status)}
-                        {server.status}
-                      </span>
-                      <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-medium ${healthTone(server.health_status)}`}>
-                        <CheckCircle2 className="h-3.5 w-3.5" />
-                        {labels.health}: {healthLabel(server.health_status, labels)}
-                      </span>
+                  <div className="flex shrink-0 items-center gap-2">
+                  {server.transport === 'stdio' ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          aria-label={server.status === 'Running' ? labels.stop : labels.start}
+                          onClick={() => void runServerAction(server.id, server.status === 'Running' ? 'stop' : 'start')}
+                          disabled={busy || !server.is_enabled}
+                          className={`inline-flex h-9 w-9 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
+                            server.status === 'Running'
+                              ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                              : 'bg-status-running text-white hover:bg-status-running/90'
+                          }`}
+                        >
+                          {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : server.status === 'Running' ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>{server.status === 'Running' ? labels.stop : labels.start}</TooltipContent>
+                    </Tooltip>
+                  ) : null}
 
-                      {server.transport === 'stdio' && server.auto_start ? (
-                        <span className="rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
-                          {labels.autoStart}
-                        </span>
-                      ) : null}
-                      {!server.is_enabled ? (
-                        <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600">
-                          {labels.disabled}
-                        </span>
-                      ) : null}
-                      {(server.disabled_tool_names?.length ?? 0) > 0 ? (
-                        <span className="rounded-full border border-electric-blue/30 bg-electric-blue/12 px-2 py-1 text-xs font-medium text-electric-blue">
-                          {messages.disabledToolsBadge(server.disabled_tool_names.length)}
-                        </span>
-                      ) : null}
-                      {server.transport === 'http_stream' && server.auth_type === 'oauth2' ? (
-                        <span className={`rounded-full border px-2 py-1 text-xs font-medium ${
-                          server.oauth_connected
-                            ? 'border-status-running/30 bg-status-running/12 text-status-running'
-                            : 'border-amber-500/30 bg-amber-500/10 text-amber-700'
-                        }`}>
-                          {labels.oauth}: {server.oauth_connected ? labels.connected : labels.notConnected}
-                        </span>
-                      ) : null}
-                    </div>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        aria-label={labels.check}
+                        onClick={() => void checkServerHealth(server.id)}
+                        disabled={busy}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{labels.check}</TooltipContent>
+                  </Tooltip>
+
+                  {server.transport === 'http_stream' && server.auth_type === 'oauth2' ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          aria-label={labels.oauth}
+                          onClick={() => openAuthModal(server.id)}
+                          disabled={busy}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>{labels.oauth}</TooltipContent>
+                    </Tooltip>
+                  ) : null}
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        aria-label={labels.manageTools}
+                        onClick={() => void openServerTools(server)}
+                        disabled={serverToolsLoadingId === server.id}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {serverToolsLoadingId === server.id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Settings2 className="h-4 w-4" />}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{labels.manageTools}</TooltipContent>
+                  </Tooltip>
+
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          aria-label={labels.serverInfo}
+                          onClick={() => void inspectServer(server)}
+                          disabled={inspectingServerId === server.id}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          {inspectingServerId === server.id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Info className="h-4 w-4" />}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>{labels.serverInfo}</TooltipContent>
+                    </Tooltip>
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        aria-label={labels.edit}
+                        onClick={() => startEditServer(server)}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border transition-colors hover:bg-accent"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{labels.edit}</TooltipContent>
+                  </Tooltip>
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        aria-label={server.is_enabled ? labels.disableServer : labels.enableServer}
+                        onClick={() => void setServerEnabled(server.id, !server.is_enabled)}
+                        disabled={busy}
+                        className={`inline-flex h-9 w-9 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
+                          server.is_enabled
+                            ? 'border border-amber-500/30 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20'
+                            : 'border border-border bg-card text-foreground hover:bg-accent'
+                        }`}
+                      >
+                        {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : server.is_enabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{server.is_enabled ? labels.disableServer : labels.enableServer}</TooltipContent>
+                  </Tooltip>
+
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        aria-label={labels.delete}
+                        onClick={() => void deleteServer(server.id)}
+                        disabled={busy}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-destructive/30 text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{labels.delete}</TooltipContent>
+                  </Tooltip>
                   </div>
                 </div>
 
-                <div className="mt-4 space-y-2 text-sm">
-                  <div>
-                    <div className="text-muted-foreground">
-                      {server.transport === 'http_stream' ? labels.url : labels.launchCommand}
-                    </div>
-                    <code className="mt-1 block overflow-x-auto rounded-md bg-card px-3 py-2 text-xs text-electric-blue">
-                      {server.transport === 'http_stream' ? server.url : server.launch_command_display || server.launch_command}
-                    </code>
-                  </div>
-                  {server.transport === 'stdio' ? (
-                    <div>
-                      <div className="text-muted-foreground">{labels.workingDirectory}</div>
-                      <div className="mt-1 text-sm">
-                        {server.working_dir || labels.notSpecified}
-                      </div>
-                    </div>
-                  ) : server.bearer_token_env_var ? (
-                    <div>
-                      <div className="text-muted-foreground">{labels.bearerTokenEnvironmentVariable}</div>
-                      <div className="mt-1 text-sm">{server.bearer_token_env_var}</div>
-                    </div>
+                <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-1">
+                  <span className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-1 text-xs font-medium ${statusTone(server.status)}`}>
+                    {statusIcon(server.status)}
+                    {server.status}
+                  </span>
+                  <span className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-1 text-xs font-medium ${healthTone(server.health_status)}`}>
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    {labels.health}: {healthLabel(server.health_status, labels)}
+                  </span>
+
+                  {server.transport === 'stdio' && server.auto_start ? (
+                    <span className="shrink-0 whitespace-nowrap rounded-full border border-border bg-muted px-2 py-1 text-xs text-muted-foreground">
+                      {labels.autoStart}
+                    </span>
+                  ) : null}
+                  {!server.is_enabled ? (
+                    <span className="shrink-0 whitespace-nowrap rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-600">
+                      {labels.disabled}
+                    </span>
+                  ) : null}
+                  {(server.disabled_tool_names?.length ?? 0) > 0 ? (
+                    <span className="shrink-0 whitespace-nowrap rounded-full border border-electric-blue/30 bg-electric-blue/12 px-2 py-1 text-xs font-medium text-electric-blue">
+                      {messages.disabledToolsBadge(server.disabled_tool_names.length)}
+                    </span>
                   ) : null}
                   {server.transport === 'http_stream' && server.auth_type === 'oauth2' ? (
-                    <div>
-                      <div className="text-muted-foreground">OAuth</div>
-                      <div className="mt-1 text-sm">
-                        {server.oauth_provider || 'custom'}
-                        {server.oauth_connected_at ? ` · connected ${new Date(server.oauth_connected_at).toLocaleString()}` : ''}
-                      </div>
-                      {server.oauth_last_error ? (
-                        <div className="mt-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                          {server.oauth_last_error}
-                        </div>
-                      ) : null}
-                    </div>
+                    <span className={`shrink-0 whitespace-nowrap rounded-full border px-2 py-1 text-xs font-medium ${
+                      server.oauth_connected
+                        ? 'border-status-running/30 bg-status-running/12 text-status-running'
+                        : 'border-amber-500/30 bg-amber-500/10 text-amber-700'
+                    }`}>
+                      {labels.oauth}: {server.oauth_connected ? labels.connected : labels.notConnected}
+                    </span>
                   ) : null}
-                  <div>
-                    <div className="text-muted-foreground">{labels.lastCheck}</div>
-                    <div className="mt-1 text-sm">
-                      {server.health_checked_at ? new Date(server.health_checked_at).toLocaleString() : labels.notSpecified}
-                    </div>
-                    {server.health_error ? (
-                      <div className="mt-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                        {server.health_error}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-
-                <div className="mt-5 flex flex-wrap gap-2">
-                  {server.transport === 'stdio' ? (
-                    <button
-                      onClick={() => void runServerAction(server.id, server.status === 'Running' ? 'stop' : 'start')}
-                      disabled={busy || !server.is_enabled}
-                      className={`inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
-                        server.status === 'Running'
-                          ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
-                          : 'bg-status-running text-white hover:bg-status-running/90'
-                      }`}
-                    >
-                      {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : server.status === 'Running' ? <Square className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                      {server.status === 'Running' ? labels.stop : labels.start}
-                    </button>
-                  ) : null}
-
-                  <button
-                    onClick={() => void checkServerHealth(server.id)}
-                    disabled={busy}
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
-                    {labels.check}
-                  </button>
-
-                  {server.transport === 'http_stream' && server.auth_type === 'oauth2' ? (
-                    <button
-                      onClick={() => openAuthModal(server.id)}
-                      disabled={busy}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Info className="h-4 w-4" />}
-                      {labels.oauth}
-                    </button>
-                  ) : null}
-
-                  <button
-                    onClick={() => void openServerTools(server)}
-                    disabled={serverToolsLoadingId === server.id}
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    {serverToolsLoadingId === server.id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Settings2 className="h-4 w-4" />}
-                    {labels.manageTools}
-                  </button>
-
-                  {server.transport === 'stdio' ? (
-                    <button
-                      onClick={() => void inspectServer(server)}
-                      disabled={inspectingServerId === server.id}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
-                    >
-                      {inspectingServerId === server.id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Info className="h-4 w-4" />}
-                      {labels.info}
-                    </button>
-                  ) : null}
-
-                  <button
-                    onClick={() => startEditServer(server)}
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent"
-                  >
-                    <Pencil className="h-4 w-4" />
-                    Edit
-                  </button>
-
-                  <button
-                    onClick={() => void setServerEnabled(server.id, !server.is_enabled)}
-                    disabled={busy}
-                    className={`inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-70 ${
-                      server.is_enabled
-                        ? 'border border-amber-500/30 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20'
-                        : 'border border-border bg-card text-foreground hover:bg-accent'
-                    }`}
-                  >
-                    {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : server.is_enabled ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                    {server.is_enabled ? labels.disableServer : labels.enableServer}
-                  </button>
-
-                  <button
-                    onClick={() => void deleteServer(server.id)}
-                    disabled={busy}
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-destructive/30 px-4 text-sm font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-70"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Delete
-                  </button>
                 </div>
               </div>
             );

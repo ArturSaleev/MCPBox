@@ -175,6 +175,14 @@ export type Dictionary = {
     showToken: string;
     hideToken: string;
     copyToken: string;
+    oauthClients: string;
+    addOAuthClient: string;
+    oauthClientsDescription: string;
+    clientName: string;
+    createdAt: string;
+    noOAuthClients: string;
+    callbackStoredHidden: string;
+    status: string;
   };
   messages: {
     loadingProjects: string;
@@ -505,6 +513,14 @@ export const dictionaries: Record<Language, Dictionary> = {
       showToken: 'Show token',
       hideToken: 'Hide token',
       copyToken: 'Copy token',
+      oauthClients: 'OAuth connections',
+      addOAuthClient: 'Add connection',
+      oauthClientsDescription: 'Create a separate OAuth connection for each ChatGPT user or client.',
+      clientName: 'Client name',
+      createdAt: 'Created',
+      noOAuthClients: 'No OAuth connections yet.',
+      callbackStoredHidden: 'The callback URL is stored securely in the local database and is not displayed after saving.',
+      status: 'Status',
     },
     messages: {
       loadingProjects: 'Loading projects...',
@@ -864,6 +880,14 @@ export const dictionaries: Record<Language, Dictionary> = {
       showToken: 'Показать токен',
       hideToken: 'Скрыть токен',
       copyToken: 'Скопировать токен',
+      oauthClients: 'OAuth-подключения',
+      addOAuthClient: 'Добавить подключение',
+      oauthClientsDescription: 'Создавайте отдельное OAuth-подключение для каждого пользователя или клиента ChatGPT.',
+      clientName: 'Имя клиента',
+      createdAt: 'Создано',
+      noOAuthClients: 'OAuth-подключений пока нет.',
+      callbackStoredHidden: 'Callback URL хранится только в локальной базе данных и после сохранения не отображается.',
+      status: 'Статус',
     },
     messages: {
       loadingProjects: 'Загружаю проекты...',

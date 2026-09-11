@@ -220,10 +220,8 @@ type ProjectsViewProps = {
   launchingLMStudioProjectId: number | null;
   OllamaIcon: (props: { className?: string }) => JSX.Element;
   alternativeConnectURLs: string[];
-  connectionURLsExpanded: boolean;
-  setConnectionURLsExpanded: (updater: (current: boolean) => boolean) => void;
-  copyConnectURL: () => void | Promise<void>;
-  copied: boolean;
+  oauthClientManagementEnabled: boolean;
+  copyConnectURL: (url?: string) => void | Promise<void>;
   busyProjectId: number | null;
   setProjectPaused: (projectId: number, paused: boolean) => void | Promise<void>;
   startDuplicateProject: () => void;
@@ -350,10 +348,8 @@ export function ProjectsView({
   launchingLMStudioProjectId,
   OllamaIcon,
   alternativeConnectURLs,
-  connectionURLsExpanded,
-  setConnectionURLsExpanded,
+  oauthClientManagementEnabled,
   copyConnectURL,
-  copied,
   regenerateEndpointToken,
   busyProjectId,
   setProjectPaused,
@@ -478,10 +474,8 @@ export function ProjectsView({
         launchingLMStudioProjectId={launchingLMStudioProjectId}
         OllamaIcon={OllamaIcon}
         alternativeConnectURLs={alternativeConnectURLs}
-        connectionURLsExpanded={connectionURLsExpanded}
-        setConnectionURLsExpanded={setConnectionURLsExpanded}
+        oauthClientManagementEnabled={oauthClientManagementEnabled}
         copyConnectURL={copyConnectURL}
-        copied={copied}
         regenerateEndpointToken={regenerateEndpointToken}
         busyProjectId={busyProjectId}
         setProjectPaused={setProjectPaused}
@@ -609,6 +603,7 @@ export function ProjectsView({
         inspectOpen={inspectOpen}
         setInspectOpen={setInspectOpen}
         inspectionServerName={inspectionServerName}
+        inspectionServer={selectedProject?.servers.find((server) => server.name === inspectionServerName) ?? null}
         inspectingServerId={inspectingServerId}
         inspectionError={inspectionError}
         inspection={inspection}

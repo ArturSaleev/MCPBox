@@ -298,8 +298,6 @@ export default function App() {
     ? projects.flatMap((p) => p.servers).find((s) => s.id === authServerId) ?? null
     : null;
 
-  const [copied, setCopied] = useState(false);
-  const [connectionURLsExpanded, setConnectionURLsExpanded] = useState(false);
   const logsViewportRef = useRef<HTMLDivElement | null>(null);
   const marketAutoSyncTriggeredRef = useRef(false);
   const previousViewRef = useRef(view);
@@ -405,10 +403,6 @@ export default function App() {
     window.localStorage.setItem(languageStorageKey, language);
     document.documentElement.lang = language;
   }, [language]);
-
-  useEffect(() => {
-    setConnectionURLsExpanded(false);
-  }, [selectedProjectId]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -1262,14 +1256,14 @@ export default function App() {
     }
   }
 
-  async function copyConnectURL() {
-    if (!selectedProject?.connect_url) {
+  async function copyConnectURL(url?: string) {
+    const value = url ?? selectedProject?.connect_url;
+    if (!value) {
       return;
     }
 
-    await copyToClipboard(selectedProject.connect_url);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
+    await copyToClipboard(value);
+    toast.success(labels.copied);
   }
 
   async function copyToClipboard(value: string) {
@@ -1298,10 +1292,16 @@ export default function App() {
 
   async function inspectServer(server: ServerStatus) {
     setInspectOpen(true);
-    setInspectingServerId(server.id);
     setInspection(null);
     setInspectionError(null);
     setInspectionServerName(server.name);
+
+    if (server.transport !== 'stdio') {
+      setInspectingServerId(null);
+      return;
+    }
+
+    setInspectingServerId(server.id);
 
     try {
       const nextInspection = await apiRequest<ServerInspection>(
@@ -2167,10 +2167,8 @@ export default function App() {
               launchingLMStudioProjectId={launchingLMStudioProjectId}
               OllamaIcon={OllamaIcon}
               alternativeConnectURLs={alternativeConnectURLs}
-              connectionURLsExpanded={connectionURLsExpanded}
-              setConnectionURLsExpanded={setConnectionURLsExpanded}
+              oauthClientManagementEnabled={editionMeta.edition_id === 'pro'}
               copyConnectURL={copyConnectURL}
-              copied={copied}
               busyProjectId={busyProjectId}
               setProjectPaused={setProjectPaused}
               startDuplicateProject={startDuplicateProject}

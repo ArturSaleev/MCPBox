@@ -150,9 +150,13 @@ type Server struct {
 	mux                 *http.ServeMux
 	sessionMu           sync.RWMutex
 	sessions            map[string]connectSession
+	clientActorMu       sync.RWMutex
+	clientActors        map[string]mcpClientActor
 	oauthMu             sync.RWMutex
 	oauth               map[string]oauthSession
 	initializedServers  map[uint]bool
+	adminAPIAuthorizer  func(requiredScope string, next http.Handler) http.Handler
+	handler             http.Handler
 	projectAuthorizer   connectruntime.ProjectAuthorizer
 }
 
@@ -163,6 +167,11 @@ type connectSession struct {
 	ServerID     uint
 	CreatedAt    time.Time
 	Stream       chan []byte
+}
+
+type mcpClientActor struct {
+	Name       string
+	LastSeenAt time.Time
 }
 
 type oauthSession struct {
@@ -400,6 +409,7 @@ type Options struct {
 	ConnectPort         int
 	UIFS                fs.FS
 	HTTPRegistrars      []func(*http.ServeMux)
+	AdminAPIAuthorizer  func(requiredScope string, next http.Handler) http.Handler
 	ProjectAuthorizer   connectruntime.ProjectAuthorizer
 }
 
@@ -422,8 +432,10 @@ func NewServerWithInstaller(store *storage.Store, registry *orchestrator.Registr
 		urlLauncher:         launchExternalURL,
 		mux:                 http.NewServeMux(),
 		sessions:            make(map[string]connectSession),
+		clientActors:        make(map[string]mcpClientActor),
 		oauth:               make(map[string]oauthSession),
 		initializedServers:  make(map[uint]bool),
+		adminAPIAuthorizer:  options.AdminAPIAuthorizer,
 		projectAuthorizer:   options.ProjectAuthorizer,
 	}
 	if s.editionID == "" {
@@ -442,11 +454,12 @@ func NewServerWithInstaller(store *storage.Store, registry *orchestrator.Registr
 			registrar(s.mux)
 		}
 	}
+	s.handler = withCORS(s.withAdminAPIAuthorization(s.mux))
 	return s
 }
 
 func (s *Server) Handler() http.Handler {
-	return withCORS(s.mux)
+	return s.handler
 }
 
 func (s *Server) AdminHandler() http.Handler {
@@ -457,11 +470,11 @@ func (s *Server) AdminHandler() http.Handler {
 			return
 		}
 		if isConnectPath(r.URL.Path) {
-			withCORS(s.mux).ServeHTTP(w, r)
+			s.handler.ServeHTTP(w, r)
 			return
 		}
 
-		withCORS(s.mux).ServeHTTP(w, r)
+		s.handler.ServeHTTP(w, r)
 	})
 }
 
@@ -473,12 +486,58 @@ func (s *Server) ConnectHandler() http.Handler {
 			return
 		}
 		if r.URL.Path == "/healthz" || isConnectPath(r.URL.Path) || isConnectProtocolPath(r.URL.Path) {
-			withCORS(s.mux).ServeHTTP(w, r)
+			s.handler.ServeHTTP(w, r)
 			return
 		}
 
 		http.NotFound(w, r)
 	})
+}
+
+func (s *Server) withAdminAPIAuthorization(next http.Handler) http.Handler {
+	if s.adminAPIAuthorizer == nil {
+		return next
+	}
+
+	readHandler := s.adminAPIAuthorizer("pro:read", next)
+	writeHandler := s.adminAPIAuthorizer("pro:write", next)
+	adminHandler := s.adminAPIAuthorizer("pro:admin", next)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch sharedAdminAPIScope(r) {
+		case "pro:read":
+			readHandler.ServeHTTP(w, r)
+		case "pro:write":
+			writeHandler.ServeHTTP(w, r)
+		case "pro:admin":
+			adminHandler.ServeHTTP(w, r)
+		default:
+			next.ServeHTTP(w, r)
+		}
+	})
+}
+
+func sharedAdminAPIScope(r *http.Request) string {
+	cleanedPath := path.Clean("/" + strings.TrimSpace(r.URL.Path))
+	if !strings.HasPrefix(cleanedPath, "/api/") || cleanedPath == "/api/meta" || strings.HasPrefix(cleanedPath, "/api/pro/") {
+		return ""
+	}
+
+	if strings.HasSuffix(cleanedPath, "/token") && strings.Contains(cleanedPath, "/oauth-clients/") {
+		return "pro:admin"
+	}
+	if strings.HasSuffix(cleanedPath, "/bearer-token") || strings.HasSuffix(cleanedPath, "/regenerate-token") {
+		return "pro:admin"
+	}
+
+	switch r.Method {
+	case http.MethodGet, http.MethodHead:
+		return "pro:read"
+	case http.MethodDelete:
+		return "pro:admin"
+	default:
+		return "pro:write"
+	}
 }
 
 func (s *Server) registerRoutes() {
@@ -502,6 +561,12 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("DELETE /api/rag/collections/", s.handleDeleteRAGCollection)
 	s.mux.HandleFunc("GET /api/projects", s.handleListProjects)
 	s.mux.HandleFunc("POST /api/projects", s.handleCreateProject)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/oauth-clients", s.handleListProjectOAuthClients)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/oauth-clients", s.handleCreateProjectOAuthClient)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/oauth-clients/{clientID}/token", s.handleRevealProjectOAuthClientToken)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/oauth-clients/{clientID}/enable", s.handleEnableProjectOAuthClient)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/oauth-clients/{clientID}/disable", s.handleDisableProjectOAuthClient)
+	s.mux.HandleFunc("DELETE /api/projects/{projectID}/oauth-clients/{clientID}", s.handleDeleteProjectOAuthClient)
 	s.mux.HandleFunc("GET /api/projects/", s.handleProjectStatus)
 	s.mux.HandleFunc("POST /api/projects/", s.handleProjectAction)
 	s.mux.HandleFunc("PUT /api/projects/", s.handleProjectUpdate)
@@ -1316,7 +1381,20 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if !projectEndpointBearerAuthorized(r, *project) {
+	endpointAuthorized := projectEndpointBearerAuthorized(r, *project)
+	if !endpointAuthorized && project.BearerAuthEnabled {
+		oauthClient, clientErr := s.store.GetProjectOAuthClientByToken(r.Context(), project.ID, bearerTokenFromRequest(r))
+		if clientErr != nil {
+			writeError(w, http.StatusInternalServerError, clientErr)
+			return
+		}
+		if oauthClient != nil {
+			endpointAuthorized = true
+			actor = strings.TrimSpace(oauthClient.Name)
+			r = r.Clone(connectruntime.WithAccess(r.Context(), &connectruntime.Access{Actor: actor}))
+		}
+	}
+	if !endpointAuthorized {
 		w.Header().Set(
 			"WWW-Authenticate",
 			fmt.Sprintf(`Bearer resource_metadata="%s"`, s.absoluteConnectURL(r, "/.well-known/oauth-protected-resource")),
@@ -1375,6 +1453,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, err)
 				return
 			}
+			actor = s.connectRequestActor(r, project.ID, payload, actor)
 			response, hasResponse, err := s.dispatchProjectJSONRPC(r.Context(), actor, *project, servers, payload)
 			if err != nil {
 				writeError(w, http.StatusBadGateway, err)
@@ -1396,6 +1475,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
+		actor = s.connectRequestActor(r, project.ID, payload, actor)
 		response, hasResponse, err := s.dispatchProjectJSONRPC(r.Context(), actor, *project, servers, payload)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, err)
@@ -1996,6 +2076,14 @@ func (s *Server) connectURLs(r *http.Request, token string) []string {
 		slices.Sort(interfaceHosts)
 		for _, iface := range interfaceHosts {
 			appendCandidate(iface, requestPath)
+		}
+
+		for _, tailscaleURL := range tailscaleConnectionURLs(port, requestPath) {
+			if _, ok := seen[tailscaleURL]; ok {
+				continue
+			}
+			seen[tailscaleURL] = struct{}{}
+			urls = append(urls, tailscaleURL)
 		}
 	}
 
@@ -2623,6 +2711,108 @@ func clientActor(r *http.Request) string {
 	}
 
 	return strings.TrimSpace(r.RemoteAddr)
+}
+
+func (s *Server) connectRequestActor(r *http.Request, projectID uint, payload []byte, fallback string) string {
+	if access := connectruntime.FromContext(r.Context()); access != nil {
+		if actor := strings.TrimSpace(access.Actor); actor != "" {
+			return actor
+		}
+	}
+
+	key := mcpClientActorKey(r, projectID)
+	if name := mcpClientNameFromInitialize(payload); name != "" {
+		s.rememberMCPClientActor(key, name)
+		return name
+	}
+	if name := s.rememberedMCPClientActor(key); name != "" {
+		return name
+	}
+	if name := mcpClientNameFromUserAgent(r.UserAgent()); name != "" {
+		return name
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func mcpClientActorKey(r *http.Request, projectID uint) string {
+	fingerprint := fmt.Sprintf("%d\n%s\n%s", projectID, clientActor(r), strings.TrimSpace(r.UserAgent()))
+	sum := sha256.Sum256([]byte(fingerprint))
+	return hex.EncodeToString(sum[:])
+}
+
+func mcpClientNameFromInitialize(payload []byte) string {
+	var request struct {
+		Method string `json:"method"`
+		Params struct {
+			ClientInfo struct {
+				Name string `json:"name"`
+			} `json:"clientInfo"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(payload, &request); err != nil || strings.TrimSpace(request.Method) != "initialize" {
+		return ""
+	}
+	return normalizeMCPClientActor(request.Params.ClientInfo.Name)
+}
+
+func normalizeMCPClientActor(raw string) string {
+	value := strings.Join(strings.Fields(raw), " ")
+	runes := []rune(value)
+	if len(runes) > 120 {
+		value = string(runes[:120])
+	}
+	return value
+}
+
+func mcpClientNameFromUserAgent(raw string) string {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	switch {
+	case strings.Contains(value, "chatgpt"), strings.Contains(value, "openai"):
+		return "ChatGPT"
+	case strings.Contains(value, "claude"), strings.Contains(value, "anthropic"):
+		return "Claude"
+	case strings.Contains(value, "codex"):
+		return "Codex"
+	case strings.Contains(value, "cursor"):
+		return "Cursor"
+	case strings.Contains(value, "librechat"):
+		return "LibreChat"
+	default:
+		return ""
+	}
+}
+
+func (s *Server) rememberMCPClientActor(key, name string) {
+	if key == "" || name == "" {
+		return
+	}
+	now := time.Now().UTC()
+	s.clientActorMu.Lock()
+	defer s.clientActorMu.Unlock()
+	if len(s.clientActors) >= 512 {
+		for existingKey, actor := range s.clientActors {
+			if now.Sub(actor.LastSeenAt) > 24*time.Hour {
+				delete(s.clientActors, existingKey)
+			}
+		}
+	}
+	if len(s.clientActors) >= 2048 {
+		s.clientActors = make(map[string]mcpClientActor)
+	}
+	s.clientActors[key] = mcpClientActor{Name: name, LastSeenAt: now}
+}
+
+func (s *Server) rememberedMCPClientActor(key string) string {
+	if key == "" {
+		return ""
+	}
+	s.clientActorMu.RLock()
+	actor, ok := s.clientActors[key]
+	s.clientActorMu.RUnlock()
+	if !ok || time.Since(actor.LastSeenAt) > 24*time.Hour {
+		return ""
+	}
+	return actor.Name
 }
 
 func truncateDetail(detail string) string {
