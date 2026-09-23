@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -78,7 +79,7 @@ func Run(options Options) error {
 	store := opened.store
 
 	registry := orchestrator.NewRegistry(rootCtx)
-	packageInstaller := installer.NewService(store, "package_store")
+	packageInstaller := installer.NewService(store, filepath.Join(store.DataRoot(), "package_store"))
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -222,8 +223,9 @@ func OpenRuntime(options Options) (*OpenedRuntime, error) {
 
 	opened := &OpenedRuntime{
 		Runtime: &RuntimeContext{
-			Edition: options.Edition,
-			DB:      store.DB(),
+			Edition:  options.Edition,
+			DB:       store.DB(),
+			DataRoot: store.DataRoot(),
 			LogAudit: func(ctx context.Context, entry AuditEntry) error {
 				return store.CreateAuditLog(ctx, &models.AuditLog{
 					ProjectID: entry.ProjectID,
@@ -253,9 +255,31 @@ func normalizeOptions(options Options) Options {
 		options.Edition = FreeEdition()
 	}
 	if strings.TrimSpace(options.StoreDSN) == "" {
-		options.StoreDSN = "mcpbox.db"
+		options.StoreDSN = filepath.Join(executableDir(), "mcpbox.db")
+	} else if !isSpecialOrAbsoluteDSN(options.StoreDSN) {
+		options.StoreDSN = filepath.Join(executableDir(), options.StoreDSN)
 	}
 	return options
+}
+
+func executableDir() string {
+	executable, err := os.Executable()
+	if err != nil {
+		return "."
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(executable); resolveErr == nil {
+		executable = resolved
+	}
+	absolute, err := filepath.Abs(executable)
+	if err != nil {
+		return filepath.Dir(executable)
+	}
+	return filepath.Dir(absolute)
+}
+
+func isSpecialOrAbsoluteDSN(dsn string) bool {
+	trimmed := strings.TrimSpace(dsn)
+	return filepath.IsAbs(trimmed) || strings.HasPrefix(trimmed, ":") || strings.HasPrefix(trimmed, "file:")
 }
 
 func toHTTPRegistrars(runtimeContext *RuntimeContext, registrars []HTTPRegistrar) []func(*http.ServeMux) {

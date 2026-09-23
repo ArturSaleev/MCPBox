@@ -30,6 +30,7 @@ type Edition struct {
 type RuntimeContext struct {
 	Edition  Edition
 	DB       *gorm.DB
+	DataRoot string
 	LogAudit func(ctx context.Context, entry AuditEntry) error
 }
 
