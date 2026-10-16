@@ -13,11 +13,45 @@ MCPBox - это control plane на Go для MCP-серверов.
 - проектный организатор локальных и удаленных MCP-бэкендов
 - aggregation endpoint для включенных серверов внутри проекта
 - операторский UI для управления проектами, серверами, inspection, health-check и логированием
+- пользователей, роли, сессии, токены доступа и опциональный OIDC SSO
 
 Сейчас MCPBox еще не:
-- multi-user платформой с auth и ролями
 - полноценной observability-платформой, хотя теперь в нем уже есть базовые встроенные метрики по задержкам, ошибкам и трафику
 - распределенной системой оркестрации MCP между несколькими хостами
+
+## MCPBox 1.3.0: единое приложение
+
+Исходники бывшего MCPBoxPro входят в этот репозиторий под Apache-2.0. Коммерческая активация и соседняя папка MCPBoxPro для сборки не нужны.
+
+### Авторизация и совместимость
+
+Админка требует входа. Чтение административного API требует `pro:read`, изменения — `pro:write`, привилегированные операции — `pro:admin`. Публичные маршруты метаданных, входа и SSO доступны до входа; MCP/OAuth endpoints используют собственные правила авторизации. Прежние `/api/pro/*`, scopes `pro:*`, переменные `MCPBOX_PRO_*` и имена таблиц сохранены для совместимости.
+
+Создание первого администратора:
+
+```bash
+./MCPBox admin create --email admin@example.com --password 'replace-with-a-unique-password' --name 'Admin'
+```
+
+Для существующего локального аккаунта с тем же email команда обновит пароль. Минимальная длина пароля — восемь символов. Вошедший администратор также может сменить пароль через Настройки → Пользователи. При загрузке страницы сначала проверяется сохранённая сессия и только затем загружаются защищённые данные. Недействительный сохранённый токен сбрасывается без уведомления об ошибке.
+
+### Модули и хранение данных
+
+- `internal/proauth`, `internal/prosso`: пользователи, роли, токены, сессии и OIDC SSO.
+- `internal/prohttp`: защищённый административный API, OAuth проектов, endpoints интеграций и runtime-авторизация.
+- `internal/propolicy`, `internal/proprojects`: интеграция PolicyBox, опубликованные manifests, привязки и shadow-записи проектов.
+- `internal/proragbox`: настройки RagBox, bindings, ingest и поиск.
+- `internal/prostorage`: настройки bootstrap-хранилища и опциональное подключение operational PostgreSQL. Это не означает перенос всех таблиц общего ядра в PostgreSQL; см. [архитектуру хранения](docs/STORAGE_ARCHITECTURE_RU.md).
+- `internal/cli`: сохраняемые определения CLI, обнаружение каталога и выполнение с ограничениями; см. [документацию CLI](docs/CLI.md).
+- `html/src/app/pro`: UI доступа и интеграций, который собирается вместе с общим frontend в `internal/httpapi/ui/dist`.
+
+SQLite остаётся bootstrap-базой по умолчанию. База по умолчанию и относительные runtime-пути разрешаются рядом с исполняемым файлом независимо от текущей директории терминала. Сохранена совместимость с `.mcpboxpro/rag-shadow`. RagBox и PolicyBox остаются отдельными опциональными сервисами.
+
+Listeners по умолчанию: `127.0.0.1:38181` для админки и `0.0.0.0:38182` для MCP. Настройка через `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, `MCPBOX_MCP_PORT` или соответствующие CLI flags.
+
+Независимая сборка: `GOWORK=off go build -o MCPBox .`; backend-проверки: `GOWORK=off go test ./...`. Релизы собираются через `./build-release.sh host` или `./build-release.sh all` в `release/<os>/<arch>/MCPBox/`. После изменения frontend пересоберите Go-бинарник, чтобы встроить новый UI.
+
+См. [инструкцию переноса](docs/MERGE.md) и [описание релиза 1.3.0](release/RELEASE-1.3.0.md).
 
 ## Основная Модель
 
@@ -72,7 +106,7 @@ MCPBox - это control plane на Go для MCP-серверов.
 - LM Studio deeplink launcher через `POST /api/projects/{id}/launch-lmstudio`
 
 Примечание по Базе знаний:
-- текущий RAG-слой использует классический локальный полнотекстовый поиск, а не embedding-индексы
+- встроенный Bleve RAG использует локальный полнотекстовый поиск без embedding-индексов; опциональный RagBox выполняет поиск во внешнем сервисе
 - коллекции хранятся на диске и ищутся через Bleve
 - внешняя векторная база не требуется
 - pipeline генерации embeddings на этом этапе тоже не нужен
@@ -334,16 +368,17 @@ html                         React + Vite исходники встроенно�
 Сначала нужно собрать встроенный UI, затем Go-бинарь:
 
 ```bash
-npm --prefix html install
+npm --prefix html ci
 npm --prefix html run build
-go build -o MCPBox .
+GOWORK=off go build -o MCPBox .
 ```
 
 Для Windows:
 
 ```powershell
-npm --prefix html install
+npm --prefix html ci
 npm --prefix html run build
+$env:GOWORK = "off"
 go build -o MCPBox.exe .
 ```
 
@@ -351,18 +386,18 @@ go build -o MCPBox.exe .
 
 ## Запуск
 
-Порт по умолчанию: `38180`
+Порт по умолчанию: `38181`
 
 Запуск из исходников:
 
 ```bash
-go run .
+GOWORK=off go run .
 ```
 
 Прямой запуск встроенного локального Ollama host:
 
 ```bash
-go run . ollama-chat --config /path/to/project.yml --model llama3.2
+GOWORK=off go run . ollama-chat --config /path/to/project.yml --model llama3.2
 ```
 
 После успешного старта MCPBox автоматически открывает локальный UI и печатает:
@@ -374,10 +409,10 @@ go run . ollama-chat --config /path/to/project.yml --model llama3.2
 Порядок приоритета:
 1. CLI-флаг `-port`
 2. Переменная окружения `MCPBOX_PORT`
-3. Значение по умолчанию `38180`
+3. Значение по умолчанию `38181`
 
 Пример:
 
 ```bash
-go run . -port 39000
+GOWORK=off go run . -port 39000
 ```

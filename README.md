@@ -1,5 +1,24 @@
 # MCPBox
 
+MCPBox is one open-source application under Apache-2.0. It includes the former MCPBoxPro features: local accounts, roles, sessions, agent tokens, OIDC SSO, PolicyBox and RagBox integrations, and storage configuration. No commercial license or activation is required.
+
+Build independently from this repository (Go 1.26+, Node.js/npm):
+
+```bash
+cd html
+npm ci
+npm run build
+cd ..
+GOWORK=off go build -o MCPBox .
+./MCPBox admin create --email admin@example.com --password 'replace-with-a-unique-password'
+./MCPBox
+```
+
+Admin UI: `http://127.0.0.1:38181/`; project MCP: `http://localhost:38182/mcp/<project-token>`. Override listeners with `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, and `MCPBOX_MCP_PORT`. Sign in with the account created above. Interactive startup can also create the first administrator.
+
+See [migration and compatibility](docs/MERGE.md) before replacing an existing installation. All code and frontend sources are contained in this repository; the MCPBoxPro directory is no longer required. Release builds: `./build-release.sh host` or `./build-release.sh all`.
+
+
 MCPBox is a Go-based control plane for MCP servers. It lets you group local and remote MCP backends by project, inspect what they expose, monitor traffic, and publish a single project URL for AI clients such as Claude, Cursor, Codex, LM Studio, and local Ollama-based workflows.
 
 <p align="center">
@@ -34,12 +53,16 @@ Key capabilities:
 - One-click Ollama and llama.cpp launchers for local MCP testing
 - Single-binary deployment with embedded React UI and local SQLite storage
 
+## Release 1.3.0
+
+See [release notes](release/RELEASE-1.3.0.md) and [upgrade instructions](docs/MERGE.md).
+
 ## Quick Start
 
 1. Download the binary for your OS from the latest release, or build from source.
 2. Run `MCPBox`.
-3. Open `http://127.0.0.1:38180/` if the browser does not open automatically.
-4. Create a project.
+3. Open `http://127.0.0.1:38181/` if the browser does not open automatically.
+4. Sign in with your local administrator account, then create a project.
 5. Add local `stdio` servers or remote `HTTP streaming` servers.
 6. Copy the project endpoint from the UI and connect your AI client to `/mcp/{project_token}`.
 
@@ -71,18 +94,18 @@ Requirements:
 Build steps:
 
 ```bash
-npm --prefix html install
+npm --prefix html ci
 npm --prefix html run build
-go build -o MCPBox .
+GOWORK=off go build -o MCPBox .
 ```
 
 Run from source:
 
 ```bash
-go run .
+GOWORK=off go run .
 ```
 
-Default port: `38180`
+Default port: `38181`
 
 ## Documentation
 
@@ -93,10 +116,12 @@ Default port: `38180`
 ## Notes
 
 - MCPBox uses a local SQLite database by default.
-- The current Knowledge Base / RAG implementation uses local full-text indexing with Bleve. It does not build or require embedding indexes at this stage.
+- Local Knowledge Base / RAG uses full-text indexing with Bleve without mandatory embedding indexes. Optional RagBox integration adds external ingestion and retrieval.
 - The Docker runtime support in `1.2.1` is intentionally an MVP. Advanced container features such as compose-style orchestration, custom networks, and volume presets are not fully implemented yet.
 - The `go_install` package flow in `1.2.2` assumes the target integration can be installed through `go install module/path@version` and exposed through a concrete binary entry point.
 - Secret masking is applied in the UI and catalog install flow. Existing manually configured servers that still pass secrets directly in command arguments should be migrated to environment variables for full process-list safety.
 - The Ollama launcher is shown only when `ollama` is installed on the machine.
 - The llama.cpp launcher requires `llama-server`; project prompts are passed through `--system-prompt-file` and are also exposed through MCP `prompts/list` as `project_prompt`.
 - Local server inspection is available for `stdio` servers only.
+
+[CLI Registry: configuration, API, MCP and execution boundaries](docs/CLI.md).

@@ -1,11 +1,14 @@
-import { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { FormEvent, Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { Toaster, toast } from 'sonner';
 import {
   Bot,
   Database,
   FolderKanban,
+  LogOut,
+  Shield,
   ShoppingBag,
   TextSearch,
+  Terminal,
 } from 'lucide-react';
 import {
   defaultLanguage,
@@ -26,11 +29,12 @@ import type {
   PerformanceMetricsResponse,
   MetricsWindow,
   EditionMeta,
+  LogsFilterMode,
   ServerInspection,
   ServerToolStatus,
   KeyValuePair,
-  LlamaCppLaunchResponse,
   LlamaCppStatus,
+  LlamaCppLaunchResponse,
   OllamaStatus,
   OllamaLaunchResponse,
   ProjectFormState,
@@ -40,7 +44,33 @@ import { useAuth } from './hooks/useAuth';
 import { useLlamaCpp } from './hooks/useLlamaCpp';
 import { useOllama } from './hooks/useOllama';
 import { useServerTools } from './hooks/useServerTools';
-import { apiRequest } from './utils/api';
+import type { ProPrincipal, ProTokenRecord, ProUserRecord, ProRoleRecord, ProSessionRecord, CreateProTokenResponse, CreateProUserResponse, UpdateProUserResponse, UpdateProUserPasswordResponse, DisableProUserResponse, EnableProUserResponse, CreateProSessionResponse, ProLocalLoginResponse, ProSSOConfig, ProScopePreset } from './pro/types';
+import type {
+  ProPolicyBoxConfig,
+  ProPolicyBoxRuntimeTicketPayload,
+  ProPolicyBoxRuntimeTicketResponse,
+  ProPolicyBoxRuntimeTokenResponse,
+  ProPolicyBoxRuntimeValidateResponse,
+} from './pro/policybox';
+import type {
+  ProRagBoxConfig,
+  ProRagBoxKnowledgeBaseStatus,
+  ProRagBoxSearchResponse,
+  ProRagBoxVectorConnection,
+  ProRagBoxVectorConnectionListResponse,
+  ProRagBoxWorkspace,
+  ProRagBoxWorkspaceListResponse,
+  ProRagBoxWriteResponse,
+} from './pro/ragbox';
+import type {
+  ProStorageConfig,
+  ProStorageRuntimeStatus,
+  ProStorageShadowStatus,
+} from './pro/storage';
+import { proAPIRequest, hasProScope } from './pro/utils';
+import { getProCopy } from './pro/i18n';
+import { proAuthStorageKey } from './pro/constants';
+import { APIRequestError, apiRequest, setAPIAuthToken } from './utils/api';
 import { ProjectsSidebar } from './components/ProjectsSidebar';
 import type {
   CatalogItem,
@@ -48,6 +78,8 @@ import type {
   InstalledPackage,
   ProjectOption,
 } from './market';
+
+const CLIView = lazy(async () => { const module = await import('./components/CLIView'); return { default: module.CLIView }; });
 
 const KnowledgeView = lazy(async () => {
   const module = await import('./components/KnowledgeView');
@@ -67,6 +99,11 @@ const MarketView = lazy(async () => {
 const ProjectsView = lazy(async () => {
   const module = await import('./components/ProjectsView');
   return { default: module.ProjectsView };
+});
+
+const ProAccessView = lazy(async () => {
+  const module = await import('./components/ProAccessView');
+  return { default: module.ProAccessView };
 });
 
 type CatalogResponse = {
@@ -94,6 +131,39 @@ type LMStudioLaunchResponse = {
   project_id: number;
   server_name: string;
   deeplink: string;
+};
+
+type ProPolicyBoxAuditEvent = {
+  id: string;
+  type: string;
+  actor_id?: string;
+  target_id?: string;
+  metadata?: Record<string, string>;
+  occurred_at: string;
+};
+
+const defaultPolicyBoxRuntimePayload: ProPolicyBoxRuntimeTicketPayload = {
+  project_slug: 'workspace-assistant',
+  requested_scopes: ['chat:use', 'rag:query'],
+  context: {
+    tenant_id: 'tenant-main',
+    workspace_id: 'workspace-1',
+    resource_id: 'task-42',
+    department_id: 'operations',
+  },
+  metadata: {
+    source_system: 'external-platform',
+    page: 'assistant-console',
+  },
+  user: {
+    id: 'operator-1',
+    name: 'Ivan Ivanov',
+    role: 'operator',
+    attributes: {
+      department: 'operations',
+      region: 'kz-almaty',
+    },
+  },
 };
 
 const legacyCatalogSourceURL = 'https://webeasy.kz/mcpbox/catalog.json';
@@ -145,6 +215,29 @@ const emptyRAGCollectionForm = {
   name: '',
   source_path: '',
   auto_reindex: false,
+  service_mode: 'bleve_only' as 'bleve_only' | 'ragbox_only' | 'dual',
+  vector_connection_id: '',
+  existing_workspace_id: '',
+};
+
+const emptyProRagBoxVectorConnectionForm = {
+  name: '',
+  backend_type: 'sqlite' as 'sqlite' | 'qdrant' | 'pgvector' | 'milvus' | 'weaviate' | 'opensearch' | 'elasticsearch' | 'pinecone' | 'chroma',
+  description: '',
+  is_default: false,
+  qdrant_scheme: 'http' as 'http' | 'https',
+  qdrant_host: '',
+  qdrant_port: '6333',
+  qdrant_api_key: '',
+  qdrant_collection_prefix: '',
+  pgvector_host: '',
+  pgvector_port: '5432',
+  pgvector_username: '',
+  pgvector_password: '',
+  pgvector_database_name: '',
+  pgvector_schema: '',
+  pgvector_table_prefix: '',
+  backend_config_json: '',
 };
 
 function formatSchema(schema: unknown) {
@@ -176,18 +269,19 @@ function modelNameFromPath(modelPath: string) {
 }
 
 export default function App() {
-  const [view, setView] = useState<'projects' | 'knowledge' | 'market' | 'logs'>('projects');
+  const [view, setView] = useState<'projects' | 'cli' | 'knowledge' | 'market' | 'logs' | 'settings'>('projects');
   const [language, setLanguage] = useState<Language>(detectInitialLanguage);
   const [editionMeta, setEditionMeta] = useState<EditionMeta>({
-    edition_id: 'free',
+    edition_id: 'mcpbox',
     edition_name: 'MCPBox',
-    capabilities: [],
+    capabilities: ['auth'],
   });
   const [projects, setProjects] = useState<ProjectStatus[]>([]);
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [logMetrics, setLogMetrics] = useState<PerformanceMetricsResponse | null>(null);
   const [selectedLogsProjectId, setSelectedLogsProjectId] = useState<number | null>(null);
   const [metricsWindow, setMetricsWindow] = useState<MetricsWindow>('1h');
+  const [logsFilterMode, setLogsFilterMode] = useState<LogsFilterMode>('all');
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
   const [projectForm, setProjectForm] = useState<ProjectFormState>(emptyProjectForm);
   const [serverForm, setServerForm] = useState<ServerFormState>(emptyServerForm);
@@ -260,6 +354,7 @@ export default function App() {
   const [ragSearchQueries, setRAGSearchQueries] = useState<Record<string, string>>({});
   const [ragSearchResults, setRAGSearchResults] = useState<Record<string, RAGSearchResult[]>>({});
   const [ragSearchResultsOpen, setRAGSearchResultsOpen] = useState(false);
+  const [uploadingKnowledgeBaseId, setUploadingKnowledgeBaseId] = useState<string | null>(null);
   const [activeRAGSearchCollectionId, setActiveRAGSearchCollectionId] = useState<string | null>(null);
   const [indexingCollectionId, setIndexingCollectionId] = useState<string | null>(null);
   const [searchingCollectionId, setSearchingCollectionId] = useState<string | null>(null);
@@ -269,9 +364,13 @@ export default function App() {
   const [catalogSettings, setCatalogSettings] = useState<CatalogSettings | null>(null);
   const [installedPackages, setInstalledPackages] = useState<InstalledPackage[]>([]);
 
+  const { llamaCppStatus, llamaCppRefreshing, loadLlamaCppStatus } = useLlamaCpp({ requestFailed: 'Request failed' });
+  const [launchingLlamaCppProjectId, setLaunchingLlamaCppProjectId] = useState<number | null>(null);
+  const [stoppingLlamaCpp, setStoppingLlamaCpp] = useState(false);
+  const [selectedLlamaCppModelPath, setSelectedLlamaCppModelPath] = useState('');
+  const [selectedLlamaCppModelName, setSelectedLlamaCppModelName] = useState('');
   // Ollama hook
   const { ollamaStatus, setOllamaStatus, ollamaRefreshing, setOllamaRefreshing, selectedOllamaModel, setSelectedOllamaModel, loadOllamaStatus: hookLoadOllamaStatus } = useOllama({ requestFailed: 'Request failed' });
-  const { llamaCppStatus, setLlamaCppStatus, llamaCppRefreshing, setLlamaCppRefreshing, loadLlamaCppStatus: hookLoadLlamaCppStatus } = useLlamaCpp({ requestFailed: 'Request failed' });
 
   const [catalogURL, setCatalogURL] = useState(defaultCatalogSourceURL);
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -285,11 +384,7 @@ export default function App() {
   const [uninstallingCatalogItemId, setUninstallingCatalogItemId] = useState<string | null>(null);
   const [busyProjectId, setBusyProjectId] = useState<number | null>(null);
   const [launchingOllamaProjectId, setLaunchingOllamaProjectId] = useState<number | null>(null);
-  const [launchingLlamaCppProjectId, setLaunchingLlamaCppProjectId] = useState<number | null>(null);
   const [launchingLMStudioProjectId, setLaunchingLMStudioProjectId] = useState<number | null>(null);
-  const [stoppingLlamaCpp, setStoppingLlamaCpp] = useState(false);
-  const [selectedLlamaCppModelPath, setSelectedLlamaCppModelPath] = useState('');
-  const [selectedLlamaCppModelName, setSelectedLlamaCppModelName] = useState('');
 
   // Auth hook
   const { authOpen, setAuthOpen, authServerId, setAuthServerId, resetAuthServer } = useAuth();
@@ -298,7 +393,138 @@ export default function App() {
     ? projects.flatMap((p) => p.servers).find((s) => s.id === authServerId) ?? null
     : null;
 
+  const [proAuthToken, setProAuthToken] = useState(() => {
+    if (typeof window === 'undefined') {
+      return '';
+    }
+    const storedToken = window.localStorage.getItem(proAuthStorageKey) ?? '';
+    setAPIAuthToken(storedToken);
+    return storedToken;
+  });
+  const [proPrincipal, setProPrincipal] = useState<ProPrincipal | null>(null);
+  const [proTokens, setProTokens] = useState<ProTokenRecord[]>([]);
+  const [proUsers, setProUsers] = useState<ProUserRecord[]>([]);
+  const [proRoles, setProRoles] = useState<ProRoleRecord[]>([]);
+  const [proSessions, setProSessions] = useState<ProSessionRecord[]>([]);
+  const [proSSOConfig, setProSSOConfig] = useState<ProSSOConfig | null>(null);
+  const [proStorageConfig, setProStorageConfig] = useState<ProStorageConfig | null>(null);
+  const [proStorageRuntimeStatus, setProStorageRuntimeStatus] = useState<ProStorageRuntimeStatus | null>(null);
+  const [proStorageShadowStatus, setProStorageShadowStatus] = useState<ProStorageShadowStatus | null>(null);
+  const [proPolicyBoxConfig, setProPolicyBoxConfig] = useState<ProPolicyBoxConfig | null>(null);
+  const [proRagBoxConfig, setProRagBoxConfig] = useState<ProRagBoxConfig | null>(null);
+  const [proLoading, setProLoading] = useState(false);
+  const [proLocalLoginLoading, setProLocalLoginLoading] = useState(false);
+  const [proAuthBootstrapping, setProAuthBootstrapping] = useState(false);
+  const [proCreateOpen, setProCreateOpen] = useState(false);
+  const [proCreatingToken, setProCreatingToken] = useState(false);
+  const [proRevokingTokenId, setProRevokingTokenId] = useState<number | null>(null);
+  const [proCreateUserOpen, setProCreateUserOpen] = useState(false);
+  const [proCreatingUser, setProCreatingUser] = useState(false);
+  const [proEditUserOpen, setProEditUserOpen] = useState(false);
+  const [proUpdatingUserRoles, setProUpdatingUserRoles] = useState(false);
+  const [proPasswordUserOpen, setProPasswordUserOpen] = useState(false);
+  const [proUpdatingUserPassword, setProUpdatingUserPassword] = useState(false);
+  const [proDisablingUserId, setProDisablingUserId] = useState<number | null>(null);
+  const [proEnablingUserId, setProEnablingUserId] = useState<number | null>(null);
+  const [proDeletingUserId, setProDeletingUserId] = useState<number | null>(null);
+  const [proSessionsFilterUserId, setProSessionsFilterUserId] = useState('all');
+  const [proEditingUserId, setProEditingUserId] = useState<string>('');
+  const [proEditingUserName, setProEditingUserName] = useState('');
+  const [proEditingUserRoles, setProEditingUserRoles] = useState('reader');
+  const [proPasswordUserId, setProPasswordUserId] = useState('');
+  const [proPasswordUserName, setProPasswordUserName] = useState('');
+  const [proPasswordUserPassword, setProPasswordUserPassword] = useState('');
+  const [proPasswordUserPasswordConfirm, setProPasswordUserPasswordConfirm] = useState('');
+  const [proCreateSessionOpen, setProCreateSessionOpen] = useState(false);
+  const [proCreatingSession, setProCreatingSession] = useState(false);
+  const [proRevokingSessionId, setProRevokingSessionId] = useState<number | null>(null);
+  const [proNewTokenName, setProNewTokenName] = useState('');
+  const [proLoginEmail, setProLoginEmail] = useState('');
+  const [proLoginPassword, setProLoginPassword] = useState('');
+  const [proNewTokenScopes, setProNewTokenScopes] = useState('pro:read, pro:write');
+  const [proNewTokenExpiresDays, setProNewTokenExpiresDays] = useState('30');
+  const [proCreatedTokenValue, setProCreatedTokenValue] = useState<string | null>(null);
+  const [proNewUserName, setProNewUserName] = useState('');
+  const [proNewUserEmail, setProNewUserEmail] = useState('');
+  const [proNewUserRoles, setProNewUserRoles] = useState('reader');
+  const [proNewSessionUserId, setProNewSessionUserId] = useState('');
+  const [proNewSessionLabel, setProNewSessionLabel] = useState('');
+  const [proNewSessionExpiresDays, setProNewSessionExpiresDays] = useState('30');
+  const [proCreatedSessionToken, setProCreatedSessionToken] = useState<string | null>(null);
+  const [proPolicyBoxBaseURL, setProPolicyBoxBaseURL] = useState('');
+  const [proPolicyBoxAdminToken, setProPolicyBoxAdminToken] = useState('');
+  const [proPolicyBoxSaving, setProPolicyBoxSaving] = useState(false);
+  const [proPolicyBoxRuntimeDialogOpen, setProPolicyBoxRuntimeDialogOpen] = useState(false);
+  const [proPolicyBoxRuntimePayload, setProPolicyBoxRuntimePayload] = useState(
+    JSON.stringify(defaultPolicyBoxRuntimePayload, null, 2),
+  );
+  const [proPolicyBoxRuntimeTicket, setProPolicyBoxRuntimeTicket] = useState('');
+  const [proPolicyBoxRuntimeToken, setProPolicyBoxRuntimeToken] = useState('');
+  const [proPolicyBoxRuntimeResponseJSON, setProPolicyBoxRuntimeResponseJSON] = useState('');
+  const [proPolicyBoxIssuingTicket, setProPolicyBoxIssuingTicket] = useState(false);
+  const [proPolicyBoxExchangingTicket, setProPolicyBoxExchangingTicket] = useState(false);
+  const [proPolicyBoxValidatingToken, setProPolicyBoxValidatingToken] = useState(false);
+  const [proStorageOperationalBackend, setProStorageOperationalBackend] = useState<'sqlite' | 'postgres'>('sqlite');
+  const [proStoragePostgresHost, setProStoragePostgresHost] = useState('');
+  const [proStoragePostgresPort, setProStoragePostgresPort] = useState('5432');
+  const [proStoragePostgresDatabase, setProStoragePostgresDatabase] = useState('');
+  const [proStoragePostgresSchema, setProStoragePostgresSchema] = useState('public');
+  const [proStoragePostgresUsername, setProStoragePostgresUsername] = useState('');
+  const [proStoragePostgresPassword, setProStoragePostgresPassword] = useState('');
+  const [proStorageClearPostgresDSN, setProStorageClearPostgresDSN] = useState(false);
+  const [proStorageLogsBackend, setProStorageLogsBackend] = useState<'operational' | 'clickhouse' | 'elasticsearch'>('operational');
+  const [proStorageClickHouseURL, setProStorageClickHouseURL] = useState('');
+  const [proStorageClickHouseDatabase, setProStorageClickHouseDatabase] = useState('');
+  const [proStorageClickHouseUsername, setProStorageClickHouseUsername] = useState('');
+  const [proStorageClickHousePassword, setProStorageClickHousePassword] = useState('');
+  const [proStorageClearClickHousePassword, setProStorageClearClickHousePassword] = useState(false);
+  const [proStorageElasticsearchURL, setProStorageElasticsearchURL] = useState('');
+  const [proStorageElasticsearchUsername, setProStorageElasticsearchUsername] = useState('');
+  const [proStorageElasticsearchPassword, setProStorageElasticsearchPassword] = useState('');
+  const [proStorageElasticsearchIndex, setProStorageElasticsearchIndex] = useState('');
+  const [proStorageClearElasticsearchPassword, setProStorageClearElasticsearchPassword] = useState(false);
+  const [proStorageSaving, setProStorageSaving] = useState(false);
+  const [proRagBoxBaseURL, setProRagBoxBaseURL] = useState('');
+  const [proRagBoxAdminToken, setProRagBoxAdminToken] = useState('');
+  const [proRagBoxClearAdminToken, setProRagBoxClearAdminToken] = useState(false);
+  const [proRagBoxTimeoutSeconds, setProRagBoxTimeoutSeconds] = useState('30');
+  const [proRagBoxWriteMode, setProRagBoxWriteMode] = useState<'bleve_only' | 'dual_write'>('dual_write');
+  const [proRagBoxSearchMode, setProRagBoxSearchMode] = useState<'bleve_only' | 'dual_search' | 'hybrid'>('hybrid');
+  const [proRagBoxSaving, setProRagBoxSaving] = useState(false);
+  const [proRagBoxVectorConnections, setProRagBoxVectorConnections] = useState<ProRagBoxVectorConnection[]>([]);
+  const [proRagBoxWorkspaces, setProRagBoxWorkspaces] = useState<ProRagBoxWorkspace[]>([]);
+  const [proRagBoxBuiltinFallbackBackend, setProRagBoxBuiltinFallbackBackend] = useState('sqlite');
+  const [proRagBoxLoadingVectorConnections, setProRagBoxLoadingVectorConnections] = useState(false);
+  const [proRagBoxLoadingWorkspaces, setProRagBoxLoadingWorkspaces] = useState(false);
+  const [proRagBoxCreatingVectorConnection, setProRagBoxCreatingVectorConnection] = useState(false);
+  const [proRagBoxDefaultingVectorConnectionId, setProRagBoxDefaultingVectorConnectionId] = useState<string | null>(null);
+  const [proRagBoxVectorConnectionForm, setProRagBoxVectorConnectionForm] = useState(emptyProRagBoxVectorConnectionForm);
+  const [proRagBoxBindingProjectId, setProRagBoxBindingProjectId] = useState('');
+  const [proRagBoxBindingVectorConnectionId, setProRagBoxBindingVectorConnectionId] = useState('');
+  const [proRagBoxBindingExistingWorkspaceId, setProRagBoxBindingExistingWorkspaceId] = useState('');
+  const [proRagBoxBindingCollectionProjectId, setProRagBoxBindingCollectionProjectId] = useState('');
+  const [proRagBoxBindingCollectionId, setProRagBoxBindingCollectionId] = useState('');
+  const [proRagBoxEnsuringWorkspace, setProRagBoxEnsuringWorkspace] = useState(false);
+  const [proRagBoxEnsuringCollection, setProRagBoxEnsuringCollection] = useState(false);
+  const [proRagBoxUploadProjectId, setProRagBoxUploadProjectId] = useState('');
+  const [proRagBoxUploadCollectionId, setProRagBoxUploadCollectionId] = useState('');
+  const [proRagBoxUploadFile, setProRagBoxUploadFile] = useState<File | null>(null);
+  const [proRagBoxUploadSourceName, setProRagBoxUploadSourceName] = useState('');
+  const [proRagBoxUploadExternalId, setProRagBoxUploadExternalId] = useState('');
+  const [proRagBoxUploadTitle, setProRagBoxUploadTitle] = useState('');
+  const [proRagBoxUploadMetadata, setProRagBoxUploadMetadata] = useState('');
+  const [proRagBoxUploadingFile, setProRagBoxUploadingFile] = useState(false);
+  const [proRagBoxRecordsProjectId, setProRagBoxRecordsProjectId] = useState('');
+  const [proRagBoxRecordsCollectionId, setProRagBoxRecordsCollectionId] = useState('');
+  const [proRagBoxRecordsPayload, setProRagBoxRecordsPayload] = useState(
+    '{\n  "source": { "type": "api_push", "name": "mcpboxpro" },\n  "records": []\n}',
+  );
+  const [proRagBoxUpsertingRecords, setProRagBoxUpsertingRecords] = useState(false);
+  const [proRagBoxLastOperation, setProRagBoxLastOperation] = useState<ProRagBoxWriteResponse | null>(null);
+  const [proRagBoxKnowledgeBaseStatus, setProRagBoxKnowledgeBaseStatus] = useState<Record<string, ProRagBoxKnowledgeBaseStatus>>({});
+  const [ragSearchDiagnostics, setRAGSearchDiagnostics] = useState<string | null>(null);
   const logsViewportRef = useRef<HTMLDivElement | null>(null);
+  const logsStickToBottomRef = useRef(true);
   const marketAutoSyncTriggeredRef = useRef(false);
   const previousViewRef = useRef(view);
   const dictionary = dictionaries[language];
@@ -307,6 +533,57 @@ export default function App() {
     { value: 'en', label: labels.english },
     { value: 'ru', label: labels.russian },
   ];
+  const proCopy = getProCopy(language);
+  const proScopePresets: ProScopePreset[] =
+    language === 'ru'
+      ? [
+          {
+            id: 'reader',
+            label: 'Reader',
+            scopes: ['pro:read'],
+            description: 'Только просмотр Pro API и token activity',
+          },
+          {
+            id: 'operator',
+            label: 'Operator',
+            scopes: ['pro:read', 'pro:write'],
+            description: 'Рабочие операции без полного admin-доступа',
+          },
+          {
+            id: 'admin',
+            label: 'Admin',
+            scopes: ['pro:admin'],
+            description: 'Полный доступ ко всем Pro операциям',
+          },
+        ]
+      : [
+          {
+            id: 'reader',
+            label: 'Reader',
+            scopes: ['pro:read'],
+            description: 'Read-only access to Pro API and token activity',
+          },
+          {
+            id: 'operator',
+            label: 'Operator',
+            scopes: ['pro:read', 'pro:write'],
+            description: 'Operational access without full admin rights',
+          },
+          {
+            id: 'admin',
+            label: 'Admin',
+            scopes: ['pro:admin'],
+            description: 'Full access to all Pro operations',
+          },
+        ];
+  const policyBoxIdentityAvailable = Boolean(proPolicyBoxConfig?.enabled && proPolicyBoxConfig?.configured);
+
+  function defaultProjectForm(): ProjectFormState {
+    return {
+      ...emptyProjectForm,
+      identity_verification_enabled: policyBoxIdentityAvailable,
+    };
+  }
   const viewLoadingFallback = (
     <div className="flex min-h-[40vh] items-center justify-center rounded-2xl border border-border bg-card/50">
       <div className="text-sm text-muted-foreground">{messages.loadingProjects}</div>
@@ -317,15 +594,31 @@ export default function App() {
     { value: '1h', label: labels.lastHour },
     { value: '24h', label: labels.last24Hours },
   ];
+  const hasProAccess =
+    editionMeta.capabilities.includes('auth') ||
+    editionMeta.capabilities.includes('agent_tokens');
+  const isProEdition = editionMeta.capabilities.includes('auth');
   const navigationItems = [
     { id: 'projects' as const, label: labels.projects, icon: FolderKanban },
+    { id: 'cli' as const, label: 'CLI', icon: Terminal },
     { id: 'knowledge' as const, label: labels.knowledgeBase, icon: Database },
     { id: 'market' as const, label: labels.market, icon: ShoppingBag },
     { id: 'logs' as const, label: labels.logs, icon: TextSearch },
+    ...(hasProAccess ? [{ id: 'settings' as const, label: proCopy.nav, icon: Shield }] : []),
   ];
 
   const selectedProject =
     projects.find((project) => project.project_id === selectedProjectId) ?? null;
+  const selectedProjectForProjectsView = selectedProject
+    ? {
+        ...selectedProject,
+        bearer_auth_enabled: Boolean((selectedProject as ProjectStatus & Record<string, unknown>).bearer_auth_enabled),
+        bearer_token: String((selectedProject as ProjectStatus & Record<string, unknown>).bearer_token ?? ''),
+        oauth_redirect_uri: String((selectedProject as ProjectStatus & Record<string, unknown>).oauth_redirect_uri ?? ''),
+        llama_cpp_model_path: String((selectedProject as ProjectStatus & Record<string, unknown>).llama_cpp_model_path ?? ''),
+        llama_cpp_model_name: String((selectedProject as ProjectStatus & Record<string, unknown>).llama_cpp_model_name ?? ''),
+      }
+    : null;
   const alternativeConnectURLs = (selectedProject?.connect_urls ?? []).filter(
     (url) => url !== selectedProject?.connect_url,
   );
@@ -376,24 +669,107 @@ export default function App() {
     name: project.name,
     root_path: project.root_path,
   }));
+  const ragBoxProjects = projects.map((project) => ({
+    project_id: project.project_id,
+    name: project.name,
+  }));
+  const ragBoxProjectKnowledgeBases = projects.flatMap((project) =>
+    (project.rag_collections ?? []).map((collection) => ({
+      project_id: project.project_id,
+      collection_id: collection.collection_id,
+      name: collection.name,
+    })),
+  );
   const shouldShowOllamaControls = ollamaStatus?.installed ?? false;
-  const shouldShowLlamaCppControls = llamaCppStatus?.installed ?? false;
   const canLaunchOllama =
     !!selectedOllamaModel &&
     (ollamaStatus?.models.length ?? 0) > 0;
-  const canLaunchLlamaCpp =
-    !!llamaCppStatus?.installed &&
-    !!(
-      selectedLlamaCppModelPath.trim() ||
-      selectedProject?.llama_cpp_model_path?.trim() ||
-      llamaCppStatus?.model_path?.trim()
-    );
+  const shouldShowLlamaCppControls = llamaCppStatus?.installed ?? false;
+  const canLaunchLlamaCpp = !!llamaCppStatus?.installed && !!(selectedLlamaCppModelPath.trim() || selectedProject?.llama_cpp_model_path?.trim() || llamaCppStatus?.model_path?.trim());
   const requestTrendValues = logMetrics?.trends.map((entry) => entry.request_count) ?? [];
   const errorTrendValues = logMetrics?.trends.map((entry) => entry.error_count) ?? [];
   const avgLatencyTrendValues = logMetrics?.trends.map((entry) => entry.avg_latency_ms) ?? [];
   const p95LatencyTrendValues = logMetrics?.trends.map((entry) => entry.p95_latency_ms) ?? [];
-  const visibleLogs = logs;
-  const activeView = view;
+  const proAuditActions = new Set([
+    'token_created',
+    'token_revoked',
+    'token_used',
+    'session_created',
+    'session_used',
+    'session_revoked',
+    'user_created',
+    'user_roles_updated',
+    'user_enabled',
+    'user_disabled',
+    'user_deleted',
+    'local_login',
+    'sso_login',
+  ]);
+  const isProAuditLog = (entry: AuditLog) =>
+    proAuditActions.has(entry.action) || entry.action.startsWith('policybox:');
+  const proActivityCopy =
+    language === 'ru'
+      ? {
+          title: 'Pro activity',
+          subtitle: 'События токенов, сессий, защищенного Pro API и подключенного PolicyBox',
+          all: 'Вся активность',
+          proOnly: 'Pro + PolicyBox',
+          policyOnly: 'Только PolicyBox',
+          created: 'Создано',
+          used: 'Использовано',
+          revoked: 'Отозвано',
+          policy: 'Policy events',
+          empty: 'Pro/PolicyBox activity пока нет.',
+          logFeedTab: 'Логи',
+          analyticsTab: 'Аналитика',
+          exportLogs: 'Выгрузить лог',
+          clearLogs: 'Очистить историю',
+          clearLogsConfirm: filteredLogsProject?.name
+            ? `Удалить всю историю проекта «${filteredLogsProject.name}»? Другие проекты не будут затронуты.`
+            : 'Удалить всю историю логов? Это действие нельзя отменить.',
+          actor: 'Кто',
+          requestIP: 'IP',
+          autoScrollPinned: 'Автопрокрутка включена',
+          autoScrollDetached: 'Просмотр истории',
+        }
+      : {
+          title: 'Pro activity',
+          subtitle: 'Agent token, session, protected Pro API, and connected PolicyBox events',
+          all: 'All activity',
+          proOnly: 'Pro + PolicyBox',
+          policyOnly: 'PolicyBox only',
+          created: 'Created',
+          used: 'Used',
+          revoked: 'Revoked',
+          policy: 'Policy events',
+          empty: 'No Pro/PolicyBox activity yet.',
+          logFeedTab: 'Logs',
+          analyticsTab: 'Analytics',
+          exportLogs: 'Export log',
+          clearLogs: 'Clear history',
+          clearLogsConfirm: filteredLogsProject?.name
+            ? `Delete the complete history for “${filteredLogsProject.name}”? Other projects will not be affected.`
+            : 'Delete the complete log history? This cannot be undone.',
+          actor: 'Actor',
+          requestIP: 'IP',
+          autoScrollPinned: 'Auto-scroll on',
+          autoScrollDetached: 'History mode',
+        };
+  const policyActivityLogs = logs.filter((entry) => entry.action.startsWith('policybox:'));
+  const proActivityLogs = logs.filter(isProAuditLog);
+  const visibleLogs =
+    logsFilterMode === 'pro' ? proActivityLogs : logsFilterMode === 'policy' ? policyActivityLogs : logs;
+  const proCreatedCount = proActivityLogs.filter((entry) => entry.action === 'token_created' || entry.action === 'session_created').length;
+  const proUsedCount = proActivityLogs.filter((entry) => entry.action === 'token_used' || entry.action === 'session_used' || entry.action === 'local_login' || entry.action === 'sso_login').length;
+  const proRevokedCount = proActivityLogs.filter((entry) => entry.action === 'token_revoked' || entry.action === 'session_revoked').length;
+  const policyEventCount = policyActivityLogs.length;
+  const canWritePro = hasProScope(proPrincipal, 'pro:write');
+  const canAdminPro = hasProScope(proPrincipal, 'pro:admin');
+  const proAuthLocked = isProEdition && !proPrincipal;
+  const activeView = proAuthLocked ? 'settings' : view;
+  const visibleNavigationItems = proAuthLocked
+    ? navigationItems.filter((item) => item.id === 'settings')
+    : navigationItems;
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -403,6 +779,41 @@ export default function App() {
     window.localStorage.setItem(languageStorageKey, language);
     document.documentElement.lang = language;
   }, [language]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    setProAuthToken(window.localStorage.getItem(proAuthStorageKey) ?? '');
+
+    const url = new URL(window.location.href);
+    const sessionToken = url.searchParams.get('pro_session_token');
+    const ssoError = url.searchParams.get('pro_sso_error');
+    const targetView = url.searchParams.get('pro_view');
+    if (sessionToken) {
+      updateAndPersistProAuthToken(sessionToken);
+      if (targetView === 'pro' || targetView === 'settings') {
+        setView('settings');
+      }
+      url.searchParams.delete('pro_session_token');
+      url.searchParams.delete('pro_view');
+      window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+    }
+    if (ssoError) {
+      if (targetView === 'pro' || targetView === 'settings') {
+        setView('settings');
+      }
+      toast.error(ssoError);
+      url.searchParams.delete('pro_sso_error');
+      url.searchParams.delete('pro_view');
+      window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+    }
+  }, []);
+
+  useEffect(() => {
+    setAPIAuthToken(proAuthToken);
+  }, [proAuthToken]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -451,8 +862,12 @@ export default function App() {
   }, [selectedLogsProjectId]);
 
   useEffect(() => {
+    void loadEditionMeta();
+  }, []);
+
+  useEffect(() => {
+    if (!proAuthToken.trim() || !proPrincipal) return;
     void Promise.all([
-      loadEditionMeta(),
       loadProjects(true),
       loadRAGCollections(),
       loadCatalog(true),
@@ -460,7 +875,102 @@ export default function App() {
       loadOllamaStatus(),
       loadLlamaCppStatus(),
     ]);
-  }, []);
+  }, [proAuthToken, proPrincipal]);
+
+  useEffect(() => {
+    if (!hasProAccess || activeView !== 'settings' || !proAuthToken.trim() || proPrincipal) {
+      return;
+    }
+
+    void loadProSession(undefined, { restoring: true });
+  }, [hasProAccess, activeView, proAuthToken, proPrincipal]);
+
+  useEffect(() => {
+    if (!proStorageConfig) {
+      return;
+    }
+
+    setProStorageOperationalBackend(proStorageConfig.operational_backend ?? 'sqlite');
+    setProStoragePostgresHost(proStorageConfig.operational_postgres_host ?? '');
+    setProStoragePostgresPort(String(proStorageConfig.operational_postgres_port ?? 5432));
+    setProStoragePostgresDatabase(proStorageConfig.operational_postgres_database ?? '');
+    setProStoragePostgresSchema(proStorageConfig.operational_postgres_schema ?? 'public');
+    setProStoragePostgresUsername(proStorageConfig.operational_postgres_username ?? '');
+    setProStoragePostgresPassword('');
+    setProStorageClearPostgresDSN(false);
+    setProStorageLogsBackend(proStorageConfig.logs_backend ?? 'operational');
+    setProStorageClickHouseURL(proStorageConfig.clickhouse_url ?? '');
+    setProStorageClickHouseDatabase(proStorageConfig.clickhouse_database ?? '');
+    setProStorageClickHouseUsername(proStorageConfig.clickhouse_username ?? '');
+    setProStorageClickHousePassword('');
+    setProStorageClearClickHousePassword(false);
+    setProStorageElasticsearchURL(proStorageConfig.elasticsearch_url ?? '');
+    setProStorageElasticsearchUsername(proStorageConfig.elasticsearch_username ?? '');
+    setProStorageElasticsearchPassword('');
+    setProStorageElasticsearchIndex(proStorageConfig.elasticsearch_index ?? '');
+    setProStorageClearElasticsearchPassword(false);
+  }, [proStorageConfig]);
+
+  useEffect(() => {
+    if (!proPolicyBoxConfig) {
+      return;
+    }
+
+    setProPolicyBoxBaseURL(proPolicyBoxConfig.base_url ?? '');
+    setProPolicyBoxAdminToken('');
+  }, [proPolicyBoxConfig]);
+
+  useEffect(() => {
+    if (!proRagBoxConfig) {
+      return;
+    }
+
+    setProRagBoxBaseURL(proRagBoxConfig.base_url ?? '');
+    setProRagBoxAdminToken('');
+    setProRagBoxClearAdminToken(false);
+    setProRagBoxTimeoutSeconds(String(proRagBoxConfig.request_timeout_seconds || 30));
+    setProRagBoxWriteMode(proRagBoxConfig.write_mode ?? 'dual_write');
+    setProRagBoxSearchMode(proRagBoxConfig.search_mode ?? 'hybrid');
+  }, [proRagBoxConfig]);
+
+  useEffect(() => {
+    if (!hasProAccess || activeView !== 'settings' || !proAuthToken.trim() || !proPrincipal) {
+      return;
+    }
+
+    void loadProStorageContext().catch(() => {});
+  }, [hasProAccess, activeView, proAuthToken, proPrincipal]);
+
+  useEffect(() => {
+    if (!hasProAccess || activeView !== 'settings' || !proAuthToken.trim() || !proPrincipal || !proRagBoxConfig?.admin_configured) {
+      return;
+    }
+
+    void loadProRagBoxVectorConnections();
+    void loadProRagBoxWorkspaces();
+  }, [hasProAccess, activeView, proAuthToken, proPrincipal, proRagBoxConfig?.admin_configured]);
+
+  useEffect(() => {
+    if (!hasProAccess) {
+      setProSSOConfig(null);
+      return;
+    }
+
+    void (async () => {
+      try {
+        const config = await apiRequest<ProSSOConfig>('/api/pro/sso/config', messages.requestFailed);
+        setProSSOConfig(config);
+      } catch {
+        setProSSOConfig(null);
+      }
+    })();
+  }, [hasProAccess]);
+
+  useEffect(() => {
+    if (!hasProAccess && view === 'settings') {
+      setView('projects');
+    }
+  }, [hasProAccess, view]);
 
   useEffect(() => {
     if (!ollamaStatus?.installed) {
@@ -479,33 +989,11 @@ export default function App() {
   }, [ollamaStatus, selectedOllamaModel]);
 
   useEffect(() => {
-    if (!selectedProject) {
-      return;
-    }
-
-    setSelectedLlamaCppModelPath(selectedProject.llama_cpp_model_path || llamaCppStatus?.model_path || '');
-    setSelectedLlamaCppModelName(
-      selectedProject.llama_cpp_model_name ||
-      modelNameFromPath(selectedProject.llama_cpp_model_path || '') ||
-      llamaCppStatus?.model_name ||
-      modelNameFromPath(llamaCppStatus?.model_path || ''),
-    );
-  }, [selectedProject?.project_id, selectedProject?.llama_cpp_model_path, selectedProject?.llama_cpp_model_name, llamaCppStatus?.model_path, llamaCppStatus?.model_name]);
-
-  useEffect(() => {
     if (view === 'logs') {
       void loadLogs();
       void loadLogMetrics();
     }
   }, [view, selectedLogsProjectId, metricsWindow]);
-
-  useEffect(() => {
-    if (!launchProjectOpen) {
-      return;
-    }
-
-    void Promise.all([loadOllamaStatus({ silent: true }), loadLlamaCppStatus({ silent: true })]);
-  }, [launchProjectOpen]);
 
   useEffect(() => {
     const previousView = previousViewRef.current;
@@ -550,8 +1038,28 @@ export default function App() {
       return;
     }
 
-    logsViewportRef.current.scrollTop = logsViewportRef.current.scrollHeight
+    if (!logsStickToBottomRef.current) {
+      return;
+    }
+
+    logsViewportRef.current.scrollTop = logsViewportRef.current.scrollHeight;
   }, [logs, view]);
+
+  useEffect(() => {
+    if (view === 'logs') {
+      logsStickToBottomRef.current = true;
+    }
+  }, [view, selectedLogsProjectId, logsFilterMode]);
+
+  function handleLogsViewportScroll() {
+    const viewport = logsViewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    const distanceToBottom =
+      viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    logsStickToBottomRef.current = distanceToBottom <= 32;
+  }
 
   useEffect(() => {
     if (projects.length === 0) {
@@ -595,9 +1103,9 @@ export default function App() {
       setEditionMeta(meta);
     } catch {
       setEditionMeta({
-        edition_id: 'free',
+        edition_id: 'mcpbox',
         edition_name: 'MCPBox',
-        capabilities: [],
+        capabilities: ['auth'],
       });
     }
   }
@@ -618,8 +1126,76 @@ export default function App() {
         }
         return next;
       });
+      if (hasProAccess && proAuthToken.trim()) {
+        void loadProRagBoxKnowledgeBaseStatus();
+      }
     } catch (loadError) {
       setActionError(loadError instanceof Error ? loadError.message : messages.loadProjectsError);
+    }
+  }
+
+  async function loadProRagBoxKnowledgeBaseStatus() {
+    if (!hasProAccess || !proAuthToken.trim()) {
+      setProRagBoxKnowledgeBaseStatus({});
+      return;
+    }
+    try {
+      const response = await proAPIRequest<{ items: ProRagBoxKnowledgeBaseStatus[] }>(
+        proAuthToken,
+        '/api/pro/ragbox/knowledge-bases',
+        messages.requestFailed,
+      );
+      setProRagBoxKnowledgeBaseStatus(
+        Object.fromEntries(
+          response.items.map((item) => [item.collection.collection_id, item] as const),
+        ),
+      );
+    } catch {
+      setProRagBoxKnowledgeBaseStatus({});
+    }
+  }
+
+  async function loadProRagBoxVectorConnections() {
+    if (!hasProAccess || !proAuthToken.trim() || !proRagBoxConfig?.admin_configured) {
+      setProRagBoxVectorConnections([]);
+      return;
+    }
+
+    setProRagBoxLoadingVectorConnections(true);
+    try {
+      const response = await proAPIRequest<ProRagBoxVectorConnectionListResponse>(
+        proAuthToken,
+        '/api/pro/ragbox/admin/vector-connections',
+        messages.requestFailed,
+      );
+      setProRagBoxBuiltinFallbackBackend(response.builtin_fallback_backend || 'sqlite');
+      setProRagBoxVectorConnections(response.items ?? []);
+    } catch (loadError) {
+      setProRagBoxVectorConnections([]);
+      toast.error(loadError instanceof Error ? loadError.message : proCopy.ragboxVectorConnectionsLoadFailed);
+    } finally {
+      setProRagBoxLoadingVectorConnections(false);
+    }
+  }
+
+  async function loadProRagBoxWorkspaces() {
+    if (!hasProAccess || !proAuthToken.trim() || !proRagBoxConfig?.admin_configured) {
+      setProRagBoxWorkspaces([]);
+      return;
+    }
+
+    setProRagBoxLoadingWorkspaces(true);
+    try {
+      const response = await proAPIRequest<ProRagBoxWorkspaceListResponse>(
+        proAuthToken,
+        '/api/pro/ragbox/admin/workspaces',
+        messages.requestFailed,
+      );
+      setProRagBoxWorkspaces(response.items ?? []);
+    } catch {
+      setProRagBoxWorkspaces([]);
+    } finally {
+      setProRagBoxLoadingWorkspaces(false);
     }
   }
 
@@ -634,13 +1210,62 @@ export default function App() {
         `/api/logs${query}`,
         messages.requestFailed,
       );
-      setLogs(nextLogs);
+      let mergedLogs = nextLogs;
+      if (selectedLogsProjectId === null && proAuthToken.trim() && proPolicyBoxConfig?.enabled && proPolicyBoxConfig?.admin_configured) {
+        try {
+          const response = await proAPIRequest<{ items: ProPolicyBoxAuditEvent[] }>(
+            proAuthToken,
+            '/api/pro/policybox/audit',
+            messages.requestFailed,
+          );
+          const mappedLogs: AuditLog[] = response.items.map((event, index) => ({
+            id: -1 * (index + 1),
+            project_id: null,
+            server_id: null,
+            action: `policybox:${event.type}`,
+            actor: event.actor_id ?? 'policybox',
+            detail: JSON.stringify({
+              target_id: event.target_id ?? '',
+              metadata: event.metadata ?? {},
+            }),
+            created_at: event.occurred_at,
+          }));
+          mergedLogs = [...nextLogs, ...mappedLogs].sort(
+            (left, right) => new Date(left.created_at).getTime() - new Date(right.created_at).getTime(),
+          );
+        } catch (policyAuditError) {
+          console.warn('Failed to load PolicyBox audit logs:', policyAuditError);
+        }
+      } else {
+        mergedLogs = [...nextLogs].sort(
+          (left, right) => new Date(left.created_at).getTime() - new Date(right.created_at).getTime(),
+        );
+      }
+      setLogs(mergedLogs);
     } catch (loadError) {
       setActionError(loadError instanceof Error ? loadError.message : messages.loadProjectsError);
     } finally {
       if (!options?.silent) {
         setLogsLoading(false);
       }
+    }
+  }
+
+  async function clearLogs() {
+    setLogsLoading(true);
+    setActionError(null);
+    try {
+      const query = selectedLogsProjectId !== null ? `?project_id=${selectedLogsProjectId}` : '';
+      await apiRequest<{ deleted: number }>(`/api/logs${query}`, messages.requestFailed, {
+        method: 'DELETE',
+      });
+      await loadLogs({ silent: true });
+      await loadLogMetrics({ silent: true });
+      toast.success(language === 'ru' ? 'История очищена' : 'History cleared');
+    } catch (clearError) {
+      setActionError(clearError instanceof Error ? clearError.message : messages.requestFailed);
+    } finally {
+      setLogsLoading(false);
     }
   }
 
@@ -698,8 +1323,21 @@ export default function App() {
     }
   }
 
+  useEffect(() => {
+    if (!selectedProject) {
+      return;
+    }
+
+    setSelectedLlamaCppModelPath(selectedProject.llama_cpp_model_path || llamaCppStatus?.model_path || '');
+    setSelectedLlamaCppModelName(
+      selectedProject.llama_cpp_model_name ||
+      modelNameFromPath(selectedProject.llama_cpp_model_path || '') ||
+      llamaCppStatus?.model_name ||
+      modelNameFromPath(llamaCppStatus?.model_path || ''),
+    );
+  }, [selectedProject?.project_id, selectedProject?.llama_cpp_model_path, selectedProject?.llama_cpp_model_name, llamaCppStatus?.model_path, llamaCppStatus?.model_name]);
+
   const loadOllamaStatus = hookLoadOllamaStatus;
-  const loadLlamaCppStatus = hookLoadLlamaCppStatus;
 
   async function loadInstalledPackages() {
     try {
@@ -711,6 +1349,1049 @@ export default function App() {
     } catch (loadError) {
       setActionError(loadError instanceof Error ? loadError.message : messages.loadPackagesError);
     }
+  }
+
+  async function loadProStorageContext(tokenOverride?: string) {
+    const activeToken = (tokenOverride ?? proAuthToken).trim();
+    if (!activeToken) {
+      setProStorageConfig(null);
+      setProStorageRuntimeStatus(null);
+      setProStorageShadowStatus(null);
+      return;
+    }
+
+    try {
+      const [config, runtimeStatus, shadowStatus] = await Promise.all([
+        proAPIRequest<ProStorageConfig>(activeToken, '/api/pro/storage/config', messages.requestFailed),
+        proAPIRequest<ProStorageRuntimeStatus>(activeToken, '/api/pro/storage/runtime-status', messages.requestFailed),
+        proAPIRequest<ProStorageShadowStatus>(activeToken, '/api/pro/storage/shadow-status', messages.requestFailed),
+      ]);
+      setProStorageConfig(config);
+      setProStorageRuntimeStatus(runtimeStatus);
+      setProStorageShadowStatus(shadowStatus);
+    } catch (loadError) {
+      setProStorageConfig(null);
+      setProStorageRuntimeStatus(null);
+      setProStorageShadowStatus(null);
+      throw loadError;
+    }
+  }
+
+  async function loadProSession(tokenOverride?: string, options?: { restoring?: boolean }) {
+    const activeToken = (tokenOverride ?? proAuthToken).trim();
+    if (!activeToken) {
+      setProPrincipal(null);
+      setProTokens([]);
+      setProUsers([]);
+      setProRoles([]);
+      setProSessions([]);
+      setProStorageConfig(null);
+      setProStorageRuntimeStatus(null);
+      setProStorageShadowStatus(null);
+      setProPolicyBoxConfig(null);
+      setProRagBoxConfig(null);
+      return;
+    }
+
+    setProLoading(true);
+    try {
+      // Validate a saved session before loading any protected application data.
+      const principal = await proAPIRequest<ProPrincipal>(activeToken, '/api/pro/auth/me', messages.requestFailed);
+      const [tokens, users, roles, sessions] = await Promise.all([
+        proAPIRequest<ProTokenRecord[]>(activeToken, '/api/pro/tokens', messages.requestFailed),
+        proAPIRequest<ProUserRecord[]>(activeToken, '/api/pro/users', messages.requestFailed),
+        proAPIRequest<ProRoleRecord[]>(activeToken, '/api/pro/roles', messages.requestFailed),
+        proAPIRequest<ProSessionRecord[]>(activeToken, '/api/pro/sessions', messages.requestFailed),
+      ]);
+      setProPrincipal(principal);
+      setProTokens(tokens);
+      setProUsers(users);
+      setProRoles(roles);
+      setProSessions(sessions);
+
+      const [policyboxResult, ragboxResult] = await Promise.allSettled([
+        proAPIRequest<ProPolicyBoxConfig>(activeToken, '/api/pro/policybox/config', messages.requestFailed),
+        proAPIRequest<ProRagBoxConfig>(activeToken, '/api/pro/ragbox/config', messages.requestFailed),
+      ]);
+
+      if (policyboxResult.status === 'fulfilled') {
+        setProPolicyBoxConfig(policyboxResult.value);
+      } else {
+        setProPolicyBoxConfig(null);
+        setActionError(policyboxResult.reason instanceof Error ? policyboxResult.reason.message : proCopy.policyboxSaveFailed);
+      }
+
+      if (ragboxResult.status === 'fulfilled') {
+        setProRagBoxConfig(ragboxResult.value);
+        void loadProRagBoxKnowledgeBaseStatus();
+        if (ragboxResult.value.admin_configured) {
+          void loadProRagBoxVectorConnections();
+          void loadProRagBoxWorkspaces();
+        } else {
+          setProRagBoxVectorConnections([]);
+          setProRagBoxWorkspaces([]);
+        }
+      } else {
+        setProRagBoxConfig(null);
+        setProRagBoxVectorConnections([]);
+        setProRagBoxWorkspaces([]);
+        setActionError(ragboxResult.reason instanceof Error ? ragboxResult.reason.message : proCopy.ragboxSaveFailed);
+      }
+
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(proAuthStorageKey, activeToken);
+      }
+    } catch (loadError) {
+      const unauthorized = loadError instanceof APIRequestError && loadError.status === 401;
+      resetProAccess(unauthorized);
+      if (unauthorized) {
+        setError(null);
+        setActionError(null);
+      }
+      if (!options?.restoring || !unauthorized) {
+        toast.error(loadError instanceof Error ? loadError.message : proCopy.loadTokensFailed);
+      }
+    } finally {
+      setProLoading(false);
+    }
+  }
+
+  function resetProAccess(clearToken = false) {
+    setProPrincipal(null);
+    setProTokens([]);
+    setProUsers([]);
+    setProRoles([]);
+    setProSessions([]);
+    setProStorageConfig(null);
+    setProStorageRuntimeStatus(null);
+    setProStorageShadowStatus(null);
+    setProStoragePostgresHost('');
+    setProStoragePostgresPort('5432');
+    setProStoragePostgresDatabase('');
+    setProStoragePostgresSchema('public');
+    setProStoragePostgresUsername('');
+    setProStoragePostgresPassword('');
+    setProStorageClearPostgresDSN(false);
+    setProStorageClickHousePassword('');
+    setProStorageClearClickHousePassword(false);
+    setProStorageElasticsearchPassword('');
+    setProStorageClearElasticsearchPassword(false);
+    setProPolicyBoxConfig(null);
+    setProPolicyBoxAdminToken('');
+    setProRagBoxConfig(null);
+    setProRagBoxAdminToken('');
+    setProRagBoxClearAdminToken(false);
+    setProRagBoxVectorConnections([]);
+    setProRagBoxWorkspaces([]);
+    setProRagBoxVectorConnectionForm(emptyProRagBoxVectorConnectionForm);
+    setProRagBoxKnowledgeBaseStatus({});
+    setProCreatedTokenValue(null);
+    setProCreatedSessionToken(null);
+    setProLoginPassword('');
+    setProAuthBootstrapping(false);
+    if (clearToken) {
+      updateAndPersistProAuthToken('');
+    }
+  }
+
+  async function connectProToken() {
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    setProLoading(true);
+    try {
+      const principal = await proAPIRequest<ProPrincipal>(
+        proAuthToken,
+        '/api/pro/auth/me',
+        messages.requestFailed,
+      );
+      setProPrincipal(principal);
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(proAuthStorageKey, proAuthToken.trim());
+      }
+      await loadProSession(proAuthToken);
+    } catch (verifyError) {
+      toast.error(verifyError instanceof Error ? verifyError.message : proCopy.verifyFailed);
+    } finally {
+      setProLoading(false);
+    }
+  }
+
+  async function loginProLocal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    setProLocalLoginLoading(true);
+    setProAuthBootstrapping(true);
+    try {
+      const payload = await apiRequest<ProLocalLoginResponse>('/api/pro/login', messages.requestFailed, {
+        method: 'POST',
+        body: JSON.stringify({
+          email: proLoginEmail,
+          password: proLoginPassword,
+          expires_in_days: 30,
+        }),
+      });
+      setProPrincipal({
+        name: payload.user.display_name,
+        scopes: payload.user.scopes,
+        roles: payload.user.roles,
+        user_id: payload.user.id,
+        session_id: payload.session?.id,
+        auth_method: payload.session?.auth_method ?? 'local_password',
+        is_bootstrap: payload.user.is_bootstrap,
+      });
+      updateAndPersistProAuthToken(payload.token);
+      setProLoginPassword('');
+      setView('settings');
+      await loadProSession(payload.token);
+    } catch (loginError) {
+      setProPrincipal(null);
+      toast.error(loginError instanceof Error ? loginError.message : proCopy.verifyFailed);
+    } finally {
+      setProAuthBootstrapping(false);
+      setProLocalLoginLoading(false);
+    }
+  }
+
+  function startProSSOSignIn() {
+    if (typeof window === 'undefined' || !proSSOConfig?.enabled || !proSSOConfig.start_url) {
+      return;
+    }
+    const url = new URL(proSSOConfig.start_url, window.location.origin);
+    url.searchParams.set('return_to', '/?pro_view=settings');
+    window.location.assign(url.toString());
+  }
+
+  async function createProToken(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    setProCreatingToken(true);
+    try {
+      const payload = await proAPIRequest<CreateProTokenResponse>(
+        proAuthToken,
+        '/api/pro/tokens',
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            name: proNewTokenName,
+            scopes: proNewTokenScopes
+              .split(',')
+              .map((scope) => scope.trim())
+              .filter(Boolean),
+            expires_in_days: Number(proNewTokenExpiresDays || '0'),
+          }),
+        },
+      );
+      setProCreatedTokenValue(payload.token);
+      setProCreateOpen(false);
+      setProNewTokenName('');
+      setProNewTokenScopes('pro:read, pro:write');
+      setProNewTokenExpiresDays('30');
+      await loadProSession();
+    } catch (createError) {
+      toast.error(createError instanceof Error ? createError.message : proCopy.createFailed);
+    } finally {
+      setProCreatingToken(false);
+    }
+  }
+
+  async function revokeProToken(tokenId: number) {
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    setProRevokingTokenId(tokenId);
+    try {
+      await proAPIRequest(
+        proAuthToken,
+        `/api/pro/tokens/${tokenId}`,
+        messages.requestFailed,
+        { method: 'DELETE' },
+      );
+      await loadProSession();
+    } catch (revokeError) {
+      toast.error(revokeError instanceof Error ? revokeError.message : proCopy.revokeFailed);
+    } finally {
+      setProRevokingTokenId(null);
+    }
+  }
+
+  async function createProUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    setProCreatingUser(true);
+    try {
+      await proAPIRequest<CreateProUserResponse>(
+        proAuthToken,
+        '/api/pro/users',
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            display_name: proNewUserName,
+            email: proNewUserEmail,
+            role_names: proNewUserRoles
+              .split(',')
+              .map((role) => role.trim())
+              .filter(Boolean),
+          }),
+        },
+      );
+      setProCreateUserOpen(false);
+      setProNewUserName('');
+      setProNewUserEmail('');
+      setProNewUserRoles('reader');
+      await loadProSession();
+    } catch (createError) {
+      toast.error(createError instanceof Error ? createError.message : proCopy.createUserFailed);
+    } finally {
+      setProCreatingUser(false);
+    }
+  }
+
+  function startEditProUser(user: ProUserRecord) {
+    setProEditingUserId(String(user.id));
+    setProEditingUserName(user.display_name);
+    setProEditingUserRoles(user.roles.join(', '));
+    setProEditUserOpen(true);
+  }
+
+  function startProPasswordChange(user: ProUserRecord) {
+    setProPasswordUserId(String(user.id));
+    setProPasswordUserName(user.display_name);
+    setProPasswordUserPassword('');
+    setProPasswordUserPasswordConfirm('');
+    setProPasswordUserOpen(true);
+  }
+
+  async function updateProUserRoles(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    setProUpdatingUserRoles(true);
+    try {
+      await proAPIRequest<UpdateProUserResponse>(
+        proAuthToken,
+        `/api/pro/users/${Number(proEditingUserId || '0')}`,
+        messages.requestFailed,
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            role_names: proEditingUserRoles
+              .split(',')
+              .map((role) => role.trim())
+              .filter(Boolean),
+          }),
+        },
+      );
+      setProEditUserOpen(false);
+      setProEditingUserId('');
+      setProEditingUserName('');
+      setProEditingUserRoles('reader');
+      await loadProSession();
+    } catch (updateError) {
+      toast.error(updateError instanceof Error ? updateError.message : proCopy.updateUserRolesFailed);
+    } finally {
+      setProUpdatingUserRoles(false);
+    }
+  }
+
+  async function updateProUserPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+    if (proPasswordUserPassword !== proPasswordUserPasswordConfirm) {
+      toast.error(proCopy.passwordsDoNotMatch);
+      return;
+    }
+
+    setProUpdatingUserPassword(true);
+    try {
+      await proAPIRequest<UpdateProUserPasswordResponse>(
+        proAuthToken,
+        `/api/pro/users/${Number(proPasswordUserId || '0')}/password`,
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            password: proPasswordUserPassword,
+          }),
+        },
+      );
+      setProPasswordUserOpen(false);
+      setProPasswordUserId('');
+      setProPasswordUserName('');
+      setProPasswordUserPassword('');
+      setProPasswordUserPasswordConfirm('');
+      toast.success(proCopy.passwordChanged);
+      await loadProSession();
+    } catch (updateError) {
+      toast.error(updateError instanceof Error ? updateError.message : proCopy.updateUserPasswordFailed);
+    } finally {
+      setProUpdatingUserPassword(false);
+    }
+  }
+
+  async function disableProUser(user: ProUserRecord) {
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+    if (!window.confirm(proCopy.disableUserConfirm)) {
+      return;
+    }
+
+    setProDisablingUserId(user.id);
+    try {
+      await proAPIRequest<DisableProUserResponse>(
+        proAuthToken,
+        `/api/pro/users/${user.id}/disable`,
+        messages.requestFailed,
+        { method: 'POST' },
+      );
+      if (proPrincipal?.user_id === user.id) {
+        setProCreatedSessionToken(null);
+      }
+      await loadProSession();
+    } catch (disableError) {
+      toast.error(disableError instanceof Error ? disableError.message : proCopy.disableUserFailed);
+    } finally {
+      setProDisablingUserId(null);
+    }
+  }
+
+  async function enableProUser(user: ProUserRecord) {
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+    if (!window.confirm(proCopy.enableUserConfirm)) {
+      return;
+    }
+
+    setProEnablingUserId(user.id);
+    try {
+      await proAPIRequest<EnableProUserResponse>(
+        proAuthToken,
+        `/api/pro/users/${user.id}/enable`,
+        messages.requestFailed,
+        { method: 'POST' },
+      );
+      await loadProSession();
+    } catch (enableError) {
+      toast.error(enableError instanceof Error ? enableError.message : proCopy.enableUserFailed);
+    } finally {
+      setProEnablingUserId(null);
+    }
+  }
+
+  async function deleteProUser(user: ProUserRecord) {
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+    if (!window.confirm(proCopy.deleteUserConfirm)) {
+      return;
+    }
+
+    setProDeletingUserId(user.id);
+    try {
+      await proAPIRequest(
+        proAuthToken,
+        `/api/pro/users/${user.id}`,
+        messages.requestFailed,
+        { method: 'DELETE' },
+      );
+      if (proEditingUserId === String(user.id)) {
+        setProEditUserOpen(false);
+        setProEditingUserId('');
+        setProEditingUserName('');
+        setProEditingUserRoles('reader');
+      }
+      if (proSessionsFilterUserId === String(user.id)) {
+        setProSessionsFilterUserId('all');
+      }
+      await loadProSession();
+    } catch (deleteError) {
+      toast.error(deleteError instanceof Error ? deleteError.message : proCopy.deleteUserFailed);
+    } finally {
+      setProDeletingUserId(null);
+    }
+  }
+
+  async function createProSession(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    setProCreatingSession(true);
+    try {
+      const payload = await proAPIRequest<CreateProSessionResponse>(
+        proAuthToken,
+        '/api/pro/sessions',
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            user_id: Number(proNewSessionUserId || '0'),
+            label: proNewSessionLabel,
+            auth_method: 'local',
+            expires_in_days: Number(proNewSessionExpiresDays || '0'),
+          }),
+        },
+      );
+      setProCreatedSessionToken(payload.token);
+      setProCreateSessionOpen(false);
+      setProNewSessionUserId('');
+      setProNewSessionLabel('');
+      setProNewSessionExpiresDays('30');
+      await loadProSession();
+    } catch (createError) {
+      toast.error(createError instanceof Error ? createError.message : proCopy.createSessionFailed);
+    } finally {
+      setProCreatingSession(false);
+    }
+  }
+
+  async function revokeProSession(sessionId: number) {
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    const isCurrentSession = proPrincipal?.session_id === sessionId;
+    setProRevokingSessionId(sessionId);
+    try {
+      await proAPIRequest(
+        proAuthToken,
+        `/api/pro/sessions/${sessionId}`,
+        messages.requestFailed,
+        { method: 'DELETE' },
+      );
+      if (isCurrentSession) {
+        resetProAccess(true);
+        return;
+      }
+      await loadProSession();
+    } catch (revokeError) {
+      toast.error(revokeError instanceof Error ? revokeError.message : proCopy.revokeSessionFailed);
+    } finally {
+      setProRevokingSessionId(null);
+    }
+  }
+
+  async function revokeCurrentProSession() {
+    if (!proPrincipal?.session_id) {
+      return;
+    }
+    if (!window.confirm(proCopy.revokeCurrentSessionConfirm)) {
+      return;
+    }
+    await revokeProSession(proPrincipal.session_id);
+  }
+
+  async function saveProStorageConfig(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    const postgresFieldsChanged = (
+      proStoragePostgresHost.trim() !== (proStorageConfig?.operational_postgres_host ?? '') ||
+      (proStoragePostgresPort.trim() || '5432') !== String(proStorageConfig?.operational_postgres_port ?? 5432) ||
+      proStoragePostgresDatabase.trim() !== (proStorageConfig?.operational_postgres_database ?? '') ||
+      proStoragePostgresSchema.trim() !== (proStorageConfig?.operational_postgres_schema ?? 'public') ||
+      proStoragePostgresUsername.trim() !== (proStorageConfig?.operational_postgres_username ?? '')
+    );
+    const shouldUpdatePostgresDSN = (
+      proStorageOperationalBackend === 'postgres' && (
+        !proStorageConfig?.operational_postgres_configured ||
+        postgresFieldsChanged ||
+        proStoragePostgresPassword.trim() !== ''
+      )
+    );
+
+    if (shouldUpdatePostgresDSN && !proStoragePostgresPassword.trim()) {
+      toast.error(proCopy.storagePostgresPasswordRequired);
+      return;
+    }
+    setProStorageSaving(true);
+    try {
+      const config = await proAPIRequest<ProStorageConfig>(
+        proAuthToken,
+        '/api/pro/storage/config',
+        messages.requestFailed,
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            operational_backend: proStorageOperationalBackend,
+            postgres_host: shouldUpdatePostgresDSN ? proStoragePostgresHost : '',
+            postgres_port: shouldUpdatePostgresDSN ? (Number.parseInt(proStoragePostgresPort, 10) || 5432) : 0,
+            postgres_database: shouldUpdatePostgresDSN ? proStoragePostgresDatabase : '',
+            postgres_schema: shouldUpdatePostgresDSN ? proStoragePostgresSchema : '',
+            postgres_username: shouldUpdatePostgresDSN ? proStoragePostgresUsername : '',
+            postgres_password: shouldUpdatePostgresDSN ? proStoragePostgresPassword : '',
+            clear_postgres_dsn: proStorageClearPostgresDSN,
+            logs_backend: proStorageLogsBackend,
+            clickhouse_url: proStorageClickHouseURL,
+            clickhouse_database: proStorageClickHouseDatabase,
+            clickhouse_username: proStorageClickHouseUsername,
+            clickhouse_password: proStorageClickHousePassword,
+            clear_clickhouse_password: proStorageClearClickHousePassword,
+            elasticsearch_url: proStorageElasticsearchURL,
+            elasticsearch_username: proStorageElasticsearchUsername,
+            elasticsearch_password: proStorageElasticsearchPassword,
+            elasticsearch_index: proStorageElasticsearchIndex,
+            clear_elasticsearch_password: proStorageClearElasticsearchPassword,
+          }),
+        },
+      );
+      setProStorageConfig(config);
+      await loadProStorageContext(proAuthToken);
+      toast.success(proCopy.storageSaved);
+    } catch (saveError) {
+      toast.error(saveError instanceof Error ? saveError.message : proCopy.storageSaveFailed);
+    } finally {
+      setProStorageSaving(false);
+    }
+  }
+
+  async function saveProRagBoxConfig(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    setProRagBoxSaving(true);
+    try {
+      const config = await proAPIRequest<ProRagBoxConfig>(
+        proAuthToken,
+        '/api/pro/ragbox/config',
+        messages.requestFailed,
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            base_url: proRagBoxBaseURL,
+            admin_token: proRagBoxAdminToken,
+            clear_admin_token: proRagBoxClearAdminToken,
+            request_timeout_seconds: Number.parseInt(proRagBoxTimeoutSeconds, 10) || 30,
+            write_mode: proRagBoxWriteMode,
+            search_mode: proRagBoxSearchMode,
+          }),
+        },
+      );
+      setProRagBoxConfig(config);
+      setProRagBoxAdminToken('');
+      setProRagBoxClearAdminToken(false);
+      if (config.configured) {
+        await proAPIRequest(
+          proAuthToken,
+          '/api/pro/ragbox/knowledge-bases/sync',
+          messages.requestFailed,
+          { method: 'POST' },
+        );
+      }
+      if (config.admin_configured) {
+        await loadProRagBoxVectorConnections();
+        await loadProRagBoxWorkspaces();
+      } else {
+        setProRagBoxVectorConnections([]);
+        setProRagBoxWorkspaces([]);
+      }
+      toast.success(proCopy.ragboxSaved);
+    } catch (saveError) {
+      toast.error(saveError instanceof Error ? saveError.message : proCopy.ragboxSaveFailed);
+    } finally {
+      setProRagBoxSaving(false);
+    }
+  }
+
+  async function createProRagBoxVectorConnection(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    setProRagBoxCreatingVectorConnection(true);
+    try {
+      const backendType =
+        proRagBoxVectorConnectionForm.backend_type === 'pgvector'
+          ? 'pg_vector'
+          : proRagBoxVectorConnectionForm.backend_type === 'opensearch'
+            ? 'open_search'
+            : proRagBoxVectorConnectionForm.backend_type;
+      const payload: Record<string, unknown> = {
+        name: proRagBoxVectorConnectionForm.name.trim(),
+        backend_type: backendType,
+        description: proRagBoxVectorConnectionForm.description.trim(),
+        is_default: proRagBoxVectorConnectionForm.is_default,
+      };
+      if (proRagBoxVectorConnectionForm.backend_type === 'qdrant') {
+        const qdrantURL = `${proRagBoxVectorConnectionForm.qdrant_scheme}://${proRagBoxVectorConnectionForm.qdrant_host.trim()}:${proRagBoxVectorConnectionForm.qdrant_port.trim()}`;
+        payload.qdrant = {
+          url: qdrantURL,
+          api_key: proRagBoxVectorConnectionForm.qdrant_api_key.trim() || undefined,
+          collection_prefix: proRagBoxVectorConnectionForm.qdrant_collection_prefix.trim(),
+        };
+      }
+      if (proRagBoxVectorConnectionForm.backend_type === 'pgvector') {
+        payload.pgvector = {
+          host: proRagBoxVectorConnectionForm.pgvector_host.trim(),
+          port: Number.parseInt(proRagBoxVectorConnectionForm.pgvector_port.trim(), 10) || 5432,
+          database: proRagBoxVectorConnectionForm.pgvector_database_name.trim(),
+          username: proRagBoxVectorConnectionForm.pgvector_username.trim(),
+          password: proRagBoxVectorConnectionForm.pgvector_password,
+          schema: proRagBoxVectorConnectionForm.pgvector_schema.trim(),
+          table_prefix:
+            proRagBoxVectorConnectionForm.pgvector_table_prefix.trim() ||
+            proRagBoxVectorConnectionForm.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') ||
+            'ragbox',
+        };
+      }
+      if (!['sqlite', 'qdrant', 'pgvector'].includes(proRagBoxVectorConnectionForm.backend_type)) {
+        const rawConfig = proRagBoxVectorConnectionForm.backend_config_json.trim();
+        if (rawConfig) {
+          payload.backend_config = JSON.parse(rawConfig) as Record<string, unknown>;
+        }
+      }
+
+      await proAPIRequest(
+        proAuthToken,
+        '/api/pro/ragbox/admin/vector-connections',
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        },
+      );
+      setProRagBoxVectorConnectionForm(emptyProRagBoxVectorConnectionForm);
+      await loadProRagBoxVectorConnections();
+      await loadProRagBoxWorkspaces();
+      toast.success(proCopy.ragboxVectorConnectionCreated);
+    } catch (createError) {
+      toast.error(createError instanceof Error ? createError.message : proCopy.ragboxVectorConnectionCreateFailed);
+    } finally {
+      setProRagBoxCreatingVectorConnection(false);
+    }
+  }
+
+  async function setDefaultProRagBoxVectorConnection(connectionId: string) {
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    setProRagBoxDefaultingVectorConnectionId(connectionId);
+    try {
+      await proAPIRequest(
+        proAuthToken,
+        `/api/pro/ragbox/admin/vector-connections/${connectionId}/set-default`,
+        messages.requestFailed,
+        { method: 'POST' },
+      );
+      await loadProRagBoxVectorConnections();
+      await loadProRagBoxWorkspaces();
+      toast.success(proCopy.ragboxVectorConnectionDefaultSet);
+    } catch (saveError) {
+      toast.error(saveError instanceof Error ? saveError.message : proCopy.ragboxVectorConnectionDefaultFailed);
+    } finally {
+      setProRagBoxDefaultingVectorConnectionId(null);
+    }
+  }
+
+  async function saveProPolicyBoxConfig(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    setProPolicyBoxSaving(true);
+    try {
+      const config = await proAPIRequest<ProPolicyBoxConfig>(
+        proAuthToken,
+        '/api/pro/policybox/config',
+        messages.requestFailed,
+        {
+          method: 'PUT',
+          body: JSON.stringify({
+            base_url: proPolicyBoxBaseURL,
+            admin_token: proPolicyBoxAdminToken,
+          }),
+        },
+      );
+      setProPolicyBoxConfig(config);
+      setProPolicyBoxAdminToken('');
+      toast.success(proCopy.policyboxSaved);
+    } catch (saveError) {
+      toast.error(saveError instanceof Error ? saveError.message : proCopy.policyboxSaveFailed);
+    } finally {
+      setProPolicyBoxSaving(false);
+    }
+  }
+
+  async function issueProPolicyBoxRuntimeTicket() {
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+
+    let payload: ProPolicyBoxRuntimeTicketPayload;
+    try {
+      payload = JSON.parse(proPolicyBoxRuntimePayload) as ProPolicyBoxRuntimeTicketPayload;
+    } catch {
+      toast.error('Invalid PolicyBox runtime JSON payload');
+      return;
+    }
+
+    setProPolicyBoxIssuingTicket(true);
+    try {
+      const response = await proAPIRequest<ProPolicyBoxRuntimeTicketResponse>(
+        proAuthToken,
+        '/api/pro/policybox/runtime/ticket',
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            payload,
+          }),
+        },
+      );
+      setProPolicyBoxRuntimeTicket(response.ticket ?? '');
+      setProPolicyBoxRuntimeResponseJSON(JSON.stringify(response, null, 2));
+    } catch (saveError) {
+      toast.error(saveError instanceof Error ? saveError.message : proCopy.policyboxSaveFailed);
+    } finally {
+      setProPolicyBoxIssuingTicket(false);
+    }
+  }
+
+  async function exchangeProPolicyBoxRuntimeTicket() {
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+    if (!proPolicyBoxRuntimeTicket.trim()) {
+      toast.error('PolicyBox ticket is required');
+      return;
+    }
+
+    setProPolicyBoxExchangingTicket(true);
+    try {
+      const response = await proAPIRequest<ProPolicyBoxRuntimeTokenResponse>(
+        proAuthToken,
+        '/api/pro/policybox/runtime/exchange',
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            ticket: proPolicyBoxRuntimeTicket,
+          }),
+        },
+      );
+      setProPolicyBoxRuntimeToken(response.token ?? '');
+      setProPolicyBoxRuntimeResponseJSON(JSON.stringify(response, null, 2));
+    } catch (saveError) {
+      toast.error(saveError instanceof Error ? saveError.message : proCopy.policyboxSaveFailed);
+    } finally {
+      setProPolicyBoxExchangingTicket(false);
+    }
+  }
+
+  async function validateProPolicyBoxRuntimeToken() {
+    if (!proAuthToken.trim()) {
+      toast.error(proCopy.verifyFailed);
+      return;
+    }
+    if (!proPolicyBoxRuntimeToken.trim()) {
+      toast.error('PolicyBox runtime token is required');
+      return;
+    }
+
+    setProPolicyBoxValidatingToken(true);
+    try {
+      const response = await proAPIRequest<ProPolicyBoxRuntimeValidateResponse>(
+        proAuthToken,
+        '/api/pro/policybox/runtime/validate',
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            token: proPolicyBoxRuntimeToken,
+          }),
+        },
+      );
+      setProPolicyBoxRuntimeResponseJSON(JSON.stringify(response, null, 2));
+    } catch (saveError) {
+      toast.error(saveError instanceof Error ? saveError.message : proCopy.policyboxSaveFailed);
+    } finally {
+      setProPolicyBoxValidatingToken(false);
+    }
+  }
+
+  async function ensureRagBoxWorkspace() {
+    if (!proAuthToken.trim() || !proRagBoxBindingProjectId) {
+      return;
+    }
+
+    setProRagBoxEnsuringWorkspace(true);
+    try {
+      await proAPIRequest(
+        proAuthToken,
+        `/api/pro/ragbox/projects/${proRagBoxBindingProjectId}/workspace/ensure`,
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            vector_connection_id: proRagBoxBindingVectorConnectionId,
+            workspace_id: proRagBoxBindingExistingWorkspaceId,
+          }),
+        },
+      );
+      toast.success(proCopy.ragboxWorkspaceEnsured);
+    } catch (ensureError) {
+      toast.error(ensureError instanceof Error ? ensureError.message : proCopy.ragboxEnsureWorkspaceFailed);
+    } finally {
+      setProRagBoxEnsuringWorkspace(false);
+    }
+  }
+
+  async function ensureRagBoxCollection() {
+    if (!proAuthToken.trim() || !proRagBoxBindingCollectionProjectId || !proRagBoxBindingCollectionId) {
+      return;
+    }
+
+    setProRagBoxEnsuringCollection(true);
+    try {
+      await proAPIRequest(
+        proAuthToken,
+        `/api/pro/ragbox/projects/${proRagBoxBindingCollectionProjectId}/collections/${proRagBoxBindingCollectionId}/ensure`,
+        messages.requestFailed,
+        { method: 'POST' },
+      );
+      toast.success(proCopy.ragboxCollectionEnsured);
+    } catch (ensureError) {
+      toast.error(ensureError instanceof Error ? ensureError.message : proCopy.ragboxEnsureCollectionFailed);
+    } finally {
+      setProRagBoxEnsuringCollection(false);
+    }
+  }
+
+  async function uploadRagBoxFile() {
+    if (!proAuthToken.trim() || !proRagBoxUploadProjectId || !proRagBoxUploadCollectionId || !proRagBoxUploadFile) {
+      return;
+    }
+
+    setProRagBoxUploadingFile(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', proRagBoxUploadFile);
+      if (proRagBoxUploadSourceName.trim()) {
+        formData.append('source_name', proRagBoxUploadSourceName.trim());
+      }
+      if (proRagBoxUploadExternalId.trim()) {
+        formData.append('external_id', proRagBoxUploadExternalId.trim());
+      }
+      if (proRagBoxUploadTitle.trim()) {
+        formData.append('title', proRagBoxUploadTitle.trim());
+      }
+      if (proRagBoxUploadMetadata.trim()) {
+        formData.append('metadata', proRagBoxUploadMetadata.trim());
+      }
+
+      const response = await fetch(
+        `/api/pro/ragbox/projects/${proRagBoxUploadProjectId}/collections/${proRagBoxUploadCollectionId}/files:upload`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${proAuthToken.trim()}`,
+          },
+          body: formData,
+        },
+      );
+
+      if (!response.ok) {
+        let message = proCopy.ragboxUploadFileFailed;
+        try {
+          const payload = (await response.json()) as { error?: string };
+          if (payload?.error) {
+            message = payload.error;
+          }
+        } catch {}
+        throw new Error(message);
+      }
+
+      const operation = (await response.json()) as ProRagBoxWriteResponse;
+      setProRagBoxLastOperation(operation);
+
+      setProRagBoxUploadFile(null);
+      setProRagBoxUploadSourceName('');
+      setProRagBoxUploadExternalId('');
+      setProRagBoxUploadTitle('');
+      setProRagBoxUploadMetadata('');
+      toast.success(proCopy.ragboxFileUploaded);
+    } catch (uploadError) {
+      toast.error(uploadError instanceof Error ? uploadError.message : proCopy.ragboxUploadFileFailed);
+    } finally {
+      setProRagBoxUploadingFile(false);
+    }
+  }
+
+  async function upsertRagBoxRecords() {
+    if (!proAuthToken.trim() || !proRagBoxRecordsProjectId || !proRagBoxRecordsCollectionId || !proRagBoxRecordsPayload.trim()) {
+      return;
+    }
+
+    setProRagBoxUpsertingRecords(true);
+    try {
+      const parsed = JSON.parse(proRagBoxRecordsPayload);
+      const operation = await proAPIRequest<ProRagBoxWriteResponse>(
+        proAuthToken,
+        `/api/pro/ragbox/projects/${proRagBoxRecordsProjectId}/collections/${proRagBoxRecordsCollectionId}/records:upsert`,
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: JSON.stringify(parsed),
+        },
+      );
+      setProRagBoxLastOperation(operation);
+      toast.success(proCopy.ragboxRecordsUpserted);
+    } catch (upsertError) {
+      toast.error(upsertError instanceof Error ? upsertError.message : proCopy.ragboxUpsertRecordsFailed);
+    } finally {
+      setProRagBoxUpsertingRecords(false);
+    }
+  }
+
+  async function signOutPro() {
+    if (proPrincipal?.session_id) {
+      await revokeCurrentProSession();
+      return;
+    }
+    resetProAccess(true);
+    setView('projects');
   }
 
   async function syncCatalog() {
@@ -940,7 +2621,7 @@ export default function App() {
         await loadProjects();
       }
 
-      setProjectForm(emptyProjectForm);
+      setProjectForm(defaultProjectForm());
       setEditingProjectId(null);
       setCreateProjectOpen(false);
     } catch (submitError) {
@@ -1270,6 +2951,18 @@ export default function App() {
     await navigator.clipboard.writeText(value);
   }
 
+  function updateAndPersistProAuthToken(value: string) {
+    setAPIAuthToken(value);
+    setProAuthToken(value);
+    if (typeof window !== 'undefined') {
+      if (value.trim()) {
+        window.localStorage.setItem(proAuthStorageKey, value);
+      } else {
+        window.localStorage.removeItem(proAuthStorageKey);
+      }
+    }
+  }
+
   async function setServerEnabled(serverId: number, enabled: boolean) {
     setBusyServerId(serverId);
     setActionError(null);
@@ -1408,6 +3101,11 @@ export default function App() {
     });
     setEditingProjectId(selectedProject.project_id);
     setCreateProjectOpen(true);
+  }
+
+  function prepareCreateProject() {
+    setEditingProjectId(null);
+    setProjectForm(defaultProjectForm());
   }
 
   function startDuplicateProject() {
@@ -1668,22 +3366,43 @@ export default function App() {
   }
 
   async function deleteRAGCollection(collectionId: string) {
-    const confirmed = window.confirm(messages.deleteKnowledgeBaseConfirm);
-    if (!confirmed) {
-      return;
-    }
-
     setActionError(null);
     setLinkingCollectionId(collectionId);
 
     try {
-      await apiRequest<{ deleted: boolean }>(
-        `/api/rag/collections/${collectionId}`,
+      const preview = await proAPIRequest<{
+        collection_id: string;
+        managed_source_path: string;
+        has_uploaded_files: boolean;
+        uploaded_files_count: number;
+      }>(
+        proAuthToken,
+        `/api/pro/ragbox/collections/${collectionId}/delete-preview`,
+        messages.requestFailed,
+      );
+
+      const confirmed = window.confirm(messages.deleteKnowledgeBaseConfirm);
+      if (!confirmed) {
+        return;
+      }
+
+      let removeUploadedFiles = false;
+      if (preview.has_uploaded_files) {
+        const deleteFilesMessage = language === 'ru'
+          ? `У этой базы знаний есть загруженные файлы: ${preview.uploaded_files_count}.\n\nУдалить их вместе с базой знаний?\n\n${preview.managed_source_path}`
+          : `This knowledge base has uploaded files: ${preview.uploaded_files_count}.\n\nDelete them together with the knowledge base?\n\n${preview.managed_source_path}`;
+        removeUploadedFiles = window.confirm(deleteFilesMessage);
+      }
+
+      await proAPIRequest<{ deleted: boolean }>(
+        proAuthToken,
+        `/api/pro/ragbox/collections/${collectionId}?remove_uploaded_files=${removeUploadedFiles ? 'true' : 'false'}`,
         messages.requestFailed,
         {
           method: 'DELETE',
         },
       );
+
       await loadRAGCollections();
       await loadProjects();
       await loadLogs();
@@ -1700,6 +3419,9 @@ export default function App() {
       name: collection.name,
       source_path: collection.source_path ?? '',
       auto_reindex: collection.auto_reindex ?? false,
+      service_mode: collection.service_mode ?? 'bleve_only',
+      vector_connection_id: collection.vector_connection_id ?? '',
+      existing_workspace_id: proRagBoxKnowledgeBaseStatus[collection.collection_id]?.binding?.ragbox_workspace_id ?? '',
     });
     setCreateRAGCollectionOpen(true);
   }
@@ -1720,6 +3442,8 @@ export default function App() {
             name: ragCollectionForm.name,
             source_path: ragCollectionForm.source_path,
             auto_reindex: ragCollectionForm.auto_reindex,
+            service_mode: ragCollectionForm.service_mode,
+            vector_connection_id: ragCollectionForm.vector_connection_id,
           }),
         },
       );
@@ -1735,6 +3459,37 @@ export default function App() {
         ...current,
         [savedCollection.collection_id]: savedCollection.source_path,
       }));
+      if (
+        hasProAccess &&
+        proAuthToken.trim() &&
+        proRagBoxConfig?.enabled &&
+        proRagBoxConfig?.configured &&
+        ragCollectionForm.service_mode !== 'bleve_only'
+      ) {
+        try {
+          await proAPIRequest(
+            proAuthToken,
+            `/api/pro/ragbox/collections/${savedCollection.collection_id}/ensure`,
+            messages.requestFailed,
+            {
+              method: 'POST',
+              body: JSON.stringify({
+                workspace_id: ragCollectionForm.existing_workspace_id,
+              }),
+            },
+          );
+          if (ragCollectionForm.source_path.trim()) {
+            await proAPIRequest(
+              proAuthToken,
+              `/api/pro/ragbox/collections/${savedCollection.collection_id}/sync-source`,
+              messages.requestFailed,
+              { method: 'POST' },
+            );
+          }
+        } catch (ensureError) {
+          toast.error(ensureError instanceof Error ? ensureError.message : proCopy.ragboxEnsureCollectionFailed);
+        }
+      }
       setRAGCollectionForm(emptyRAGCollectionForm);
       setEditingRAGCollectionId(null);
       setCreateRAGCollectionOpen(false);
@@ -1765,6 +3520,8 @@ export default function App() {
             name: ragCollectionForm.name,
             source_path: ragCollectionForm.source_path,
             auto_reindex: ragCollectionForm.auto_reindex,
+            service_mode: ragCollectionForm.service_mode,
+            vector_connection_id: ragCollectionForm.vector_connection_id,
           }),
         },
       );
@@ -1774,6 +3531,38 @@ export default function App() {
         ...current,
         [savedCollection.collection_id]: savedCollection.source_path,
       }));
+
+      if (
+        hasProAccess &&
+        proAuthToken.trim() &&
+        proRagBoxConfig?.enabled &&
+        proRagBoxConfig?.configured &&
+        ragCollectionForm.service_mode !== 'bleve_only'
+      ) {
+        try {
+          await proAPIRequest(
+            proAuthToken,
+            `/api/pro/ragbox/collections/${savedCollection.collection_id}/ensure`,
+            messages.requestFailed,
+            {
+              method: 'POST',
+              body: JSON.stringify({
+                workspace_id: ragCollectionForm.existing_workspace_id,
+              }),
+            },
+          );
+          if (ragCollectionForm.source_path.trim()) {
+            await proAPIRequest(
+              proAuthToken,
+              `/api/pro/ragbox/collections/${savedCollection.collection_id}/sync-source`,
+              messages.requestFailed,
+              { method: 'POST' },
+            );
+          }
+        } catch (ensureError) {
+          toast.error(ensureError instanceof Error ? ensureError.message : proCopy.ragboxEnsureCollectionFailed);
+        }
+      }
 
       const updatedProject = await apiRequest<ProjectStatus>(
         `/api/projects/${selectedProject.project_id}/rag-collections`,
@@ -1808,6 +3597,7 @@ export default function App() {
 
     setIndexingCollectionId(collectionId);
     setActionError(null);
+    const targetCollection = allRAGCollections.find((collection) => collection.collection_id === collectionId);
 
     try {
       await apiRequest<{ indexed: boolean }>(
@@ -1829,12 +3619,105 @@ export default function App() {
         ...current,
         [collectionId]: dirPath,
       }));
+      if (
+        hasProAccess &&
+        proAuthToken.trim() &&
+        proRagBoxConfig?.enabled &&
+        proRagBoxConfig?.configured &&
+        targetCollection?.service_mode !== 'bleve_only'
+      ) {
+        try {
+          await proAPIRequest(
+            proAuthToken,
+            `/api/pro/ragbox/collections/${collectionId}/sync-source`,
+            messages.requestFailed,
+            { method: 'POST' },
+          );
+        } catch (syncError) {
+          toast.error(syncError instanceof Error ? syncError.message : proCopy.ragboxUploadFileFailed);
+        }
+      }
       await loadLogs();
     } catch (submitError) {
       setActionError(submitError instanceof Error ? submitError.message : messages.loadProjectsError);
     } finally {
       setIndexingCollectionId(null);
     }
+  }
+
+  async function uploadKnowledgeBaseFile(
+    collectionId: string,
+    file: File,
+    storageMode: 'keep' | 'transient',
+  ) {
+    if (!hasProAccess || !proAuthToken.trim()) {
+      setActionError(proCopy.verifyFailed);
+      return;
+    }
+
+    setUploadingKnowledgeBaseId(collectionId);
+    setActionError(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('storage_mode', storageMode);
+
+      await proAPIRequest<ProRagBoxWriteResponse>(
+        proAuthToken,
+        `/api/pro/ragbox/collections/${collectionId}/files:upload`,
+        messages.requestFailed,
+        {
+          method: 'POST',
+          body: formData,
+        },
+      );
+
+      await Promise.all([
+        loadRAGCollections(),
+        loadProRagBoxKnowledgeBaseStatus(),
+        loadLogs(),
+      ]);
+      toast.success(proCopy.ragboxFileUploaded);
+    } catch (submitError) {
+      const message = submitError instanceof Error ? submitError.message : proCopy.ragboxUploadFileFailed;
+      setActionError(message);
+      toast.error(message);
+    } finally {
+      setUploadingKnowledgeBaseId(null);
+    }
+  }
+
+  function canUseProRagBoxSearch(collectionId: string) {
+    const targetCollection = allRAGCollections.find((collection) => collection.collection_id === collectionId);
+    const serviceMode = targetCollection?.service_mode ?? 'bleve_only';
+    return (
+      hasProAccess &&
+      proAuthToken.trim() !== '' &&
+      !!proRagBoxConfig?.enabled &&
+      !!proRagBoxConfig?.configured &&
+      (serviceMode === 'ragbox_only' || proRagBoxConfig.search_mode !== 'bleve_only')
+    );
+  }
+
+  function mapProSearchHits(items: ProRagBoxSearchResponse['items']): RAGSearchResult[] {
+    return items.map((item) => ({
+      id: item.id,
+      file_path: item.file_path || item.title || item.id,
+      section: item.section,
+      title: item.title,
+      content: item.content,
+      source: item.source,
+      score: item.score,
+    }));
+  }
+
+  function formatRagSearchDiagnostics(diagnostics: ProRagBoxSearchResponse['diagnostics']) {
+    return proCopy.ragboxSearchDiagnostics
+      .replace('{bleve}', String(diagnostics.bleve_count))
+      .replace('{ragbox}', String(diagnostics.ragbox_count))
+      .replace('{merged}', String(diagnostics.merged_count))
+      .replace('{mode}', diagnostics.mode);
   }
 
   async function searchRAGCollection(collectionId: string) {
@@ -1846,20 +3729,38 @@ export default function App() {
 
     setSearchingCollectionId(collectionId);
     setActionError(null);
+    setRAGSearchDiagnostics(null);
 
     try {
-      const response = await apiRequest<{ items: RAGSearchResult[] }>(
-        `/api/rag/collections/${collectionId}/search`,
-        messages.requestFailed,
-        {
-          method: 'POST',
-          body: JSON.stringify({ query, limit: 5 }),
-        },
-      );
-      setRAGSearchResults((current) => ({
-        ...current,
-        [collectionId]: response.items,
-      }));
+      if (canUseProRagBoxSearch(collectionId)) {
+        const response = await proAPIRequest<ProRagBoxSearchResponse>(
+          proAuthToken,
+          `/api/pro/ragbox/collections/${collectionId}/search`,
+          messages.requestFailed,
+          {
+            method: 'POST',
+            body: JSON.stringify({ query, limit: 5 }),
+          },
+        );
+        setRAGSearchResults((current) => ({
+          ...current,
+          [collectionId]: mapProSearchHits(response.items),
+        }));
+        setRAGSearchDiagnostics(formatRagSearchDiagnostics(response.diagnostics));
+      } else {
+        const response = await apiRequest<{ items: RAGSearchResult[] }>(
+          `/api/rag/collections/${collectionId}/search`,
+          messages.requestFailed,
+          {
+            method: 'POST',
+            body: JSON.stringify({ query, limit: 5 }),
+          },
+        );
+        setRAGSearchResults((current) => ({
+          ...current,
+          [collectionId]: response.items,
+        }));
+      }
       setActiveRAGSearchCollectionId(collectionId);
       setRAGSearchResultsOpen(true);
     } catch (submitError) {
@@ -1930,7 +3831,7 @@ export default function App() {
   }
 
   function updateStringListField(
-    field: 'args' | 'env_passthrough' | 'oauth_scopes',
+    field: 'args' | 'env_passthrough',
     index: number,
     value: string,
   ) {
@@ -1940,14 +3841,14 @@ export default function App() {
     }));
   }
 
-  function addStringListField(field: 'args' | 'env_passthrough' | 'oauth_scopes') {
+  function addStringListField(field: 'args' | 'env_passthrough') {
     setServerForm((current) => ({
       ...current,
       [field]: [...current[field], ''],
     }));
   }
 
-  function removeStringListField(field: 'args' | 'env_passthrough' | 'oauth_scopes', index: number) {
+  function removeStringListField(field: 'args' | 'env_passthrough', index: number) {
     setServerForm((current) => {
       const next = current[field].filter((_, itemIndex) => itemIndex !== index);
       return {
@@ -1995,12 +3896,23 @@ export default function App() {
     <AppShell
       logoSrc={logo}
       labels={labels}
-      navigationItems={navigationItems}
+      navigationItems={visibleNavigationItems}
       view={activeView}
       setView={setView}
-      immersive={false}
+      immersive={proAuthLocked}
+      footer={
+        !proAuthLocked && proPrincipal ? (
+          <button
+            onClick={() => void signOutPro()}
+            aria-label={proCopy.signOut}
+            className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-transparent bg-card text-muted-foreground transition-colors hover:border-border hover:bg-accent hover:text-destructive"
+          >
+            <LogOut className="h-5 w-5" />
+          </button>
+        ) : null
+      }
       sidebar={
-        activeView === 'projects' ? (
+        activeView === 'projects' && !proAuthLocked ? (
           <ProjectsSidebar
             labels={labels}
             messages={messages}
@@ -2018,9 +3930,10 @@ export default function App() {
             editingProjectId={editingProjectId}
             projectForm={projectForm}
             setProjectForm={setProjectForm}
+            prepareCreateProject={prepareCreateProject}
             resetProjectForm={() => {
               setEditingProjectId(null);
-              setProjectForm(emptyProjectForm);
+              setProjectForm(defaultProjectForm());
             }}
             createProject={createProject}
             creatingProject={creatingProject}
@@ -2031,8 +3944,13 @@ export default function App() {
             duplicateProject={duplicateProject}
             duplicatingProjectId={duplicatingProjectId}
             selectedProject={selectedProject}
-            regenerateProjectBearerToken={regenerateProjectBearerToken}
-            busyProjectId={busyProjectId}
+            showIdentityVerification={policyBoxIdentityAvailable}
+            identityVerificationLabel={language === 'ru' ? 'Проверка идентификации' : 'Identity verification'}
+            identityVerificationHint={
+              language === 'ru'
+                ? 'Для этого проекта `/mcp/{project_token}` будет требовать Bearer token и сверять его через PolicyBox.'
+                : 'This project will require a Bearer token on `/mcp/{project_token}` and validate it through PolicyBox.'
+            }
           />
         ) : null
       }
@@ -2057,19 +3975,33 @@ export default function App() {
                 void loadLogs();
                 void loadLogMetrics();
               }}
+              onClearLogs={() => {
+                void clearLogs();
+              }}
               logMetrics={logMetrics}
               filteredLogsProjectName={filteredLogsProject?.name ?? null}
               requestTrendValues={requestTrendValues}
               errorTrendValues={errorTrendValues}
               avgLatencyTrendValues={avgLatencyTrendValues}
               p95LatencyTrendValues={p95LatencyTrendValues}
+              hasProAccess={hasProAccess}
+              logsFilterMode={logsFilterMode}
+              setLogsFilterMode={setLogsFilterMode}
+              proActivityCopy={proActivityCopy}
               visibleLogs={visibleLogs}
+              proCreatedCount={proCreatedCount}
+              proUsedCount={proUsedCount}
+              proRevokedCount={proRevokedCount}
+              policyEventCount={policyEventCount}
               logsViewportRef={logsViewportRef}
+              onLogsViewportScroll={handleLogsViewportScroll}
               projectNameFromLog={projectNameFromLog}
               serverNameFromLog={serverNameFromLog}
               serverNamesById={serverNamesById}
               projectNamesById={projectNamesById}
             />
+          ) : activeView === 'cli' ? (
+            <CLIView language={language} />
           ) : activeView === 'knowledge' ? (
             <KnowledgeView
               labels={labels}
@@ -2102,6 +4034,14 @@ export default function App() {
               activeRAGSearchCollection={activeRAGSearchCollection}
               setActiveRAGSearchCollectionId={setActiveRAGSearchCollectionId}
               activeRAGSearchResults={activeRAGSearchResults}
+              ragSearchDiagnostics={ragSearchDiagnostics}
+              uploadKnowledgeBaseFile={uploadKnowledgeBaseFile}
+              uploadingKnowledgeBaseId={uploadingKnowledgeBaseId}
+              proCopy={proCopy}
+              proRagBoxVectorConnections={proRagBoxVectorConnections}
+              proRagBoxBuiltinFallbackBackend={proRagBoxBuiltinFallbackBackend}
+              proRagBoxWorkspaces={proRagBoxWorkspaces}
+              proRagBoxKnowledgeBaseStatus={proRagBoxKnowledgeBaseStatus}
             />
           ) : activeView === 'market' ? (
             <MarketView
@@ -2133,11 +4073,283 @@ export default function App() {
               onPerformCatalogInstall={performCatalogInstall}
               onActionError={setActionError}
             />
+          ) : activeView === 'settings' ? (
+            <ProAccessView
+              logoSrc={logo}
+              editionName={editionMeta.edition_name}
+              proCopy={proCopy}
+              proPrincipal={proPrincipal}
+              proLoading={proLoading}
+              proLocalLoginLoading={proLocalLoginLoading}
+              proLoginEmail={proLoginEmail}
+              proLoginPassword={proLoginPassword}
+              proSSOEnabled={!!proSSOConfig?.enabled}
+              proSSOProviderName={proSSOConfig?.provider_name}
+              proSSOIssuerURL={proSSOConfig?.issuer_url}
+              proSSORedirectURL={proSSOConfig?.redirect_url}
+              proSSOScopes={proSSOConfig?.scopes}
+              proSSOHostedDomain={proSSOConfig?.allowed_hosted_domain}
+              proSSODefaultRole={proSSOConfig?.default_role}
+              proSSOSessionDays={proSSOConfig?.session_days}
+              proSSOAutoCreateUsers={proSSOConfig?.auto_create_users}
+              proCreateOpen={proCreateOpen}
+              proCreatingToken={proCreatingToken}
+              proRevokingTokenId={proRevokingTokenId}
+              proNewTokenName={proNewTokenName}
+              proNewTokenScopes={proNewTokenScopes}
+              proNewTokenExpiresDays={proNewTokenExpiresDays}
+              proCreatedTokenValue={proCreatedTokenValue}
+              proCreatedSessionToken={proCreatedSessionToken}
+              proStorageConfig={proStorageConfig}
+              proStorageRuntimeStatus={proStorageRuntimeStatus}
+              proStorageShadowStatus={proStorageShadowStatus}
+              proStorageOperationalBackend={proStorageOperationalBackend}
+              proStoragePostgresHost={proStoragePostgresHost}
+              proStoragePostgresPort={proStoragePostgresPort}
+              proStoragePostgresDatabase={proStoragePostgresDatabase}
+              proStoragePostgresSchema={proStoragePostgresSchema}
+              proStoragePostgresUsername={proStoragePostgresUsername}
+              proStoragePostgresPassword={proStoragePostgresPassword}
+              proStorageClearPostgresDSN={proStorageClearPostgresDSN}
+              proStorageLogsBackend={proStorageLogsBackend}
+              proStorageClickHouseURL={proStorageClickHouseURL}
+              proStorageClickHouseDatabase={proStorageClickHouseDatabase}
+              proStorageClickHouseUsername={proStorageClickHouseUsername}
+              proStorageClickHousePassword={proStorageClickHousePassword}
+              proStorageClearClickHousePassword={proStorageClearClickHousePassword}
+              proStorageElasticsearchURL={proStorageElasticsearchURL}
+              proStorageElasticsearchUsername={proStorageElasticsearchUsername}
+              proStorageElasticsearchPassword={proStorageElasticsearchPassword}
+              proStorageElasticsearchIndex={proStorageElasticsearchIndex}
+              proStorageClearElasticsearchPassword={proStorageClearElasticsearchPassword}
+              proStorageSaving={proStorageSaving}
+              proPolicyBoxBaseURL={proPolicyBoxBaseURL}
+              proPolicyBoxAdminToken={proPolicyBoxAdminToken}
+              proPolicyBoxAdminTokenConfigured={!!proPolicyBoxConfig?.admin_token_configured}
+              proPolicyBoxAdminTokenPreview={proPolicyBoxConfig?.admin_token_preview}
+              proPolicyBoxSaving={proPolicyBoxSaving}
+              proPolicyBoxConfigured={!!proPolicyBoxConfig?.configured}
+              proPolicyBoxAdminConfigured={!!proPolicyBoxConfig?.admin_configured}
+              proPolicyBoxRuntimeConfigured={!!proPolicyBoxConfig?.runtime_configured}
+              proPolicyBoxRuntimeDialogOpen={proPolicyBoxRuntimeDialogOpen}
+              proPolicyBoxRuntimePayload={proPolicyBoxRuntimePayload}
+              proPolicyBoxRuntimeTicket={proPolicyBoxRuntimeTicket}
+              proPolicyBoxRuntimeToken={proPolicyBoxRuntimeToken}
+              proPolicyBoxRuntimeResponseJSON={proPolicyBoxRuntimeResponseJSON}
+              proPolicyBoxIssuingTicket={proPolicyBoxIssuingTicket}
+              proPolicyBoxExchangingTicket={proPolicyBoxExchangingTicket}
+              proPolicyBoxValidatingToken={proPolicyBoxValidatingToken}
+              proRagBoxBaseURL={proRagBoxBaseURL}
+              proRagBoxAdminToken={proRagBoxAdminToken}
+              proRagBoxAdminTokenConfigured={!!proRagBoxConfig?.admin_token_configured}
+              proRagBoxAdminTokenPreview={proRagBoxConfig?.admin_token_preview}
+              proRagBoxClearAdminToken={proRagBoxClearAdminToken}
+              proRagBoxTimeoutSeconds={proRagBoxTimeoutSeconds}
+              proRagBoxWriteMode={proRagBoxWriteMode}
+              proRagBoxSearchMode={proRagBoxSearchMode}
+              proRagBoxSaving={proRagBoxSaving}
+              proRagBoxAdminConfigured={!!proRagBoxConfig?.admin_configured}
+              proRagBoxVectorConnections={proRagBoxVectorConnections}
+              proRagBoxWorkspaces={proRagBoxWorkspaces}
+              proRagBoxBuiltinFallbackBackend={proRagBoxBuiltinFallbackBackend}
+              proRagBoxLoadingVectorConnections={proRagBoxLoadingVectorConnections}
+              proRagBoxLoadingWorkspaces={proRagBoxLoadingWorkspaces}
+              proRagBoxCreatingVectorConnection={proRagBoxCreatingVectorConnection}
+              proRagBoxDefaultingVectorConnectionId={proRagBoxDefaultingVectorConnectionId}
+              proRagBoxVectorConnectionForm={proRagBoxVectorConnectionForm}
+              proRagBoxConfigured={!!proRagBoxConfig?.configured}
+              proRagBoxBindingProjectId={proRagBoxBindingProjectId}
+              proRagBoxBindingVectorConnectionId={proRagBoxBindingVectorConnectionId}
+              proRagBoxBindingExistingWorkspaceId={proRagBoxBindingExistingWorkspaceId}
+              proRagBoxBindingCollectionProjectId={proRagBoxBindingCollectionProjectId}
+              proRagBoxBindingCollectionId={proRagBoxBindingCollectionId}
+              proRagBoxEnsuringWorkspace={proRagBoxEnsuringWorkspace}
+              proRagBoxEnsuringCollection={proRagBoxEnsuringCollection}
+              proRagBoxUploadProjectId={proRagBoxUploadProjectId}
+              proRagBoxUploadCollectionId={proRagBoxUploadCollectionId}
+              proRagBoxUploadFileName={proRagBoxUploadFile?.name ?? ''}
+              proRagBoxUploadSourceName={proRagBoxUploadSourceName}
+              proRagBoxUploadExternalId={proRagBoxUploadExternalId}
+              proRagBoxUploadTitle={proRagBoxUploadTitle}
+              proRagBoxUploadMetadata={proRagBoxUploadMetadata}
+              proRagBoxUploadingFile={proRagBoxUploadingFile}
+              proRagBoxRecordsProjectId={proRagBoxRecordsProjectId}
+              proRagBoxRecordsCollectionId={proRagBoxRecordsCollectionId}
+              proRagBoxRecordsPayload={proRagBoxRecordsPayload}
+              proRagBoxUpsertingRecords={proRagBoxUpsertingRecords}
+              proRagBoxLastOperation={proRagBoxLastOperation}
+              ragBoxProjects={ragBoxProjects}
+              ragBoxProjectKnowledgeBases={ragBoxProjectKnowledgeBases}
+              proTokens={proTokens}
+              proUsers={proUsers}
+              proRoles={proRoles}
+              proSessions={proSessions}
+              proScopePresets={proScopePresets}
+              canWritePro={canWritePro}
+              canAdminPro={canAdminPro}
+              proCreateUserOpen={proCreateUserOpen}
+              proCreatingUser={proCreatingUser}
+              proEditUserOpen={proEditUserOpen}
+              proUpdatingUserRoles={proUpdatingUserRoles}
+              proPasswordUserOpen={proPasswordUserOpen}
+              proUpdatingUserPassword={proUpdatingUserPassword}
+              proDisablingUserId={proDisablingUserId}
+              proEnablingUserId={proEnablingUserId}
+              proDeletingUserId={proDeletingUserId}
+              proSessionsFilterUserId={proSessionsFilterUserId}
+              proEditingUserId={proEditingUserId}
+              proEditingUserName={proEditingUserName}
+              proEditingUserRoles={proEditingUserRoles}
+              proPasswordUserId={proPasswordUserId}
+              proPasswordUserName={proPasswordUserName}
+              proPasswordUserPassword={proPasswordUserPassword}
+              proPasswordUserPasswordConfirm={proPasswordUserPasswordConfirm}
+              proCreateSessionOpen={proCreateSessionOpen}
+              proCreatingSession={proCreatingSession}
+              proRevokingSessionId={proRevokingSessionId}
+              proNewUserName={proNewUserName}
+              proNewUserEmail={proNewUserEmail}
+              proNewUserRoles={proNewUserRoles}
+              proNewSessionUserId={proNewSessionUserId}
+              proNewSessionLabel={proNewSessionLabel}
+              proNewSessionExpiresDays={proNewSessionExpiresDays}
+              onSetProCreateOpen={(open) => {
+                setProCreateOpen(open);
+                if (!open) {
+                  setProCreatedTokenValue(null);
+                }
+              }}
+              onSetProCreateUserOpen={(open) => {
+                setProCreateUserOpen(open);
+                if (!open) {
+                  setProNewUserName('');
+                  setProNewUserEmail('');
+                  setProNewUserRoles('reader');
+                }
+              }}
+              onSetProEditUserOpen={(open) => {
+                setProEditUserOpen(open);
+                if (!open) {
+                  setProEditingUserId('');
+                  setProEditingUserName('');
+                  setProEditingUserRoles('reader');
+                }
+              }}
+              onSetProPasswordUserOpen={(open) => {
+                setProPasswordUserOpen(open);
+                if (!open) {
+                  setProPasswordUserId('');
+                  setProPasswordUserName('');
+                  setProPasswordUserPassword('');
+                  setProPasswordUserPasswordConfirm('');
+                }
+              }}
+              onSetProCreateSessionOpen={(open) => {
+                setProCreateSessionOpen(open);
+                if (!open) {
+                  setProCreatedSessionToken(null);
+                  setProNewSessionUserId('');
+                  setProNewSessionLabel('');
+                  setProNewSessionExpiresDays('30');
+                }
+              }}
+              onSetProLoginEmail={setProLoginEmail}
+              onSetProLoginPassword={setProLoginPassword}
+              onSetProNewTokenName={setProNewTokenName}
+              onSetProNewTokenScopes={setProNewTokenScopes}
+              onSetProNewTokenExpiresDays={setProNewTokenExpiresDays}
+              onSetProNewUserName={setProNewUserName}
+              onSetProNewUserEmail={setProNewUserEmail}
+              onSetProNewUserRoles={setProNewUserRoles}
+              onSetProEditingUserRoles={setProEditingUserRoles}
+              onSetProPasswordUserPassword={setProPasswordUserPassword}
+              onSetProPasswordUserPasswordConfirm={setProPasswordUserPasswordConfirm}
+              onSetProSessionsFilterUserId={setProSessionsFilterUserId}
+              onSetProNewSessionUserId={setProNewSessionUserId}
+              onSetProNewSessionLabel={setProNewSessionLabel}
+              onSetProNewSessionExpiresDays={setProNewSessionExpiresDays}
+              onSetProStorageOperationalBackend={setProStorageOperationalBackend}
+              onSetProStoragePostgresHost={setProStoragePostgresHost}
+              onSetProStoragePostgresPort={setProStoragePostgresPort}
+              onSetProStoragePostgresDatabase={setProStoragePostgresDatabase}
+              onSetProStoragePostgresSchema={setProStoragePostgresSchema}
+              onSetProStoragePostgresUsername={setProStoragePostgresUsername}
+              onSetProStoragePostgresPassword={setProStoragePostgresPassword}
+              onSetProStorageClearPostgresDSN={setProStorageClearPostgresDSN}
+              onSetProStorageLogsBackend={setProStorageLogsBackend}
+              onSetProStorageClickHouseURL={setProStorageClickHouseURL}
+              onSetProStorageClickHouseDatabase={setProStorageClickHouseDatabase}
+              onSetProStorageClickHouseUsername={setProStorageClickHouseUsername}
+              onSetProStorageClickHousePassword={setProStorageClickHousePassword}
+              onSetProStorageClearClickHousePassword={setProStorageClearClickHousePassword}
+              onSetProStorageElasticsearchURL={setProStorageElasticsearchURL}
+              onSetProStorageElasticsearchUsername={setProStorageElasticsearchUsername}
+              onSetProStorageElasticsearchPassword={setProStorageElasticsearchPassword}
+              onSetProStorageElasticsearchIndex={setProStorageElasticsearchIndex}
+              onSetProStorageClearElasticsearchPassword={setProStorageClearElasticsearchPassword}
+              onSetProPolicyBoxBaseURL={setProPolicyBoxBaseURL}
+              onSetProPolicyBoxAdminToken={setProPolicyBoxAdminToken}
+              onSetProPolicyBoxRuntimeDialogOpen={setProPolicyBoxRuntimeDialogOpen}
+              onSetProPolicyBoxRuntimePayload={setProPolicyBoxRuntimePayload}
+              onSetProPolicyBoxRuntimeTicket={setProPolicyBoxRuntimeTicket}
+              onSetProPolicyBoxRuntimeToken={setProPolicyBoxRuntimeToken}
+              onSetProRagBoxBaseURL={setProRagBoxBaseURL}
+              onSetProRagBoxAdminToken={setProRagBoxAdminToken}
+              onSetProRagBoxClearAdminToken={setProRagBoxClearAdminToken}
+              onSetProRagBoxTimeoutSeconds={setProRagBoxTimeoutSeconds}
+              onSetProRagBoxWriteMode={setProRagBoxWriteMode}
+              onSetProRagBoxSearchMode={setProRagBoxSearchMode}
+              onSetProRagBoxVectorConnectionForm={setProRagBoxVectorConnectionForm}
+              onSetProRagBoxBindingProjectId={setProRagBoxBindingProjectId}
+              onSetProRagBoxBindingVectorConnectionId={setProRagBoxBindingVectorConnectionId}
+              onSetProRagBoxBindingExistingWorkspaceId={setProRagBoxBindingExistingWorkspaceId}
+              onSetProRagBoxBindingCollectionProjectId={setProRagBoxBindingCollectionProjectId}
+              onSetProRagBoxBindingCollectionId={setProRagBoxBindingCollectionId}
+              onSetProRagBoxUploadProjectId={setProRagBoxUploadProjectId}
+              onSetProRagBoxUploadCollectionId={setProRagBoxUploadCollectionId}
+              onSetProRagBoxUploadFile={setProRagBoxUploadFile}
+              onSetProRagBoxUploadSourceName={setProRagBoxUploadSourceName}
+              onSetProRagBoxUploadExternalId={setProRagBoxUploadExternalId}
+              onSetProRagBoxUploadTitle={setProRagBoxUploadTitle}
+              onSetProRagBoxUploadMetadata={setProRagBoxUploadMetadata}
+              onSetProRagBoxRecordsProjectId={setProRagBoxRecordsProjectId}
+              onSetProRagBoxRecordsCollectionId={setProRagBoxRecordsCollectionId}
+              onSetProRagBoxRecordsPayload={setProRagBoxRecordsPayload}
+              onLoginProLocal={loginProLocal}
+              onStartProSSOSignIn={startProSSOSignIn}
+              onCreateProToken={createProToken}
+              onCreateProUser={createProUser}
+              onStartEditProUser={startEditProUser}
+              onUpdateProUserRoles={updateProUserRoles}
+              onStartProPasswordChange={startProPasswordChange}
+              onUpdateProUserPassword={updateProUserPassword}
+              onDisableProUser={disableProUser}
+              onEnableProUser={enableProUser}
+              onDeleteProUser={deleteProUser}
+              onCreateProSession={createProSession}
+              onRevokeCurrentProSession={revokeCurrentProSession}
+              onSaveProStorageConfig={saveProStorageConfig}
+              onSaveProPolicyBoxConfig={saveProPolicyBoxConfig}
+              onIssueProPolicyBoxRuntimeTicket={issueProPolicyBoxRuntimeTicket}
+              onExchangeProPolicyBoxRuntimeTicket={exchangeProPolicyBoxRuntimeTicket}
+              onValidateProPolicyBoxRuntimeToken={validateProPolicyBoxRuntimeToken}
+              onSaveProRagBoxConfig={saveProRagBoxConfig}
+              onCreateProRagBoxVectorConnection={createProRagBoxVectorConnection}
+              onSetDefaultProRagBoxVectorConnection={setDefaultProRagBoxVectorConnection}
+              onEnsureRagBoxWorkspace={ensureRagBoxWorkspace}
+              onEnsureRagBoxCollection={ensureRagBoxCollection}
+              onUploadRagBoxFile={uploadRagBoxFile}
+              onUpsertRagBoxRecords={upsertRagBoxRecords}
+              onCopyToken={copyToClipboard}
+              onRevokeProToken={revokeProToken}
+              onRevokeProSession={revokeProSession}
+            />
           ) : (
             <ProjectsView
+              onCLIChanged={loadProjects}
               labels={labels}
               messages={messages}
-              selectedProject={selectedProject}
+              selectedProject={selectedProjectForProjectsView}
               selectedProjectHealthyCount={selectedProjectHealthyCount}
               launchProjectOpen={launchProjectOpen}
               setLaunchProjectOpen={setLaunchProjectOpen}
@@ -2167,8 +4379,9 @@ export default function App() {
               launchingLMStudioProjectId={launchingLMStudioProjectId}
               OllamaIcon={OllamaIcon}
               alternativeConnectURLs={alternativeConnectURLs}
-              oauthClientManagementEnabled={editionMeta.edition_id === 'pro'}
+              oauthClientManagementEnabled={isProEdition}
               copyConnectURL={copyConnectURL}
+              regenerateEndpointToken={regenerateProjectBearerToken}
               busyProjectId={busyProjectId}
               setProjectPaused={setProjectPaused}
               startDuplicateProject={startDuplicateProject}

@@ -1,0 +1,206 @@
+{
+  "schema_version": 1,
+  "version": "2026-10-04.1",
+  "items": [
+    {
+      "slug": "git",
+      "name": "Git",
+      "description": "Просмотр состояния Git-репозитория, изменений и истории.",
+      "binary": "git",
+      "platforms": [
+        "linux",
+        "darwin",
+        "windows"
+      ],
+      "operations": [
+        {
+          "command": "status"
+        },
+        {
+          "command": "diff"
+        },
+        {
+          "command": "log"
+        },
+        {
+          "command": "branch"
+        },
+        {
+          "command": "show"
+        }
+      ],
+      "timeout_seconds": 30,
+      "max_output_bytes": 1048576
+    },
+    {
+      "slug": "go",
+      "name": "Go",
+      "description": "Информация о версии Go и окружении сборки.",
+      "binary": "go",
+      "platforms": [
+        "linux",
+        "darwin",
+        "windows"
+      ],
+      "operations": [
+        {
+          "command": "version"
+        },
+        {
+          "command": "env"
+        }
+      ],
+      "timeout_seconds": 30,
+      "max_output_bytes": 1048576
+    },
+    {
+      "slug": "php",
+      "name": "PHP",
+      "description": "Информация о версии PHP и установленных модулях.",
+      "binary": "php",
+      "platforms": [
+        "linux",
+        "darwin",
+        "windows"
+      ],
+      "operations": [
+        {
+          "command": "--version"
+        },
+        {
+          "command": "--modules"
+        }
+      ],
+      "timeout_seconds": 30,
+      "max_output_bytes": 1048576
+    },
+    {
+      "slug": "composer",
+      "name": "Composer",
+      "description": "Просмотр версии Composer и зависимостей PHP-проекта.",
+      "binary": "composer",
+      "platforms": [
+        "linux",
+        "darwin",
+        "windows"
+      ],
+      "operations": [
+        {
+          "command": "--version"
+        },
+        {
+          "command": "show"
+        }
+      ],
+      "timeout_seconds": 30,
+      "max_output_bytes": 1048576
+    },
+    {
+      "slug": "npm",
+      "name": "npm",
+      "description": "Просмотр версии npm и зависимостей Node.js-проекта.",
+      "binary": "npm",
+      "platforms": [
+        "linux",
+        "darwin",
+        "windows"
+      ],
+      "operations": [
+        {
+          "command": "--version"
+        },
+        {
+          "command": "ls"
+        }
+      ],
+      "timeout_seconds": 30,
+      "max_output_bytes": 1048576
+    },
+    {
+      "slug": "docker",
+      "name": "Docker",
+      "description": "Информация о Docker, контейнерах и образах; требует работающий Docker daemon.",
+      "binary": "docker",
+      "platforms": [
+        "linux",
+        "darwin",
+        "windows"
+      ],
+      "operations": [
+        {
+          "command": "--version"
+        },
+        {
+          "command": "version"
+        },
+        {
+          "command": "ps"
+        },
+        {
+          "command": "images"
+        }
+      ],
+      "timeout_seconds": 30,
+      "max_output_bytes": 1048576
+    },
+    {
+      "slug": "opencode",
+      "name": "OpenCode",
+      "description": "Просмотр версии OpenCode, доступных моделей и MCP-подключений.",
+      "binary": "opencode",
+      "platforms": [
+        "linux",
+        "darwin",
+        "windows"
+      ],
+      "operations": [
+        {
+          "command": "--version"
+        },
+        {
+          "command": "models"
+        },
+        {
+          "command": "mcp list"
+        }
+      ],
+      "timeout_seconds": 30,
+      "max_output_bytes": 1048576
+    },
+    {
+      "slug": "curl",
+      "name": "curl",
+      "description": "Просмотр версии curl и поддерживаемых протоколов. URL и другие аргументы требуют отдельного разрешения.",
+      "binary": "curl",
+      "platforms": [
+        "linux",
+        "darwin",
+        "windows"
+      ],
+      "operations": [
+        {
+          "command": "--version"
+        }
+      ],
+      "timeout_seconds": 30,
+      "max_output_bytes": 1048576
+    },
+    {
+      "slug": "ps",
+      "name": "Processes",
+      "description": "Список процессов текущего пользователя.",
+      "binary": "ps",
+      "platforms": [
+        "linux",
+        "darwin"
+      ],
+      "operations": [
+        {
+          "command": "-f"
+        }
+      ],
+      "timeout_seconds": 30,
+      "max_output_bytes": 1048576
+    }
+  ]
+}

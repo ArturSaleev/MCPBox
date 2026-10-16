@@ -253,7 +253,7 @@ func (s *Server) dispatchProjectJSONRPC(
 		s.logProjectRPC(ctx, actor, project.ID, nil, "tools/list", map[string]any{
 			"method": "tools/list",
 		})
-		tools, err := s.aggregateTools(ctx, servers)
+		tools, err := s.aggregateTools(ctx, servers, projectHasActiveCLI(project))
 		if err != nil {
 			return nil, false, err
 		}
@@ -263,6 +263,9 @@ func (s *Server) dispatchProjectJSONRPC(
 		}
 		if len(project.RAGCollections) > 0 {
 			tools = append(tools, s.projectKnowledgeAggregateTool(project))
+		}
+		if projectHasActiveCLI(project) {
+			tools = append(tools, projectCLITools()...)
 		}
 		result := struct {
 			Tools []aggregatedToolResult `json:"tools"`
@@ -288,6 +291,10 @@ func (s *Server) dispatchProjectJSONRPC(
 		var params toolCallParams
 		if err := json.Unmarshal(request.Params, &params); err != nil {
 			return nil, false, errors.New("invalid tools/call params")
+		}
+		if isCLITool(params.Name) && projectHasActiveCLI(project) {
+			result := s.callCLITool(ctx, project, params.Name, params.Arguments, actor)
+			return mustMarshal(projectResponseEnvelope{JSONRPC: "2.0", ID: request.ID, Result: result}), true, nil
 		}
 		if params.Name == projectKnowledgeSearchToolName {
 			result, err := s.callProjectKnowledgeTool(ctx, project, params.Arguments)
@@ -338,7 +345,7 @@ func (s *Server) dispatchProjectJSONRPC(
 				Result:  result,
 			}), true, nil
 		}
-		tool, err := s.resolveAggregateTool(ctx, servers, params.Name)
+		tool, err := s.resolveAggregateTool(ctx, servers, params.Name, projectHasActiveCLI(project))
 		if err != nil {
 			return nil, false, err
 		}
@@ -697,7 +704,7 @@ func (s *Server) callHTTPServerMethod(ctx context.Context, server models.MCPServ
 	return envelope.Result, int64(len(body)), nil
 }
 
-func (s *Server) aggregateTools(ctx context.Context, servers []models.MCPServer) ([]aggregateTool, error) {
+func (s *Server) aggregateTools(ctx context.Context, servers []models.MCPServer, reserveCLI bool) ([]aggregateTool, error) {
 	tools := make([]aggregateTool, 0)
 	for _, server := range servers {
 		server, err := s.ensureServerInitialized(ctx, server)
@@ -712,7 +719,7 @@ func (s *Server) aggregateTools(ctx context.Context, servers []models.MCPServer)
 			tools = append(tools, aggregateTool{Server: server, Origin: item})
 		}
 	}
-	assignToolAliases(tools)
+	assignToolAliases(tools, reserveCLI)
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Alias < tools[j].Alias })
 	return tools, nil
 }
@@ -1058,8 +1065,8 @@ func (s *Server) fetchServerList(ctx context.Context, server models.MCPServer, m
 	}
 }
 
-func (s *Server) resolveAggregateTool(ctx context.Context, servers []models.MCPServer, alias string) (*aggregateTool, error) {
-	tools, err := s.aggregateTools(ctx, servers)
+func (s *Server) resolveAggregateTool(ctx context.Context, servers []models.MCPServer, alias string, reserveCLI bool) (*aggregateTool, error) {
+	tools, err := s.aggregateTools(ctx, servers, reserveCLI)
 	if err != nil {
 		return nil, err
 	}
@@ -1097,7 +1104,8 @@ func (s *Server) resolveAggregatePrompt(ctx context.Context, servers []models.MC
 	return nil, fmt.Errorf("prompt %q was not found", alias)
 }
 
-func assignToolAliases(tools []aggregateTool) {
+func assignToolAliases(tools []aggregateTool, reserveCLI ...bool) {
+	reserved := len(reserveCLI) > 0 && reserveCLI[0]
 	desiredAliases := make([]string, len(tools))
 	counts := make(map[string]int)
 	for index, tool := range tools {
@@ -1114,7 +1122,7 @@ func assignToolAliases(tools []aggregateTool) {
 		}
 	}
 	for index := range tools {
-		if counts[desiredAliases[index]] == 1 {
+		if counts[desiredAliases[index]] == 1 && !(reserved && isCLITool(desiredAliases[index])) {
 			tools[index].Alias = desiredAliases[index]
 			continue
 		}

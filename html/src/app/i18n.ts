@@ -535,7 +535,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       overviewFallbackDescription: 'Workspace group for MCP clients and tools.',
       connectionDescription:
         'Use the project endpoint with Authorization: Bearer <project-token>. Clients connected through this endpoint can access all enabled MCP servers in the project.',
-      connectionWarning: (_token: string) => 'To use this endpoint, add and enable at least one MCP server or connect a knowledge base.',
+      connectionWarning: (_token: string) => 'To use this endpoint, add and enable an MCP server, connect a CLI, or connect a knowledge base.',
       addServerDescription:
         'Add one or more MCP servers to expose them through the shared project endpoint.',
       serverNamePlaceholder: 'Filesystem Server',
@@ -902,7 +902,7 @@ export const dictionaries: Record<Language, Dictionary> = {
       overviewFallbackDescription: 'Логическая группа для MCP-клиентов и инструментов.',
       connectionDescription:
         'Используйте endpoint проекта с Authorization: Bearer <project-token>. Все клиенты через этот endpoint получают доступ ко всем включённым MCP-серверам проекта.',
-      connectionWarning: (_token: string) => 'Чтобы использовать этот endpoint, добавьте и включите хотя бы один MCP-сервер или подключите базу знаний.',
+      connectionWarning: (_token: string) => 'Чтобы использовать этот endpoint, добавьте и включите MCP-сервер, подключите CLI или базу знаний.',
       addServerDescription:
         'Добавьте один или несколько MCP-серверов, чтобы опубликовать их через общий endpoint проекта.',
       serverNamePlaceholder: 'Filesystem Server',

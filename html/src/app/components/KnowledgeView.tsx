@@ -1,4 +1,4 @@
-import type { FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 
 import { Database, LoaderCircle, Pencil, Plus, RefreshCw, TextSearch, Trash2 } from 'lucide-react';
 
@@ -19,7 +19,10 @@ type RAGCollection = {
   name: string;
   data_type: string;
   source_path: string;
+  managed_source_path: string;
   auto_reindex: boolean;
+  service_mode: 'bleve_only' | 'ragbox_only' | 'dual' | string;
+  vector_connection_id: string;
   index_path: string;
 };
 
@@ -27,13 +30,50 @@ type RAGSearchResult = {
   id: string;
   file_path: string;
   section?: string;
+  title?: string;
   content: string;
+  source?: 'bleve' | 'ragbox' | 'hybrid' | string;
+  score?: number;
 };
 
 type RAGCollectionForm = {
   name: string;
   source_path: string;
   auto_reindex: boolean;
+  service_mode: 'bleve_only' | 'ragbox_only' | 'dual';
+  vector_connection_id: string;
+  existing_workspace_id: string;
+};
+
+type ProRagBoxVectorConnection = {
+  id: string;
+  name: string;
+  backend_type: string;
+  is_default: boolean;
+};
+
+type ProRagBoxKnowledgeBaseStatus = {
+  binding?: {
+    ragbox_collection_id: string;
+    sync_status: string;
+    ragbox_workspace_id: string;
+    ragbox_workspace_vector_connection_id?: string;
+  };
+  token_public_id?: string;
+  token_secret?: string;
+  token_configured: boolean;
+  ingest_url_path?: string;
+  shadow_source_path?: string;
+  uses_shadow_storage: boolean;
+  requested_vector_connection_id?: string;
+};
+
+type ProRagBoxWorkspaceOption = {
+  id: string;
+  name: string;
+  vector_connection_id: string;
+  access_mode: string;
+  status: string;
 };
 
 type KnowledgeViewProps = {
@@ -64,6 +104,41 @@ type KnowledgeViewProps = {
   activeRAGSearchCollection: RAGCollection | null;
   setActiveRAGSearchCollectionId: (collectionId: string | null) => void;
   activeRAGSearchResults: RAGSearchResult[];
+  ragSearchDiagnostics: string | null;
+  uploadKnowledgeBaseFile: (collectionId: string, file: File, storageMode: 'keep' | 'transient') => void | Promise<void>;
+  uploadingKnowledgeBaseId: string | null;
+  proCopy: {
+    ragboxSearchSourceBleve: string;
+    ragboxSearchSourceRagbox: string;
+    ragboxSearchSourceHybrid: string;
+    ragboxKBEndpointTitle: string;
+    ragboxKBEndpointPath: string;
+    ragboxKBEndpointToken: string;
+    ragboxKBEndpointShadow: string;
+    ragboxKBEndpointLocalFolder: string;
+    ragboxKBEndpointStatus: string;
+    ragboxKBManagedFolder: string;
+    ragboxKBUploadTitle: string;
+    ragboxKBUploadMode: string;
+    ragboxKBUploadModeKeep: string;
+    ragboxKBUploadModeTransient: string;
+    ragboxKBUploadHint: string;
+    ragboxKBUploadButton: string;
+    ragboxKBExistingWorkspaceHint: string;
+    ragboxKBVectorConnection: string;
+    ragboxKBVectorConnectionDefault: string;
+    ragboxKBVectorConnectionHint: string;
+    ragboxKBExistingWorkspaceUsesOwnVectorConnection: string;
+    ragboxKBServiceMode: string;
+    ragboxKBServiceModeHint: string;
+    ragboxKBServiceModeBleveOnly: string;
+    ragboxKBServiceModeRagBoxOnly: string;
+    ragboxKBServiceModeDual: string;
+  };
+  proRagBoxVectorConnections: ProRagBoxVectorConnection[];
+  proRagBoxBuiltinFallbackBackend: string;
+  proRagBoxWorkspaces: ProRagBoxWorkspaceOption[];
+  proRagBoxKnowledgeBaseStatus: Record<string, ProRagBoxKnowledgeBaseStatus>;
 };
 
 export function KnowledgeView({
@@ -94,7 +169,43 @@ export function KnowledgeView({
   activeRAGSearchCollection,
   setActiveRAGSearchCollectionId,
   activeRAGSearchResults,
+  ragSearchDiagnostics,
+  uploadKnowledgeBaseFile,
+  uploadingKnowledgeBaseId,
+  proCopy,
+  proRagBoxVectorConnections,
+  proRagBoxBuiltinFallbackBackend,
+  proRagBoxWorkspaces,
+  proRagBoxKnowledgeBaseStatus,
 }: KnowledgeViewProps) {
+  const [uploadModes, setUploadModes] = useState<Record<string, 'keep' | 'transient'>>({});
+  const uploadInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const autoReindexAllowed = ragCollectionForm.service_mode === 'bleve_only';
+
+  function serviceModeLabel(mode?: string) {
+    switch (mode) {
+      case 'ragbox_only':
+        return proCopy.ragboxKBServiceModeRagBoxOnly;
+      case 'dual':
+        return proCopy.ragboxKBServiceModeDual;
+      case 'bleve_only':
+      default:
+        return proCopy.ragboxKBServiceModeBleveOnly;
+    }
+  }
+
+  function searchSourceLabel(source?: string) {
+    switch (source) {
+      case 'ragbox':
+        return proCopy.ragboxSearchSourceRagbox;
+      case 'hybrid':
+        return proCopy.ragboxSearchSourceHybrid;
+      case 'bleve':
+      default:
+        return proCopy.ragboxSearchSourceBleve;
+    }
+  }
+
   return (
     <section className="space-y-6">
       <div className="rounded-2xl border border-border bg-card p-6">
@@ -151,7 +262,6 @@ export function KnowledgeView({
                   <label className="block space-y-2">
                     <span className="text-sm text-muted-foreground">{messages.sourceFolderTitle}</span>
                     <input
-                      required
                       value={ragCollectionForm.source_path}
                       onChange={(event) =>
                         setRAGCollectionForm((current) => ({ ...current, source_path: event.target.value }))
@@ -159,7 +269,77 @@ export function KnowledgeView({
                       className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
                       placeholder={messages.sourceFolderPlaceholder}
                     />
+                    <p className="text-xs text-muted-foreground">{messages.createKnowledgeBaseDescription}</p>
                   </label>
+                  <label className="block space-y-2">
+                    <span className="text-sm text-muted-foreground">{proCopy.ragboxKBServiceMode}</span>
+                    <select
+                      value={ragCollectionForm.service_mode}
+                      onChange={(event) =>
+                        setRAGCollectionForm((current) => ({
+                          ...current,
+                          service_mode: event.target.value as 'bleve_only' | 'ragbox_only' | 'dual',
+                          auto_reindex:
+                            event.target.value === 'bleve_only'
+                              ? current.auto_reindex
+                              : false,
+                        }))
+                      }
+                      className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
+                    >
+                      <option value="bleve_only">{proCopy.ragboxKBServiceModeBleveOnly}</option>
+                      <option value="ragbox_only">{proCopy.ragboxKBServiceModeRagBoxOnly}</option>
+                      <option value="dual">{proCopy.ragboxKBServiceModeDual}</option>
+                    </select>
+                    <p className="text-xs text-muted-foreground">{proCopy.ragboxKBServiceModeHint}</p>
+                  </label>
+                  {ragCollectionForm.service_mode !== 'bleve_only' ? (
+                    <>
+                      <label className="block space-y-2">
+                        <span className="text-sm text-muted-foreground">Existing RagBox workspace</span>
+                        <select
+                          value={ragCollectionForm.existing_workspace_id}
+                          onChange={(event) =>
+                            setRAGCollectionForm((current) => ({ ...current, existing_workspace_id: event.target.value }))
+                          }
+                          className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
+                        >
+                          <option value="">Create or use MCPBox-managed workspace</option>
+                          {proRagBoxWorkspaces.map((workspace) => (
+                            <option key={workspace.id} value={workspace.id}>
+                              {workspace.name} · {workspace.vector_connection_id} · {workspace.access_mode}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-xs text-muted-foreground">{proCopy.ragboxKBExistingWorkspaceHint}</p>
+                      </label>
+                      <label className="block space-y-2">
+                        <span className="text-sm text-muted-foreground">{proCopy.ragboxKBVectorConnection}</span>
+                        <select
+                          value={ragCollectionForm.vector_connection_id}
+                          onChange={(event) =>
+                            setRAGCollectionForm((current) => ({ ...current, vector_connection_id: event.target.value }))
+                          }
+                          disabled={!!ragCollectionForm.existing_workspace_id}
+                          className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          <option value="">
+                            {proCopy.ragboxKBVectorConnectionDefault}: {proRagBoxBuiltinFallbackBackend}
+                          </option>
+                          {proRagBoxVectorConnections.map((connection) => (
+                            <option key={connection.id} value={connection.id}>
+                              {connection.name} · {connection.backend_type}{connection.is_default ? ' · default' : ''}
+                            </option>
+                          ))}
+                        </select>
+                        <p className="text-xs text-muted-foreground">
+                          {ragCollectionForm.existing_workspace_id
+                            ? proCopy.ragboxKBExistingWorkspaceUsesOwnVectorConnection
+                            : proCopy.ragboxKBVectorConnectionHint}
+                        </p>
+                      </label>
+                    </>
+                  ) : null}
                   <label className="flex items-center gap-3 rounded-md border border-border bg-background px-3 py-3 text-sm">
                     <input
                       type="checkbox"
@@ -167,6 +347,7 @@ export function KnowledgeView({
                       onChange={(event) =>
                         setRAGCollectionForm((current) => ({ ...current, auto_reindex: event.target.checked }))
                       }
+                      disabled={!autoReindexAllowed}
                       className="h-4 w-4 rounded border-border"
                     />
                     <div>
@@ -200,8 +381,67 @@ export function KnowledgeView({
           <div className="space-y-3">
             {allRAGCollections.map((collection) => (
               <div key={collection.collection_id} className="rounded-xl border border-border bg-background p-4">
+                {(() => {
+                  const status = proRagBoxKnowledgeBaseStatus[collection.collection_id];
+                  const usesRagBox = collection.service_mode !== 'bleve_only';
+                  if (!status || !usesRagBox) {
+                    return null;
+                  }
+
+                  return (
+                    <div className="mb-4 rounded-xl border border-electric-blue/20 bg-electric-blue/5 p-4 text-sm">
+                      <div className="font-medium text-foreground">{proCopy.ragboxKBEndpointTitle}</div>
+                      <div className="mt-2 grid gap-2 text-muted-foreground lg:grid-cols-2">
+                        <div>
+                          {proCopy.ragboxKBEndpointStatus}: {status.binding?.sync_status ?? 'pending'}
+                        </div>
+                        {status.binding?.ragbox_workspace_id ? (
+                          <div>
+                            RagBox workspace: <code className="text-xs">{status.binding.ragbox_workspace_id}</code>
+                          </div>
+                        ) : null}
+                        {status.binding?.ragbox_workspace_vector_connection_id ? (
+                          <div>
+                            Effective workspace vector connection: <code className="text-xs">{status.binding.ragbox_workspace_vector_connection_id}</code>
+                          </div>
+                        ) : null}
+                        <div>
+                          {proCopy.ragboxKBEndpointLocalFolder}:{' '}
+                          <code className="text-xs">
+                            {collection.source_path || 'not set'}
+                          </code>
+                        </div>
+                        <div>
+                          {proCopy.ragboxKBManagedFolder}:{' '}
+                          <code className="text-xs">
+                            {collection.managed_source_path || status.shadow_source_path || 'not set'}
+                          </code>
+                        </div>
+                        {status.ingest_url_path ? (
+                          <div className="lg:col-span-2">
+                            {proCopy.ragboxKBEndpointPath}: <code className="text-xs">{status.ingest_url_path}</code>
+                          </div>
+                        ) : null}
+                        {status.token_secret ? (
+                          <div className="lg:col-span-2">
+                            {proCopy.ragboxKBEndpointToken}: <code className="text-xs">{status.token_secret}</code>
+                          </div>
+                        ) : null}
+                        {status.shadow_source_path ? (
+                          <div className="lg:col-span-2">
+                            {proCopy.ragboxKBEndpointShadow}: <code className="text-xs">{status.shadow_source_path}</code>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div className="min-w-0">
+                    {(() => {
+                      const status = proRagBoxKnowledgeBaseStatus[collection.collection_id];
+                      return (
+                        <>
                     <div className="flex items-center gap-2">
                       <Database className="h-4 w-4 text-electric-blue" />
                       <div className="font-medium">{collection.name}</div>
@@ -210,7 +450,10 @@ export function KnowledgeView({
                       <span className="rounded-full border border-electric-blue/20 bg-electric-blue/8 px-2.5 py-1 text-[11px] font-medium text-electric-blue">
                         {messages.supportedFormatsLabel}: {messages.supportedFormatsValue}
                       </span>
-                      {collection.auto_reindex ? (
+                      <span className="rounded-full border border-border px-2.5 py-1 text-[11px] font-medium text-foreground">
+                        {proCopy.ragboxKBServiceMode}: {serviceModeLabel(collection.service_mode)}
+                      </span>
+                      {collection.auto_reindex && collection.service_mode === 'bleve_only' ? (
                         <span className="rounded-full border border-status-running/30 bg-status-running/10 px-2.5 py-1 text-[11px] font-medium text-status-running">
                           {messages.autoReindexBadge}
                         </span>
@@ -219,9 +462,20 @@ export function KnowledgeView({
                     <div className="mt-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
                       {collection.collection_id} · {collection.data_type}
                     </div>
+                    {status?.requested_vector_connection_id ? (
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        Workspace vector connection request: <code>{status.requested_vector_connection_id}</code>
+                      </div>
+                    ) : null}
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      {proCopy.ragboxKBManagedFolder}: <code>{collection.managed_source_path}</code>
+                    </div>
                     <code className="mt-2 block overflow-x-auto text-xs text-electric-blue">
                       {collection.index_path}
                     </code>
+                        </>
+                      );
+                    })()}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <button
@@ -243,6 +497,60 @@ export function KnowledgeView({
                 </div>
 
                 <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                  <div className="rounded-xl border border-border bg-card p-4">
+                    <div className="text-sm font-medium">{proCopy.ragboxKBUploadTitle}</div>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {proCopy.ragboxKBUploadHint}
+                    </p>
+                    <input
+                      ref={(element) => {
+                        uploadInputRefs.current[collection.collection_id] = element;
+                      }}
+                      type="file"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (!file) {
+                          return;
+                        }
+                        void uploadKnowledgeBaseFile(
+                          collection.collection_id,
+                          file,
+                          uploadModes[collection.collection_id] ?? 'keep',
+                        ).finally(() => {
+                          event.target.value = '';
+                        });
+                      }}
+                      className="hidden"
+                    />
+                    <label className="mt-3 block space-y-2">
+                      <span className="text-sm text-muted-foreground">{proCopy.ragboxKBUploadMode}</span>
+                      <select
+                        value={uploadModes[collection.collection_id] ?? 'keep'}
+                        onChange={(event) =>
+                          setUploadModes((current) => ({
+                            ...current,
+                            [collection.collection_id]: event.target.value as 'keep' | 'transient',
+                          }))
+                        }
+                        className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
+                      >
+                        <option value="keep">{proCopy.ragboxKBUploadModeKeep}</option>
+                        <option value="transient">{proCopy.ragboxKBUploadModeTransient}</option>
+                      </select>
+                    </label>
+                    <button
+                      onClick={() => uploadInputRefs.current[collection.collection_id]?.click()}
+                      disabled={uploadingKnowledgeBaseId === collection.collection_id}
+                      className="mt-3 inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {uploadingKnowledgeBaseId === collection.collection_id ? (
+                        <LoaderCircle className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Plus className="h-4 w-4" />
+                      )}
+                      {proCopy.ragboxKBUploadButton}
+                    </button>
+                  </div>
                   <div className="rounded-xl border border-border bg-card p-4">
                     <div className="text-sm font-medium">{messages.indexFolderTitle}</div>
                     <p className="mt-1 text-sm text-muted-foreground">
@@ -329,6 +637,12 @@ export function KnowledgeView({
             </div>
           ) : null}
 
+          {ragSearchDiagnostics ? (
+            <div className="rounded-xl border border-electric-blue/20 bg-electric-blue/5 px-4 py-3 text-sm text-muted-foreground">
+              {ragSearchDiagnostics}
+            </div>
+          ) : null}
+
           {activeRAGSearchResults.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-background px-4 py-8 text-sm text-muted-foreground">
               {messages.searchResultsEmpty}
@@ -336,8 +650,18 @@ export function KnowledgeView({
           ) : (
             <div className="max-h-[65vh] space-y-3 overflow-y-auto pr-1">
               {activeRAGSearchResults.map((item) => (
-                <div key={item.id} className="rounded-lg border border-border bg-background p-3">
-                  <code className="block overflow-x-auto text-xs text-electric-blue">{item.file_path}</code>
+                <div key={`${item.id}-${item.source ?? 'bleve'}`} className="rounded-lg border border-border bg-background p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <code className="block overflow-x-auto text-xs text-electric-blue">{item.file_path}</code>
+                    {item.source ? (
+                      <span className="inline-flex rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                        {searchSourceLabel(item.source)}
+                      </span>
+                    ) : null}
+                    {typeof item.score === 'number' ? (
+                      <span className="text-[11px] text-muted-foreground">score {item.score.toFixed(2)}</span>
+                    ) : null}
+                  </div>
                   {item.section ? (
                     <div className="mt-2 inline-flex rounded-full border border-electric-blue/20 bg-electric-blue/8 px-2.5 py-1 text-[11px] font-medium text-electric-blue">
                       {item.section}

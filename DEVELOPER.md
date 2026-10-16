@@ -13,12 +13,46 @@ Today MCPBox is:
 - a project-based organizer for local and remote MCP backends
 - an aggregation endpoint for enabled servers inside a project
 - an operator UI for project lifecycle, server lifecycle, inspection, health checks, and logging
+- user accounts, roles, sessions, access tokens, and optional OIDC SSO
 - a reusable core module for the current MCPBox build
 
 Today MCPBox is not:
-- a multi-user platform with auth and roles
 - a full observability platform, even though it now includes basic built-in latency, error, and traffic metrics
 - a distributed MCP orchestration system across many hosts
+
+## MCPBox 1.3.0: Unified Application
+
+MCPBox includes the former MCPBoxPro backend and UI in this repository under Apache-2.0. There is no commercial license check or dependency on a sibling MCPBoxPro directory.
+
+### Authentication and compatibility
+
+The admin UI requires login. Administrative API reads require `pro:read`, writes require `pro:write`, and privileged operations require `pro:admin`. Public metadata, login, and SSO routes remain accessible before login; MCP/OAuth endpoints apply their own authentication rules. Existing `/api/pro/*` routes, `pro:*` scopes, `MCPBOX_PRO_*` environment variables, and database table names remain unchanged for compatibility.
+
+Create the first administrator with the built binary:
+
+```bash
+./MCPBox admin create --email admin@example.com --password 'replace-with-a-unique-password' --name 'Admin'
+```
+
+The same command updates an existing local account with the same email. Passwords require at least eight characters. A signed-in administrator can also change passwords in Settings → Users. On startup, a saved session is validated before loading protected application data; invalid saved tokens are cleared silently.
+
+### Modules and data ownership
+
+- `internal/proauth`, `internal/prosso`: local users, roles, tokens, sessions, OIDC SSO.
+- `internal/prohttp`: authenticated administration routes, project OAuth, integration endpoints, and runtime authorization.
+- `internal/propolicy`, `internal/proprojects`: PolicyBox integration, published manifests, project bindings and shadows.
+- `internal/proragbox`: external RagBox configuration, bindings, ingest, and search.
+- `internal/prostorage`: bootstrap storage settings and optional operational PostgreSQL connectivity. This does not imply that every shared-core table has moved to PostgreSQL; see [storage architecture](docs/STORAGE_ARCHITECTURE_RU.md).
+- `internal/cli`: persistent CLI definitions, catalog discovery, and bounded execution; see [CLI documentation](docs/CLI.md).
+- `html/src/app/pro`: access and integration UI, built together with the shared frontend into `internal/httpapi/ui/dist`.
+
+SQLite remains the default bootstrap database. Default database and relative runtime data paths are resolved beside the executable, independently of the terminal working directory. Existing `.mcpboxpro/rag-shadow` paths remain compatible. RagBox and PolicyBox are separate optional services.
+
+Default listeners are `127.0.0.1:38181` for administration and `0.0.0.0:38182` for MCP. Configure them with `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, `MCPBOX_MCP_PORT`, or the corresponding CLI flags.
+
+Build independently with `GOWORK=off`; verify backend changes with `GOWORK=off go test ./...`. Release builds use `./build-release.sh host` or `./build-release.sh all` and write to `release/<os>/<arch>/MCPBox/`. Rebuild the Go binary after frontend changes to embed the new UI.
+
+See [migration notes](docs/MERGE.md) and [1.3.0 release notes](release/RELEASE-1.3.0.md).
 
 ## Core Model
 
@@ -73,7 +107,7 @@ Important behavior:
 - LM Studio deeplink launcher through `POST /api/projects/{id}/launch-lmstudio`
 
 Knowledge Base note:
-- the current RAG layer uses classic local full-text search, not embedding indexes
+- the built-in Bleve RAG layer uses local full-text search without embedding indexes; optional RagBox retrieval runs in the external service
 - collections are stored on disk and searched through Bleve
 - no external vector database is required
 - no embedding generation pipeline is required at this stage
@@ -345,16 +379,17 @@ html                         React + Vite source for the embedded admin UI
 Build the embedded UI first, then build the Go binary:
 
 ```bash
-npm --prefix html install
+npm --prefix html ci
 npm --prefix html run build
-go build -o MCPBox .
+GOWORK=off go build -o MCPBox .
 ```
 
 On Windows:
 
 ```powershell
-npm --prefix html install
+npm --prefix html ci
 npm --prefix html run build
+$env:GOWORK = "off"
 go build -o MCPBox.exe .
 ```
 
@@ -362,18 +397,18 @@ The frontend build output is written to `internal/httpapi/ui/dist` and embedded 
 
 ## Run
 
-Default port: `38180`
+Default port: `38181`
 
 Run from source:
 
 ```bash
-go run .
+GOWORK=off go run .
 ```
 
 Run the embedded local Ollama host directly:
 
 ```bash
-go run . ollama-chat --config /path/to/project.yml --model llama3.2
+GOWORK=off go run . ollama-chat --config /path/to/project.yml --model llama3.2
 ```
 
 When MCPBox starts successfully, it opens the local UI automatically and prints:
@@ -385,10 +420,10 @@ When MCPBox starts successfully, it opens the local UI automatically and prints:
 Priority order:
 1. CLI flag `-port`
 2. Environment variable `MCPBOX_PORT`
-3. Default `38180`
+3. Default `38181`
 
 Examples:
 
 ```bash
-go run . -port 39000
+GOWORK=off go run . -port 39000
 ```

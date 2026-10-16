@@ -5,7 +5,7 @@ import type { LucideIcon } from 'lucide-react';
 import { dictionaries } from '../i18n';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
-type ViewId = 'projects' | 'knowledge' | 'market' | 'logs' | 'pro';
+type ViewId = 'projects' | 'cli' | 'knowledge' | 'market' | 'logs' | 'pro' | 'settings';
 
 type NavigationItem = {
   id: ViewId;

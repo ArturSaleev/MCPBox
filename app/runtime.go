@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -18,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ArturSaleev/MCPBox/internal/cli"
 	"github.com/ArturSaleev/MCPBox/internal/httpapi"
 	"github.com/ArturSaleev/MCPBox/internal/installer"
 	"github.com/ArturSaleev/MCPBox/internal/llamacpphost"
@@ -110,6 +112,24 @@ func Run(options Options) error {
 			return fmt.Errorf("edition startup hook failed: %w", err)
 		}
 	}
+
+	// Catalog failures do not prevent startup. Missing binaries are only detected,
+	// never installed; automatic imports never modify existing entries or links.
+	go func() {
+		result, err := (cli.CatalogService{Store: store}).Sync(rootCtx)
+		if err != nil {
+			log.Printf("CLI catalog: %v", err)
+			return
+		}
+		if len(result.Added) > 0 {
+			log.Printf("CLI catalog: registered %s", strings.Join(result.Added, ", "))
+			detail, _ := json.Marshal(map[string]any{"added": result.Added, "source": result.Source, "version": result.Version})
+			_ = store.CreateAuditLog(rootCtx, &models.AuditLog{Action: "cli_catalog_sync", Actor: "startup", Detail: string(detail)})
+		}
+		if result.Warning != "" {
+			log.Printf("CLI catalog: using bundled defaults (%s)", result.Warning)
+		}
+	}()
 
 	api := httpapi.NewServerWithInstaller(store, registry, packageInstaller, httpapi.Options{
 		EditionID:           options.Edition.ID,

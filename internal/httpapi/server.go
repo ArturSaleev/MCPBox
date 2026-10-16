@@ -530,6 +530,10 @@ func sharedAdminAPIScope(r *http.Request) string {
 		return "pro:admin"
 	}
 
+	if (cleanedPath == "/api/cli" || strings.HasPrefix(cleanedPath, "/api/cli/") || strings.Contains(cleanedPath, "/cli")) && r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return "pro:admin"
+	}
+
 	switch r.Method {
 	case http.MethodGet, http.MethodHead:
 		return "pro:read"
@@ -554,6 +558,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /api/catalog/items", s.handleCatalogList)
 	s.mux.HandleFunc("POST /api/catalog/items/", s.handleCatalogItemAction)
 	s.mux.HandleFunc("POST /api/catalog/sync", s.handleCatalogSync)
+	s.registerCLIRoutes()
 	s.mux.HandleFunc("GET /api/rag/collections", s.handleListRAGCollections)
 	s.mux.HandleFunc("POST /api/rag/collections", s.handleCreateRAGCollection)
 	s.mux.HandleFunc("POST /api/rag/collections/", s.handleRAGCollectionAction)
@@ -1431,8 +1436,8 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	servers := s.projectConnectServers(*project)
-	if len(servers) == 0 && len(project.RAGCollections) == 0 {
-		err := errors.New("project has no enabled MCP servers configured")
+	if len(servers) == 0 && len(project.RAGCollections) == 0 && !projectHasActiveCLI(*project) {
+		err := errors.New("project has no enabled MCP servers, CLI or connected knowledge bases configured")
 		s.logAudit(r.Context(), &project.ID, nil, "connect_failed", actor, truncateDetail(err.Error()))
 		writeError(w, http.StatusBadGateway, err)
 		return
@@ -2027,7 +2032,7 @@ func dedupeNonEmptyStrings(values []string) []string {
 }
 
 func (s *Server) projectConnectionReady(project models.Project) bool {
-	return len(s.projectConnectServers(project)) > 0 || len(project.RAGCollections) > 0
+	return len(s.projectConnectServers(project)) > 0 || len(project.RAGCollections) > 0 || projectHasActiveCLI(project)
 }
 
 func (s *Server) connectURL(r *http.Request, token string) string {

@@ -4,6 +4,7 @@ import { Server } from 'lucide-react';
 
 import { dictionaries } from '../i18n';
 import type { CatalogItem, InstalledPackage } from '../market';
+import { ProjectCLIPanel } from './CLIView';
 import { ProjectKnowledgePanel } from './ProjectKnowledgePanel';
 import { ProjectLaunchPanel } from './ProjectLaunchPanel';
 import { ProjectPromptPanel } from './ProjectPromptPanel';
@@ -179,6 +180,7 @@ type AuthServer = {
 };
 
 type ProjectsViewProps = {
+  onCLIChanged?: () => void | Promise<void>;
   labels: typeof dictionaries.en.labels;
   messages: typeof dictionaries.en.messages;
   selectedProject: ProjectStatus | null;
@@ -316,6 +318,7 @@ type ProjectsViewProps = {
 };
 
 export function ProjectsView({
+  onCLIChanged,
   labels,
   messages,
   selectedProject,
@@ -485,7 +488,7 @@ export function ProjectsView({
       />
 
       <Tabs defaultValue="mcp" className="gap-5">
-        <TabsList className="grid h-auto w-full grid-cols-3 rounded-2xl border border-border bg-card p-1.5">
+        <TabsList className="grid h-auto w-full grid-cols-4 rounded-2xl border border-border bg-card p-1.5">
           <TabsTrigger
             className="h-auto rounded-xl px-4 py-3 text-sm font-semibold text-muted-foreground transition-all data-[state=active]:border-electric-blue data-[state=active]:bg-electric-blue data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-electric-blue/20"
             value="mcp"
@@ -497,6 +500,7 @@ export function ProjectsView({
               </span>
             </span>
           </TabsTrigger>
+          <TabsTrigger value="cli" className="h-auto rounded-xl px-4 py-3 text-sm font-semibold text-muted-foreground data-[state=active]:bg-electric-blue data-[state=active]:text-white">CLI</TabsTrigger>
           <TabsTrigger
             className="h-auto rounded-xl px-4 py-3 text-sm font-semibold text-muted-foreground transition-all data-[state=active]:border-electric-blue data-[state=active]:bg-electric-blue data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-electric-blue/20"
             value="rag"
@@ -560,6 +564,8 @@ export function ProjectsView({
             deleteServer={deleteServer}
           />
         </TabsContent>
+
+        <TabsContent value="cli"><ProjectCLIPanel key={selectedProject.project_id} projectID={selectedProject.project_id} onChanged={onCLIChanged} language={labels.projects === dictionaries.ru.labels.projects ? 'ru' : 'en'} /></TabsContent>
 
         <TabsContent value="rag">
           <ProjectKnowledgePanel

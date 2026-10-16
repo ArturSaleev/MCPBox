@@ -1,3 +1,10 @@
+export class APIRequestError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'APIRequestError';
+  }
+}
+
 type ApiError = {
   error: string;
 };
@@ -37,7 +44,7 @@ export async function apiRequest<T>(
       // Ignore JSON parsing errors and keep fallback message.
     }
 
-    throw new Error(message);
+    throw new APIRequestError(message, response.status);
   }
 
   return (await response.json()) as T;

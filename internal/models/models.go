@@ -14,6 +14,7 @@ const (
 )
 
 type Project struct {
+	CLIs                  []CLI                    `gorm:"many2many:project_clis;" json:"clis,omitempty"`
 	ID                    uint                     `gorm:"primaryKey" json:"id"`
 	Name                  string                   `gorm:"size:255;not null" json:"name"`
 	Description           string                   `gorm:"type:text" json:"description"`

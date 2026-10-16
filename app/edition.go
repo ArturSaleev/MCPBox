@@ -56,6 +56,7 @@ func FreeEdition() Edition {
 		BinaryName: "MCPBox",
 		Capabilities: []string{
 			"projects",
+			"cli",
 			"market",
 			"rag",
 			"ollama",

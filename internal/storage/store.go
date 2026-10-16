@@ -59,7 +59,7 @@ func NewStore(dsn string) (*Store, error) {
 	if err := migrateLegacyProjectOAuthClientTable(db); err != nil {
 		return nil, err
 	}
-	if err := db.AutoMigrate(&models.Project{}, &models.MCPServer{}); err != nil {
+	if err := db.AutoMigrate(&models.CLICatalogDismissal{}, &models.CLI{}, &models.ProjectCLI{}, &models.Project{}, &models.MCPServer{}); err != nil {
 		return nil, err
 	}
 	if err := ensureProjectOAuthClientSchema(db); err != nil {
@@ -552,6 +552,12 @@ func (s *Store) DuplicateProject(ctx context.Context, source *models.Project, na
 			}
 		}
 
+		for _, entry := range source.CLIs {
+			if err := tx.Create(&models.ProjectCLI{ProjectID: duplicated.ID, CLIID: entry.ID}).Error; err != nil {
+				return err
+			}
+		}
+
 		for _, collection := range source.RAGCollections {
 			link := &models.ProjectRAGCollection{
 				ProjectID:       duplicated.ID,
@@ -574,6 +580,7 @@ func (s *Store) DuplicateProject(ctx context.Context, source *models.Project, na
 func (s *Store) ListProjects(ctx context.Context) ([]models.Project, error) {
 	var projects []models.Project
 	err := s.db.WithContext(ctx).
+		Preload("CLIs").
 		Preload("Servers").
 		Preload("RAGCollections").
 		Preload("InstalledIntegrations").
@@ -587,6 +594,7 @@ func (s *Store) ListProjects(ctx context.Context) ([]models.Project, error) {
 func (s *Store) GetProject(ctx context.Context, id uint) (*models.Project, error) {
 	var project models.Project
 	err := s.db.WithContext(ctx).
+		Preload("CLIs").
 		Preload("Servers").
 		Preload("RAGCollections").
 		Preload("InstalledIntegrations").
@@ -603,6 +611,7 @@ func (s *Store) GetProject(ctx context.Context, id uint) (*models.Project, error
 func (s *Store) GetProjectByToken(ctx context.Context, token string) (*models.Project, error) {
 	var project models.Project
 	err := s.db.WithContext(ctx).
+		Preload("CLIs").
 		Preload("Servers").
 		Preload("RAGCollections").
 		Preload("InstalledIntegrations").
@@ -764,6 +773,9 @@ func (s *Store) ListAutoStartServers(ctx context.Context) ([]models.MCPServer, e
 
 func (s *Store) DeleteProject(ctx context.Context, projectID uint) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("project_id = ?", projectID).Delete(&models.ProjectCLI{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("project_id = ?", projectID).Delete(&models.AuditLog{}).Error; err != nil {
 			return err
 		}

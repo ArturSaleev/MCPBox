@@ -111,7 +111,10 @@ export type RAGCollection = {
   name: string;
   data_type: string;
   source_path: string;
+  managed_source_path: string;
   auto_reindex: boolean;
+  service_mode: 'bleve_only' | 'ragbox_only' | 'dual' | string;
+  vector_connection_id: string;
   index_path: string;
 };
 
@@ -119,7 +122,10 @@ export type RAGSearchResult = {
   id: string;
   file_path: string;
   section?: string;
+  title?: string;
   content: string;
+  source?: 'bleve' | 'ragbox' | 'hybrid' | string;
+  score?: number;
 };
 
 export type InstalledIntegration = {
@@ -155,32 +161,10 @@ export type OllamaStatus = {
   default_model: string;
 };
 
-export type LlamaCppStatus = {
-  installed: boolean;
-  configured: boolean;
-  model_path: string;
-  model_name: string;
-  server_url: string;
-  chat_template_file: string;
-  running: boolean;
-  managed: boolean;
-  active_model_path: string;
-  active_model_name: string;
-};
-
 export type OllamaLaunchResponse = {
   project_id: number;
   model: string;
   config_path: string;
-  command_preview: string;
-};
-
-export type LlamaCppLaunchResponse = {
-  project_id: number;
-  model_path: string;
-  model_name: string;
-  server_url: string;
-  web_ui_url: string;
   command_preview: string;
 };
 
@@ -257,7 +241,7 @@ export type EditionMeta = {
   capabilities: string[];
 };
 
-export type LogsFilterMode = 'all' | 'pro';
+export type LogsFilterMode = 'all' | 'pro' | 'policy';
 
 export type ServerInspection = {
   protocol_version: string;
@@ -303,4 +287,26 @@ export type ServerToolStatus = {
   input_schema?: unknown;
   output_schema?: unknown;
   enabled: boolean;
+};
+
+export type LlamaCppStatus = {
+  installed: boolean;
+  configured: boolean;
+  model_path: string;
+  model_name: string;
+  server_url: string;
+  chat_template_file: string;
+  running: boolean;
+  managed: boolean;
+  active_model_path: string;
+  active_model_name: string;
+};
+
+export type LlamaCppLaunchResponse = {
+  project_id: number;
+  model_path: string;
+  model_name: string;
+  server_url: string;
+  web_ui_url: string;
+  command_preview: string;
 };
