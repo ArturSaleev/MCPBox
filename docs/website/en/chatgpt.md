@@ -99,3 +99,5 @@ Create the app as a draft first. In a new ChatGPT conversation, select the app w
 - Review tools again after an MCP package or server is updated.
 
 ChatGPT app features, plan availability, and screens can change. For the latest workspace rules, see [Apps in ChatGPT](https://help.openai.com/en/articles/11487775-connectors-in-chatgpt).
+
+Funnel on the same machine works with `127.0.0.1:38182`; it does not require binding to `0.0.0.0`. See [network configuration](network-access.md).

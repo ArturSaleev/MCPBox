@@ -6,7 +6,7 @@
 
 Keep a built `MCPBox` executable in a dedicated writable directory. Run it as a dedicated OS account and retain its environment in your service manager. Configure restart behavior and logs there. The repository does not provide a universal systemd, launchd, Windows service or Docker Compose installation.
 
-The admin listener defaults to localhost; the MCP listener defaults to all IPv4 interfaces. For remote administration, an SSH tunnel can keep the admin port private:
+Current source defaults both listeners to localhost. Published v1.3.0 binaries still bind MCP to all IPv4 interfaces unless explicitly configured. For remote administration, an SSH tunnel can keep the admin port private:
 
 ```bash
 ssh -N -L 38181:127.0.0.1:38181 user@server
@@ -40,3 +40,5 @@ For rollback after an unsuccessful upgrade, stop the new executable and restore 
 ## Diagnose before changing data
 
 `GET /healthz` confirms HTTP service health, not the health of every integration. Use Logs/Analytics and individual server checks. A `401` usually needs the correct credential; `403` needs the required scope or project authorization. A paused project, disabled server, missing executable or unavailable dependency needs its own fix. See [troubleshooting](troubleshooting.md).
+
+Defaults above describe current source. Published v1.3.0 uses the earlier MCP bind `0.0.0.0`; explicitly set `--mcp-host 127.0.0.1` until updating. Enable direct remote access with `--mcp-host 0.0.0.0` or `MCPBOX_MCP_HOST=0.0.0.0`. [Network access and project isolation](network-access.md).

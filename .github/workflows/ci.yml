@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOWORK: 'off'
+
+jobs:
+  checks:
+    name: Tests and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: html/package-lock.json
+      - name: Check Go formatting
+        shell: bash
+        run: |
+          unformatted="$(git ls-files -z '*.go' | xargs -0 gofmt -l)"
+          if [[ -n "$unformatted" ]]; then
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
+      - name: Check shell syntax and documentation links
+        run: |
+          bash -n build-release.sh scripts/release-checksums.sh
+          python3 scripts/check-doc-links.py
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+      - name: Install frontend dependencies
+        run: npm --prefix html ci
+      - name: Build embedded frontend
+        run: npm --prefix html run build
+      - name: Verify Go modules
+        run: go mod verify
+      - name: Validate Actions workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 -shellcheck=''
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./...
+      - name: Build executable
+        run: go build -trimpath -o "$RUNNER_TEMP/MCPBox" .
+      - name: Check dependency files remain unchanged
+        run: git diff --exit-code -- go.mod go.sum html/package-lock.json
+
+  dependency-audit:
+    name: Dependency audit (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: html/package-lock.json
+      - name: Install frontend dependencies
+        run: npm --prefix html ci
+      - name: Scan npm production dependencies
+        id: npm-audit
+        continue-on-error: true
+        run: npm --prefix html audit --omit=dev --audit-level=high --json > npm-audit.json
+      - name: Scan Go vulnerabilities
+        id: go-audit
+        continue-on-error: true
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./... > govulncheck.txt 2>&1
+      - name: Summarize audit outcomes
+        if: always()
+        env:
+          NPM_OUTCOME: ${{ steps.npm-audit.outcome }}
+          GO_OUTCOME: ${{ steps.go-audit.outcome }}
+        run: |
+          {
+            echo '### Dependency audit (advisory)'
+            echo "npm: $NPM_OUTCOME; govulncheck: $GO_OUTCOME"
+            echo 'Review the report artifact. A failed scan may mean findings or an audit-service/tool error.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$NPM_OUTCOME" != success ] || [ "$GO_OUTCOME" != success ]; then
+            echo '::warning::Dependency audit needs review; see dependency-audit-reports.'
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: dependency-audit-reports
+          path: |
+            npm-audit.json
+            govulncheck.txt
+          if-no-files-found: warn
+          retention-days: 14

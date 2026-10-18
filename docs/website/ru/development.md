@@ -45,6 +45,6 @@ SQLite остаётся bootstrap-слоем; PostgreSQL не означает �
 
 ## Релизы
 
-Сначала установите frontend-зависимости (`npm ci` выше), затем выполните `./build-release.sh host` или `./build-release.sh all`. Скрипт пересобирает UI и создаёт `release/<os>/<arch>/MCPBox/` для macOS, Linux и Windows на amd64/arm64. Windows-бинарник имеет расширение `.exe`. Релизный скрипт копирует README и LICENSE; полный комплект документации находится в репозитории.
+Сначала установите frontend-зависимости (`npm ci` выше), затем выполните `./build-release.sh host` или `./build-release.sh all`. Скрипт пересобирает UI и создаёт `release/MCPBox-<os>-<arch>` для macOS, Linux и Windows на amd64/arm64. Windows-бинарник имеет расширение `.exe`. Скрипт также создаёт `release/SHA256SUMS` текущей сборки; документация и LICENSE остаются в репозитории. В именах macOS-файлов используется `macos`.
 
 Подробности: [руководство разработчика](../../../DEVELOPER-ru.md), [HTTP API](api.md), [CLI reference](../../CLI.md). При изменениях поведения обновляйте обе языковые версии документации. Проверки backend не подтверждают работу внешних OAuth, PolicyBox/RagBox и реальных MCP-клиентов — для них нужны отдельные интеграционные проверки.

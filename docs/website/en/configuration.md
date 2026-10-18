@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `MCPBOX_HOST` | `127.0.0.1` | Admin UI/API bind address |
 | `MCPBOX_PORT` | `38181` | Admin UI/API TCP port |
-| `MCPBOX_MCP_HOST` | `0.0.0.0` | MCP bind address (all IPv4 interfaces) |
+| `MCPBOX_MCP_HOST` | `127.0.0.1` | MCP bind address (local machine) |
 | `MCPBOX_MCP_PORT` | `38182` | MCP TCP port |
 | `MCPBOX_PRO_BOOTSTRAP_TOKEN` | unset | Emergency admin bearer credential |
 | `MCPBOX_OLLAMA_MODEL` | unset | Preferred local Ollama model |
@@ -53,3 +53,5 @@ Configure RagBox, PolicyBox, PostgreSQL and log backends in Settings. SQLite rem
 Compatibility names `MCPBOX_PRO_*`, `/api/pro/*`, `pro:*`, and `.mcpboxpro` remain in the unified application and do not require a paid edition.
 
 Sources: [runtime](../../../app/runtime.go), [entry point](../../../main.go), [SSO](../../../internal/prosso/service.go), [launcher](../../../internal/httpapi/llamacpp.go).
+
+Defaults above describe current source. Published v1.3.0 uses the earlier MCP bind `0.0.0.0`; explicitly set `--mcp-host 127.0.0.1` until updating. Enable direct remote access with `--mcp-host 0.0.0.0` or `MCPBOX_MCP_HOST=0.0.0.0`. [Network access and project isolation](network-access.md).

@@ -45,6 +45,6 @@ SQLite remains the bootstrap layer; PostgreSQL does not imply migration of every
 
 ## Releases
 
-Install frontend dependencies first (`npm ci` above), then run `./build-release.sh host` or `./build-release.sh all`. The script rebuilds the UI and produces `release/<os>/<arch>/MCPBox/` for macOS, Linux and Windows on amd64/arm64. Windows binaries use `.exe`. The release script copies README and LICENSE; the full documentation set remains in the repository.
+Install frontend dependencies first (`npm ci` above), then run `./build-release.sh host` or `./build-release.sh all`. The script rebuilds the UI and produces `release/MCPBox-<os>-<arch>` for macOS, Linux and Windows on amd64/arm64. Windows binaries use `.exe`. The script also generates `release/SHA256SUMS` for the current run; documentation and LICENSE remain in the repository. Use `macos` for macOS asset names.
 
 Details: [developer guide](../../../DEVELOPER.md), [HTTP API](api.md), [CLI reference](../../CLI.md). Update both documentation languages when behavior changes. Backend tests do not establish connectivity to external OAuth, PolicyBox/RagBox or real MCP clients; validate those integrations separately.

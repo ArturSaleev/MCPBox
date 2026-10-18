@@ -32,6 +32,9 @@ import (
 )
 
 const DefaultPort = 38180
+
+// DefaultMCPHost keeps project endpoints local unless remote access is explicitly configured.
+const DefaultMCPHost = "127.0.0.1"
 const ragAutoReindexInterval = 10 * time.Minute
 
 type listenConfig struct {
@@ -392,7 +395,7 @@ func resolveListenConfig(edition Edition) listenConfig {
 	config := listenConfig{
 		adminHost: firstNonEmpty(strings.TrimSpace(*hostFlag), strings.TrimSpace(os.Getenv("MCPBOX_HOST")), strings.TrimSpace(edition.AdminHost), "127.0.0.1"),
 		adminPort: firstValidPort(*portFlag, os.Getenv("MCPBOX_PORT"), edition.AdminPort, DefaultPort, "MCPBOX_PORT"),
-		mcpHost:   firstNonEmpty(strings.TrimSpace(*mcpHostFlag), strings.TrimSpace(os.Getenv("MCPBOX_MCP_HOST")), strings.TrimSpace(edition.MCPHost), "0.0.0.0"),
+		mcpHost:   firstNonEmpty(strings.TrimSpace(*mcpHostFlag), strings.TrimSpace(os.Getenv("MCPBOX_MCP_HOST")), strings.TrimSpace(edition.MCPHost), DefaultMCPHost),
 		mcpPort:   firstValidPort(*mcpPortFlag, os.Getenv("MCPBOX_MCP_PORT"), edition.MCPPort, 0, "MCPBOX_MCP_PORT"),
 	}
 
@@ -455,7 +458,7 @@ func listenAddresses(host string, port int, localOnly bool) []string {
 		appendAddress(host)
 	}
 
-	if localOnly {
+	if localOnly || (host != "" && host != "0.0.0.0" && host != "::") {
 		slices.Sort(addresses)
 		return addresses
 	}
@@ -481,7 +484,9 @@ func listenAddresses(host string, port int, localOnly bool) []string {
 			continue
 		}
 
-		appendAddress(ip.String())
+		if host != "0.0.0.0" {
+			appendAddress(ip.String())
+		}
 	}
 
 	slices.Sort(addresses)

@@ -265,3 +265,33 @@ func exchangeOAuthTestCode(t *testing.T, server *httptest.Server, code, callback
 	}
 	return tokenResponse
 }
+
+func TestChatGPTOAuthCodeRejectsWrongPKCEAndReplay(t *testing.T) {
+	server, db := newOAuthTestServer(t)
+	defer server.Close()
+	verifier := "security-test-code-verifier"
+	challengeBytes := sha256.Sum256([]byte(verifier))
+	challenge := base64.RawURLEncoding.EncodeToString(challengeBytes[:])
+	callback := server.URL + "/callback"
+	if err := db.Exec(`UPDATE projects SET oauth_redirect_uri = ? WHERE token = ?`, callback, "project-token").Error; err != nil {
+		t.Fatal(err)
+	}
+	code := authorizeOAuthTestCode(t, server, callback, challenge)
+	bad := exchangeOAuthTestCode(t, server, code, callback, "wrong-verifier", "project-bearer-secret")
+	bad.Body.Close()
+	if bad.StatusCode != http.StatusBadRequest {
+		t.Fatalf("wrong PKCE status %d", bad.StatusCode)
+	}
+	// Issue a fresh code; a rejected verifier may consume an authorization code.
+	code = authorizeOAuthTestCode(t, server, callback, challenge)
+	good := exchangeOAuthTestCode(t, server, code, callback, verifier, "project-bearer-secret")
+	good.Body.Close()
+	if good.StatusCode != http.StatusOK {
+		t.Fatalf("valid exchange status %d", good.StatusCode)
+	}
+	replay := exchangeOAuthTestCode(t, server, code, callback, verifier, "project-bearer-secret")
+	replay.Body.Close()
+	if replay.StatusCode != http.StatusBadRequest {
+		t.Fatalf("authorization code replay status %d", replay.StatusCode)
+	}
+}

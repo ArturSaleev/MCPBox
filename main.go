@@ -75,7 +75,7 @@ func main() {
 		Capabilities: capabilities,
 		AdminHost:    "127.0.0.1",
 		AdminPort:    38181,
-		MCPHost:      "0.0.0.0",
+		MCPHost:      app.DefaultMCPHost,
 		MCPPort:      38182,
 		StartupHooks: []app.StartupHook{
 			func(ctx context.Context, runtime *app.RuntimeContext) error {

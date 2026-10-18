@@ -50,11 +50,11 @@ The same command updates an existing local account with the same email. Password
 
 SQLite remains the default bootstrap database. Default database and relative runtime data paths are resolved beside the executable, independently of the terminal working directory. Existing `.mcpboxpro/rag-shadow` paths remain compatible. RagBox and PolicyBox are separate optional services.
 
-Default listeners are `127.0.0.1:38181` for administration and `0.0.0.0:38182` for MCP. Configure them with `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, `MCPBOX_MCP_PORT`, or the corresponding CLI flags.
+Default listeners are `127.0.0.1:38181` for administration and `127.0.0.1:38182` for MCP. Configure them with `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, `MCPBOX_MCP_PORT`, or the corresponding CLI flags.
 
-Build independently with `GOWORK=off`; verify backend changes with `GOWORK=off go test ./...`. Release builds use `./build-release.sh host` or `./build-release.sh all` and write to `release/<os>/<arch>/MCPBox/`. Rebuild the Go binary after frontend changes to embed the new UI.
+Build independently with `GOWORK=off`; verify backend changes with `GOWORK=off go test ./...`. Release builds use `./build-release.sh host` or `./build-release.sh all` and write to `release/MCPBox-<os>-<arch>`. Rebuild the Go binary after frontend changes to embed the new UI.
 
-See [migration notes](docs/MERGE.md) and [1.3.0 release notes](release/RELEASE-1.3.0.md).
+See [migration notes](docs/MERGE.md) and [1.3.0 release notes](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.3.0).
 
 ## Core Model
 
@@ -429,3 +429,5 @@ Examples:
 ```bash
 GOWORK=off go run . -port 39000
 ```
+
+Current source uses a loopback MCP default; published v1.3.0 binaries retain the earlier all-interface default. Direct remote deployments must explicitly set `--mcp-host 0.0.0.0`. Tailscale Funnel can proxy the loopback listener.

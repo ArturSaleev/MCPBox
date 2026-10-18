@@ -97,3 +97,5 @@ Callback URL сохраняется в базе, но после создани�
 - После обновления MCP package/server снова проверяйте tools.
 
 Функции ChatGPT apps, доступность тарифов и экраны могут меняться. Актуальные правила workspace смотрите в [Apps in ChatGPT](https://help.openai.com/en/articles/11487775-connectors-in-chatgpt).
+
+Funnel на той же машине работает с `127.0.0.1:38182`; включать `0.0.0.0` для него не требуется. См. [настройки сети](network-access.md).

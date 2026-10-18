@@ -48,7 +48,9 @@ AI-клиент → MCP URL проекта → MCP-серверы + разреш
 | Windows | [Скачать](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-windows-amd64.exe) | [Скачать](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-windows-arm64.exe) |
 | Linux | [Скачать](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-linux-amd64) | [Скачать](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-linux-arm64) |
 
-[Все релизы](https://github.com/ArturSaleev/MCPBox/releases) · [Описание v1.3.0](release/RELEASE-1.3.0.md)
+[Все релизы](https://github.com/ArturSaleev/MCPBox/releases) · [Описание v1.3.0](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.3.0)
+
+[Перед запуском проверьте SHA-256 файла](docs/website/ru/release-verification.md).
 
 ## Быстрый старт с бинарником
 
@@ -72,7 +74,7 @@ AI-клиент → MCP URL проекта → MCP-серверы + разреш
 4. Создайте проект, добавьте MCP-сервер и проверьте его состояние. Для CLI подключите запись реестра к проекту; для базы знаний — коллекцию.
 5. Скопируйте URL `http://127.0.0.1:38182/mcp/<project-token>` из UI и настройте в клиенте MCP HTTP-подключение с авторизацией проекта.
 
-Флаг в примере ограничивает MCP локальной машиной. Без него MCP по умолчанию слушает все IPv4-интерфейсы (`0.0.0.0:38182`); админка — `127.0.0.1:38181`. Для удалённого подключения настройте HTTPS и доступ по [инструкции безопасности](docs/website/ru/production-security.md).
+Флаг в примере ограничивает MCP локальной машиной, в том числе для опубликованных бинарников v1.3.0, где прежний default — `0.0.0.0:38182`. В текущих исходниках MCP уже слушает `127.0.0.1:38182` по умолчанию; админка — `127.0.0.1:38181`. Для удалённого подключения настройте HTTPS и доступ по [инструкции безопасности](docs/website/ru/production-security.md).
 
 ## Подключение AI-клиентов
 
@@ -117,7 +119,7 @@ GOWORK=off go build -o MCPBox .
 | Admin UI / API | `http://127.0.0.1:38181/` |
 | MCP проекта | `http://<server>:38182/mcp/<project-token>` |
 
-MCP слушает `0.0.0.0`; для локального доступа задайте `MCPBOX_MCP_HOST=127.0.0.1`. Порты и адреса меняются через `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, `MCPBOX_MCP_PORT`. Admin-токены, bearer проекта и PolicyBox runtime-токены имеют разные назначения.
+Текущие исходники по умолчанию ограничивают MCP адресом `127.0.0.1`. Опубликованные бинарники v1.3.0 используют `0.0.0.0`; для них явно задайте `MCPBOX_MCP_HOST=127.0.0.1`. Порты и адреса меняются через `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, `MCPBOX_MCP_PORT`. Admin-токены, bearer проекта и PolicyBox runtime-токены имеют разные назначения.
 
 ## Данные и обновление
 
@@ -137,7 +139,11 @@ MCP слушает `0.0.0.0`; для локального доступа зад�
 - [Безопасность](docs/website/ru/production-security.md), [диагностика](docs/website/ru/troubleshooting.md)
 - [Архитектура и разработка](docs/website/ru/development.md), [подробный developer guide](DEVELOPER-ru.md)
 
-Для релиза: установите frontend-зависимости и выполните `./build-release.sh host` или `./build-release.sh all`. Результат: `release/<os>/<arch>/MCPBox/`. Полная документация доступна в репозитории; пакеты релизного скрипта включают бинарник, README и LICENSE.
+Для релиза: установите frontend-зависимости и выполните `./build-release.sh host` или `./build-release.sh all`. Результат: плоские файлы `release/MCPBox-<os>-<arch>` (с `.exe` для Windows) и `release/SHA256SUMS`. Для macOS используется имя `macos`. Манифест охватывает только текущую сборку; полный релиз собирайте через `all`. Документация и LICENSE находятся в репозитории.
+
+## Участие в разработке и безопасность
+
+[Как отправить Issue или PR](CONTRIBUTING-ru.md) · [Сообщить об уязвимости приватно](SECURITY-ru.md). Принимаются русский и английский. Не публикуйте секреты и детали уязвимостей в обычных Issues.
 
 ## Лицензия
 

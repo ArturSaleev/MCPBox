@@ -12,9 +12,9 @@ This guide covers a standard on-premises installation of MCPBox.
 - For optional knowledge-base integration: a reachable RagBox instance
 - For optional runtime access validation: a reachable PolicyBox instance
 
-## 1. Download and unpack
+## 1. Download and verify the binary
 
-Download the package for your platform from the [MCPBox download page](https://github.com/ArturSaleev/MCPBox), then unpack it into a dedicated application directory.
+Download the binary for your platform from the [official release](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.3.0) into a dedicated writable directory. Rename it to `MCPBox` (macOS/Linux) or `MCPBox.exe` (Windows) after verifying its original filename.
 
 
 The executable is named:
@@ -22,6 +22,8 @@ The executable is named:
 - macOS / Linux: `MCPBox`
 - Windows: `MCPBox.exe`
 
+
+Before running it, [verify SHA-256 and review OS security prompts](release-verification.md). Release binaries do not require Go or Node.js. Choose amd64 for Intel/AMD or arm64 for ARM; install additional runtimes only for connected MCP/CLI integrations that need them.
 
 ## 2. Open-source license
 
@@ -66,10 +68,10 @@ MCPBox uses these defaults:
 | --- | --- | --- |
 | Admin host | `127.0.0.1` | Web administration UI and Admin API |
 | Admin port | `38181` | Web administration UI and Admin API |
-| MCP host | `0.0.0.0` | Project MCP listener |
+| MCP host | `127.0.0.1` | Project MCP listener |
 | MCP port | `38182` | Project MCP listener |
 
-Override them using environment variables:
+For direct remote MCP access, explicitly override them using environment variables:
 
 ```bash
 MCPBOX_HOST=127.0.0.1 \
@@ -153,3 +155,5 @@ If the new release changes your deployment topology, update firewall rules, reve
 | The UI is unavailable | Confirm that the process is running and that `MCPBOX_HOST` / `MCPBOX_PORT` are correct. |
 | Cannot sign in | Confirm the local admin credentials, or verify the OIDC variables and redirect URL. |
 | MCP clients cannot connect | Check the MCP host/port, firewall, reverse proxy, project token, and any PolicyBox runtime-token requirement. |
+
+Defaults above describe current source. Published v1.3.0 uses the earlier MCP bind `0.0.0.0`; explicitly set `--mcp-host 127.0.0.1` until updating. Enable direct remote access with `--mcp-host 0.0.0.0` or `MCPBOX_MCP_HOST=0.0.0.0`. [Network access and project isolation](network-access.md).

@@ -1,0 +1,32 @@
+name: Feature request / Предложение
+description: Explain a problem MCPBox could solve. English and Russian are welcome.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the user problem before the implementation. Please search existing issues first.
+        Можно писать на русском. Не публикуйте секреты, рабочие project URLs и частные данные.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case / Проблема или сценарий
+      description: Who needs this, and what is difficult with the current behavior?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome / Желаемый результат
+      description: Describe the behavior and how you would know it works.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workaround / Альтернативы
+  - type: textarea
+    id: scope
+    attributes:
+      label: Compatibility and impact / Совместимость и влияние
+      description: Optional effects on existing projects, data, access rules or integrations. Use synthetic examples.

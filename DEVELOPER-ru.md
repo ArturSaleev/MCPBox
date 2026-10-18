@@ -49,11 +49,11 @@ MCPBox - это control plane на Go для MCP-серверов.
 
 SQLite остаётся bootstrap-базой по умолчанию. База по умолчанию и относительные runtime-пути разрешаются рядом с исполняемым файлом независимо от текущей директории терминала. Сохранена совместимость с `.mcpboxpro/rag-shadow`. RagBox и PolicyBox остаются отдельными опциональными сервисами.
 
-Listeners по умолчанию: `127.0.0.1:38181` для админки и `0.0.0.0:38182` для MCP. Настройка через `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, `MCPBOX_MCP_PORT` или соответствующие CLI flags.
+Listeners по умолчанию: `127.0.0.1:38181` для админки и `127.0.0.1:38182` для MCP. Настройка через `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, `MCPBOX_MCP_PORT` или соответствующие CLI flags.
 
-Независимая сборка: `GOWORK=off go build -o MCPBox .`; backend-проверки: `GOWORK=off go test ./...`. Релизы собираются через `./build-release.sh host` или `./build-release.sh all` в `release/<os>/<arch>/MCPBox/`. После изменения frontend пересоберите Go-бинарник, чтобы встроить новый UI.
+Независимая сборка: `GOWORK=off go build -o MCPBox .`; backend-проверки: `GOWORK=off go test ./...`. Релизы собираются через `./build-release.sh host` или `./build-release.sh all` в `release/MCPBox-<os>-<arch>`. После изменения frontend пересоберите Go-бинарник, чтобы встроить новый UI.
 
-См. [инструкцию переноса](docs/MERGE.md) и [описание релиза 1.3.0](release/RELEASE-1.3.0.md).
+См. [инструкцию переноса](docs/MERGE.md) и [описание релиза 1.3.0](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.3.0).
 
 ## Основная Модель
 
@@ -418,3 +418,5 @@ GOWORK=off go run . ollama-chat --config /path/to/project.yml --model llama3.2
 ```bash
 GOWORK=off go run . -port 39000
 ```
+
+Текущие исходники используют loopback-default для MCP; опубликованные бинарники v1.3.0 сохраняют прежний bind на все интерфейсы. Для прямого сетевого доступа явно задайте `--mcp-host 0.0.0.0`. Tailscale Funnel может проксировать локальный listener.

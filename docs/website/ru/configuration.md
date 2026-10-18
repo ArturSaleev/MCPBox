@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `MCPBOX_HOST` | `127.0.0.1` | Адрес админки и Admin API |
 | `MCPBOX_PORT` | `38181` | Порт админки |
-| `MCPBOX_MCP_HOST` | `0.0.0.0` | Адрес MCP; все IPv4-интерфейсы |
+| `MCPBOX_MCP_HOST` | `127.0.0.1` | Адрес MCP; локальная машина |
 | `MCPBOX_MCP_PORT` | `38182` | Порт MCP |
 | `MCPBOX_PRO_BOOTSTRAP_TOKEN` | не задана | Аварийный административный bearer-токен |
 | `MCPBOX_OLLAMA_MODEL` | не задана | Предпочитаемая модель Ollama |
@@ -53,3 +53,5 @@ RagBox, PolicyBox, PostgreSQL и backend журналов настраивают
 Имена `MCPBOX_PRO_*`, `/api/pro/*`, `pro:*` и `.mcpboxpro` сохранены для совместимости и не требуют платной редакции.
 
 Исходники: [runtime](../../../app/runtime.go), [точка входа](../../../main.go), [SSO](../../../internal/prosso/service.go), [launcher](../../../internal/httpapi/llamacpp.go).
+
+Настройки по умолчанию выше относятся к текущим исходникам. Опубликованный v1.3.0 использует прежний MCP bind `0.0.0.0`; до обновления явно задавайте `--mcp-host 127.0.0.1`. Удалённый доступ включается через `--mcp-host 0.0.0.0` или `MCPBOX_MCP_HOST=0.0.0.0`. [Сеть и изоляция проектов](network-access.md).

@@ -1,0 +1,52 @@
+name: Release build
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GOWORK: 'off'
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Six-platform artifacts
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: html/package-lock.json
+      - run: npm --prefix html ci
+      - name: Build binaries and SHA256SUMS
+        env:
+          RELEASE_DIR: ${{ runner.temp }}/mcpbox-release
+        run: GOCACHE="$(go env GOCACHE)" ./build-release.sh all
+      - name: Verify exact artifact set, hashes and target architectures
+        run: python3 scripts/check-release-artifacts.py "$RUNNER_TEMP/mcpbox-release"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: MCPBox-release-${{ github.sha }}
+          path: ${{ runner.temp }}/mcpbox-release/*
+          if-no-files-found: error
+          retention-days: 14

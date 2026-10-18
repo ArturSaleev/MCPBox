@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation / Документация
+    url: https://github.com/ArturSaleev/MCPBox/tree/main/docs/website
+    about: Installation, configuration and troubleshooting in English and Russian.
+  - name: Security policy / Уязвимости
+    url: https://github.com/ArturSaleev/MCPBox/blob/main/SECURITY.md
+    about: Read the private reporting policy. Do not disclose vulnerabilities in public Issues.

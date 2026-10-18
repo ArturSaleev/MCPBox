@@ -63,3 +63,5 @@ Do not store backups in a public repository. Test restoring on a non-production 
 If something fails, stop the new executable, restore the previous executable and the matching database backup, then investigate in a test environment.
 
 [Complete backup and recovery procedure](operations.md).
+
+[Listener configuration and project isolation boundaries](network-access.md).

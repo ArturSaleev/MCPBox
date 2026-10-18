@@ -19,3 +19,11 @@ Documentation for the unified Apache-2.0 MCPBox application. Start with installa
 13. [License](license.md)
 
 RU and EN use matching page names. Update both versions when behavior changes. Check API handlers for exact request fields; these guides describe the source in this repository.
+
+[SHA-256 verification, OS security prompts and release test status](release-verification.md).
+
+[Network access and project isolation](network-access.md).
+
+[Contributing](../../../CONTRIBUTING.md) · [Private security reports](../../../SECURITY.md).
+
+[CI and release checks](ci.md).

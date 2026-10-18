@@ -1,0 +1,61 @@
+name: Bug report / Ошибка
+description: Report reproducible MCPBox behavior. English and Russian are welcome.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is a public issue. Remove project URLs/tokens, OAuth secrets, passwords, personal data and private file paths from text, logs and screenshots.
+        For vulnerabilities, follow [SECURITY.md](https://github.com/ArturSaleev/MCPBox/blob/main/SECURITY.md); do not disclose details here.
+        Можно писать на русском. Это публичный отчёт: удалите секреты и частные данные.
+  - type: input
+    id: version
+    attributes:
+      label: MCPBox release or commit / Версия
+      placeholder: v1.3.0 binary, or source commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment / Окружение
+      description: OS/version, architecture, downloaded binary or source build, AI client/version if relevant. Do not paste a complete environment dump.
+      placeholder: "macOS 15, arm64; GitHub binary; local Qwen Studio ..."
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce / Как воспроизвести
+      description: Minimal steps using test data; mention stdio/HTTP, CLI or knowledge-base mode when relevant.
+      placeholder: |
+        1. Create a test project ...
+        2. Configure ... (secrets removed)
+        3. Run ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior / Ожидаемый результат
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior / Фактический результат
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or error / Логи без секретов
+      description: A small relevant excerpt only. Replace secrets with REDACTED; do not upload a database or full config.
+      render: text
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Before submitting / Перед отправкой
+      options:
+        - label: I removed secrets and private data from all text and attachments. / Секреты и частные данные удалены.
+          required: true

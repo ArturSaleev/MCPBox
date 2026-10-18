@@ -48,7 +48,9 @@ Choose your computer's architecture: arm64 for Apple Silicon Macs, amd64 for mos
 | Windows | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-windows-amd64.exe) | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-windows-arm64.exe) |
 | Linux | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-linux-amd64) | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-linux-arm64) |
 
-[All releases](https://github.com/ArturSaleev/MCPBox/releases) · [v1.3.0 release notes](release/RELEASE-1.3.0.md)
+[All releases](https://github.com/ArturSaleev/MCPBox/releases) · [v1.3.0 release notes](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.3.0)
+
+[Verify the file SHA-256 before running it](docs/website/en/release-verification.md).
 
 ## Quick start with a binary
 
@@ -72,7 +74,7 @@ Choose your computer's architecture: arm64 for Apple Silicon Macs, amd64 for mos
 4. Create a project, add an MCP server and check its health. For CLI, attach a registry entry to the project; for knowledge, attach a collection.
 5. Copy `http://127.0.0.1:38182/mcp/<project-token>` from the UI and configure an MCP HTTP connection in your client with the project's authentication settings.
 
-The example flag keeps MCP local to your machine. Without it, MCP defaults to all IPv4 interfaces (`0.0.0.0:38182`); administration defaults to `127.0.0.1:38181`. For remote access, configure HTTPS and authentication following the [security guide](docs/website/en/production-security.md).
+The example flag keeps MCP local, including on published v1.3.0 binaries whose earlier default is `0.0.0.0:38182`. Current source defaults MCP to `127.0.0.1:38182`; administration defaults to `127.0.0.1:38181`. For remote access, configure HTTPS and authentication following the [security guide](docs/website/en/production-security.md).
 
 ## Connect an AI client
 
@@ -117,7 +119,7 @@ Passwords require at least 8 characters. This command updates an existing local 
 | Admin UI / API | `http://127.0.0.1:38181/` |
 | Project MCP | `http://<server>:38182/mcp/<project-token>` |
 
-MCP binds to `0.0.0.0`; set `MCPBOX_MCP_HOST=127.0.0.1` for local-only access. Override listeners with `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, `MCPBOX_MCP_PORT`. Admin tokens, project bearer credentials and PolicyBox runtime tokens serve different purposes.
+Current source defaults MCP to `127.0.0.1`. Published v1.3.0 binaries use `0.0.0.0`; explicitly set `MCPBOX_MCP_HOST=127.0.0.1` for those binaries. Override listeners with `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, `MCPBOX_MCP_PORT`. Admin tokens, project bearer credentials and PolicyBox runtime tokens serve different purposes.
 
 ## Data and upgrades
 
@@ -137,7 +139,11 @@ Full guides in [English](docs/website/en/README.md) and [Russian](docs/website/r
 - [Security](docs/website/en/production-security.md), [troubleshooting](docs/website/en/troubleshooting.md)
 - [Architecture and development](docs/website/en/development.md), [detailed developer guide](DEVELOPER.md)
 
-For releases, install frontend dependencies then run `./build-release.sh host` or `./build-release.sh all`. Output: `release/<os>/<arch>/MCPBox/`. Full documentation is available in the repository; script-generated release directories contain the executable, READMEs and LICENSE.
+For releases, install frontend dependencies then run `./build-release.sh host` or `./build-release.sh all`. Output: flat `release/MCPBox-<os>-<arch>` files (`.exe` for Windows) and `release/SHA256SUMS`. macOS uses `macos` in asset names. The manifest covers only the current run; use `all` for a complete release. Documentation and LICENSE remain in the repository.
+
+## Contributing and security
+
+[Report a bug or submit a PR](CONTRIBUTING.md) · [Report a vulnerability privately](SECURITY.md). English and Russian are welcome. Do not post secrets or vulnerability details in ordinary Issues.
 
 ## License
 

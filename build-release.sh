@@ -3,173 +3,62 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
-
 MODE="${1:-all}"
 RELEASE_DIR="${RELEASE_DIR:-$ROOT_DIR/release}"
-BIN_NAME="MCPBox"
-RELEASE_NAME="MCPBox"
-MAIN_PACKAGE="."
-BUILD_CACHE_DIR="${GOCACHE:-/private/tmp/mcpbox-gocache}"
-BUILD_TMP_DIR="${GOTMPDIR:-/private/tmp/mcpbox-gotmp}"
-
-HOST_GOOS="$(GOWORK=off go env GOOS)"
-HOST_GOARCH="$(GOWORK=off go env GOARCH)"
-HOST_TARGET="${HOST_GOOS}/${HOST_GOARCH}"
-
-ALL_TARGETS=(
-  "darwin/arm64"
-  "darwin/amd64"
-  "linux/arm64"
-  "linux/amd64"
-  "windows/arm64"
-  "windows/amd64"
-)
+BUILD_CACHE_DIR="${GOCACHE:-${TMPDIR:-/tmp}/mcpbox-gocache}"
+BUILD_TMP_DIR="${GOTMPDIR:-${TMPDIR:-/tmp}/mcpbox-gotmp}"
 
 usage() {
   cat <<EOF
-Usage:
-  ./build-release.sh [host|all]
-
-Modes:
-  host  Build only for the current Go host target
-  all   Build all supported platforms and architectures (default)
-
-Environment:
-  RELEASE_DIR  Override release output path
-  GOCACHE      Override Go build cache path
-  GOTMPDIR     Override Go temporary build path
-
-Artifacts:
-  $RELEASE_DIR/<os>/<arch>/$RELEASE_NAME/
+Usage: ./build-release.sh [host|all]
+Build flat MCPBox-<os>-<arch> binaries and SHA256SUMS in RELEASE_DIR.
+macOS assets use "macos"; Windows assets use ".exe".
+Requires Go, npm, installed frontend dependencies, and sha256sum or shasum.
+Environment: RELEASE_DIR, GOCACHE, GOTMPDIR.
+No existing binary is replaced unless every requested target builds successfully.
 EOF
 }
-
-ensure_prerequisites() {
-  command -v go >/dev/null 2>&1 || {
-    echo "error: go is not installed" >&2
-    exit 1
-  }
-  command -v npm >/dev/null 2>&1 || {
-    echo "error: npm is not installed" >&2
-    exit 1
-  }
-}
-
-build_embedded_ui() {
-  echo
-  echo "==> Building embedded UI"
-  (
-    cd "$ROOT_DIR/html"
-    npm run build
-  )
-}
-
-binary_name_for_target() {
-  local goos="$1"
-  if [[ "$goos" == "windows" ]]; then
-    printf '%s.exe' "$BIN_NAME"
-  else
-    printf '%s' "$BIN_NAME"
-  fi
-}
-
-artifact_path_for_target() {
-  local goos="$1"
-  local goarch="$2"
-  local binary_name
-  binary_name="$(binary_name_for_target "$goos")"
-  printf '%s/%s/%s/%s/%s' "$RELEASE_DIR" "$goos" "$goarch" "$RELEASE_NAME" "$binary_name"
-}
-
-build_target() {
-  local target="$1"
-  local goos="${target%/*}"
-  local goarch="${target#*/}"
-  local binary_name
-  binary_name="$(binary_name_for_target "$goos")"
-  local platform_dir="$RELEASE_DIR/$goos/$goarch"
-  local target_dir="$platform_dir/$RELEASE_NAME"
-  local output_path
-  output_path="$(artifact_path_for_target "$goos" "$goarch")"
-
-  echo
-  echo "==> Building $target"
-
-  mkdir -p "$target_dir"
-
-  if GOWORK=off GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 GOCACHE="$BUILD_CACHE_DIR" GOTMPDIR="$BUILD_TMP_DIR" \
-    go build -trimpath -ldflags="-s -w" -o "$output_path" "$MAIN_PACKAGE"; then
-    cp "$ROOT_DIR/LICENSE" "$ROOT_DIR/README.md" "$ROOT_DIR/README-ru.md" "$target_dir/"
-    SUCCESS_TARGETS+=("$target")
-    echo "Built artifact: $output_path"
-  else
-    FAILED_TARGETS+=("$target")
-    echo "Build failed for target: $target"
-  fi
-}
-
-select_targets() {
-  case "$MODE" in
-    host)
-      TARGETS=("$HOST_TARGET")
-      ;;
-    all)
-      TARGETS=("${ALL_TARGETS[@]}")
-      ;;
-    -h|--help|help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "Unknown mode: $MODE" >&2
-      usage
-      exit 1
-      ;;
-  esac
-}
-
-print_summary() {
-  set +u
-  local success_count="${#SUCCESS_TARGETS[@]}"
-  local failed_count="${#FAILED_TARGETS[@]}"
-
-  echo
-  echo "Build summary"
-  echo "-------------"
-  echo "Successful: $success_count"
-  for target in "${SUCCESS_TARGETS[@]}"; do
-    echo "  - $target"
-  done
-
-  echo "Failed: $failed_count"
-  for target in "${FAILED_TARGETS[@]}"; do
-    echo "  - $target"
-  done
-
-  if (( failed_count > 0 )); then
-    exit 1
-  fi
-
-  set -u
-}
-
-ensure_prerequisites
-build_embedded_ui
-select_targets
-
-mkdir -p "$RELEASE_DIR"
-mkdir -p "$BUILD_CACHE_DIR"
-mkdir -p "$BUILD_TMP_DIR"
-
-echo "Building releases into $RELEASE_DIR"
-echo "Using GOCACHE=$BUILD_CACHE_DIR"
-echo "Using GOTMPDIR=$BUILD_TMP_DIR"
-
-declare -a SUCCESS_TARGETS=()
-declare -a FAILED_TARGETS=()
-
-for target in "${TARGETS[@]}"; do
-  build_target "$target"
+case "$MODE" in
+  -h|--help|help) usage; exit 0 ;;
+  host|all) ;;
+  *) usage >&2; exit 2 ;;
+esac
+for executable in go npm; do
+  command -v "$executable" >/dev/null 2>&1 || { echo "Missing $executable" >&2; exit 1; }
 done
+if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+  echo "Install sha256sum or shasum." >&2
+  exit 1
+fi
+if [[ "$MODE" == host ]]; then
+  TARGETS=("$(GOWORK=off go env GOOS)/$(GOWORK=off go env GOARCH)")
+else
+  TARGETS=(darwin/arm64 darwin/amd64 linux/arm64 linux/amd64 windows/arm64 windows/amd64)
+fi
+mkdir -p "$RELEASE_DIR" "$BUILD_CACHE_DIR" "$BUILD_TMP_DIR"
+RELEASE_DIR="$(cd "$RELEASE_DIR" && pwd)"
+BUILD_CACHE_DIR="$(cd "$BUILD_CACHE_DIR" && pwd)"
+BUILD_TMP_DIR="$(cd "$BUILD_TMP_DIR" && pwd)"
+staging_dir="$(mktemp -d "$RELEASE_DIR/.build.XXXXXX")"
+trap 'rm -rf "$staging_dir"' EXIT
 
-print_summary
+npm --prefix html run build
+artifacts=()
+for target in "${TARGETS[@]}"; do
+  goos="${target%/*}"
+  goarch="${target#*/}"
+  asset_os="$goos"
+  [[ "$goos" != darwin ]] || asset_os=macos
+  artifact="MCPBox-$asset_os-$goarch"
+  [[ "$goos" != windows ]] || artifact="$artifact.exe"
+  echo "Building $target -> $artifact"
+  GOWORK=off GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 GOCACHE="$BUILD_CACHE_DIR" GOTMPDIR="$BUILD_TMP_DIR" \
+    go build -trimpath -ldflags="-s -w" -o "$staging_dir/$artifact" .
+  artifacts+=("$artifact")
+done
+bash "$ROOT_DIR/scripts/release-checksums.sh" "$staging_dir" "${artifacts[@]}"
+for artifact in "${artifacts[@]}"; do
+  mv "$staging_dir/$artifact" "$RELEASE_DIR/$artifact"
+done
+mv "$staging_dir/SHA256SUMS" "$RELEASE_DIR/SHA256SUMS"
+echo "Built ${#artifacts[@]} target(s) in $RELEASE_DIR; SHA256SUMS covers this run only."

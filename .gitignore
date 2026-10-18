@@ -40,3 +40,6 @@ mcpbox.db
 *.dylib
 *.test
 coverage.out
+
+# Python validation cache
+__pycache__/

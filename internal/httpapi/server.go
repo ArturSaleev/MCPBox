@@ -1400,6 +1400,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if !endpointAuthorized {
+		s.logAudit(r.Context(), &project.ID, nil, "connect_blocked_bearer_auth", actor, "missing or invalid bearer token")
 		w.Header().Set(
 			"WWW-Authenticate",
 			fmt.Sprintf(`Bearer resource_metadata="%s"`, s.absoluteConnectURL(r, "/.well-known/oauth-protected-resource")),
@@ -1450,6 +1451,7 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		if s.isSSESessionRequest(r) {
 			if err := s.validateConnectSession(r, project.Token, nil); err != nil {
+				s.logAudit(r.Context(), &project.ID, nil, "connect_blocked_session", actor, "invalid or mismatched connect session")
 				writeError(w, http.StatusBadRequest, err)
 				return
 			}
