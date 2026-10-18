@@ -1,5 +1,7 @@
 # MCPBox Developer Guide
 
+User and operator documentation: [English](docs/website/en/README.md) / [Русский](docs/website/ru/README.md).
+
 Russian version: [DEVELOPER-ru.md](./DEVELOPER-ru.md)
 
 ## Overview

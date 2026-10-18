@@ -1,5 +1,7 @@
 # Установка и настройка MCPBox
 
+[Оглавление](README.md) | [English](../en/installation.md)
+
 В этом руководстве описано стандартное on-premises-развёртывание MCPBox.
 
 ## Требования
@@ -21,7 +23,7 @@
 - Windows: `MCPBox.exe`.
 
 
-## 2. Open-source license
+## 2. Лицензия открытого ПО
 
 MCPBox uses Apache-2.0. No activation is required.
 
@@ -95,7 +97,7 @@ Project token берётся из интерфейса MCPBox. В production п�
 
 ## Bootstrap token
 
-Для аварийного/bootstrap-доступа к Pro-интерфейсу можно задать `MCPBOX_PRO_BOOTSTRAP_TOKEN`:
+Для аварийного/bootstrap-доступа к интерфейсу администрирования можно задать `MCPBOX_PRO_BOOTSTRAP_TOKEN`:
 
 ```bash
 MCPBOX_PRO_BOOTSTRAP_TOKEN='replace-with-a-long-random-secret' ./MCPBox
@@ -111,7 +113,7 @@ Generic OIDC SSO включается, когда заданы следующи�
 MCPBOX_PRO_OIDC_ISSUER_URL=https://id.example.com \
 MCPBOX_PRO_OIDC_CLIENT_ID=your-client-id \
 MCPBOX_PRO_OIDC_CLIENT_SECRET=your-client-secret \
-MCPBOX_PRO_OIDC_REDIRECT_URL=https://mcpboxpro.example.com/api/pro/sso/callback \
+MCPBOX_PRO_OIDC_REDIRECT_URL=https://mcpbox.example.com/api/pro/sso/callback \
 ./MCPBox
 ```
 
@@ -128,7 +130,7 @@ MCPBOX_PRO_OIDC_REDIRECT_URL=https://mcpboxpro.example.com/api/pro/sso/callback 
 
 ## Опциональные интеграции
 
-После входа настройте интеграции через Pro-интерфейс.
+После входа настройте интеграции через интерфейс администрирования.
 
 - **RagBox** предоставляет ingestion базы знаний, vector connections и retrieval. MCPBox проверяет настроенное соединение с RagBox, прежде чем считать интеграцию активной.
 - **PolicyBox** предоставляет runtime-проверку идентификации и доступа. Если для проекта включена проверка идентификации, доступ к его MCP endpoint требует действующий runtime bearer token, соответствующий project binding.
@@ -140,7 +142,7 @@ MCPBOX_PRO_OIDC_REDIRECT_URL=https://mcpboxpro.example.com/api/pro/sso/callback 
 1. Перед обновлением сделайте резервную копию директории установки и базы данных.
 2. Остановите работающий процесс MCPBox.
 3. Замените исполняемый файл на новую версию.
-5. Запустите MCPBox и проверьте админ-интерфейс и нужные project endpoints.
+4. Запустите MCPBox и проверьте админ-интерфейс и нужные project endpoints.
 
 Если новая версия меняет схему развёртывания, обновите правила firewall, конфигурацию reverse proxy и OIDC redirect URLs.
 

@@ -1,5 +1,7 @@
 # Install and configure MCPBox
 
+[Documentation](README.md) | [Русский](../ru/installation.md)
+
 This guide covers a standard on-premises installation of MCPBox.
 
 ## Prerequisites
@@ -111,7 +113,7 @@ MCPBox enables generic OIDC SSO when the following variables are set:
 MCPBOX_PRO_OIDC_ISSUER_URL=https://id.example.com \
 MCPBOX_PRO_OIDC_CLIENT_ID=your-client-id \
 MCPBOX_PRO_OIDC_CLIENT_SECRET=your-client-secret \
-MCPBOX_PRO_OIDC_REDIRECT_URL=https://mcpboxpro.example.com/api/pro/sso/callback \
+MCPBOX_PRO_OIDC_REDIRECT_URL=https://mcpbox.example.com/api/pro/sso/callback \
 ./MCPBox
 ```
 
@@ -140,7 +142,7 @@ Keep service credentials separate and grant only the permissions each integratio
 1. Back up the installation directory and database before updating.
 2. Stop the running MCPBox process.
 3. Replace the executable with the new version.
-5. Start MCPBox and verify that the administration interface and required project endpoints work.
+4. Start MCPBox and verify that the administration interface and required project endpoints work.
 
 If the new release changes your deployment topology, update firewall rules, reverse-proxy configuration, and OIDC redirect URLs accordingly.
 

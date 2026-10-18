@@ -1,5 +1,7 @@
 # Knowledge bases, logging, and integrations
 
+[Documentation](README.md) | [Русский](../ru/knowledge-integrations.md)
+
 ## Local RAG knowledge base
 
 A knowledge base is a searchable collection of documents. In local mode MCPBox extracts text, splits it into overlapping chunks, and indexes the chunks with the embedded Bleve search engine. At query time, the most relevant chunks can be returned to an AI workflow as context.

@@ -1,5 +1,7 @@
 # MCPBox
 
+[Documentation](README.md) | [Русский](../ru/overview.md)
+
 MCPBox is the administrative control plane for AI projects and MCP integrations. It helps teams configure projects, manage access, publish tool connections, and operate enterprise integrations from one interface.
 
 It is designed for private and on-premises deployments. MCPBox runs as a standalone service and includes a web-based Administration interface and project MCP endpoints.

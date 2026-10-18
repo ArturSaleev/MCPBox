@@ -1,5 +1,7 @@
 # Connect an MCPBox project to ChatGPT
 
+[Documentation](README.md) | [Русский](../ru/chatgpt.md)
+
 This guide lets ChatGPT use the tools that you configured inside one MCPBox project.
 
 ## Before you start

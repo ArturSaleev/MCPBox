@@ -1,8 +1,8 @@
 # Project CLI registry
 
-MCPBox owns the shared models, GORM migration, storage, HTTP API, executor,
-MCP tools and UI. MCPBox uses the base Go module and Vite source overlay;
-its only CLI-specific additions are navigation and capability metadata.
+MCPBox owns the models, GORM migration, storage, HTTP API, executor, MCP tools and UI in this repository.
+
+User guide: [English](website/en/cli.md) / [Русский](website/ru/cli.md).
 
 ## Administration
 
@@ -44,7 +44,7 @@ Use argument sets for literal arguments containing spaces.
 ## API
 
 All endpoints use the existing administrative API authentication boundary.
-In Pro, reads require `pro:read`; CLI mutations and administrative execution
+Reads require `pro:read`; CLI mutations and administrative execution
 require `pro:admin`. The project MCP endpoint retains its existing bearer/OAuth
 and project-authorization behavior.
 

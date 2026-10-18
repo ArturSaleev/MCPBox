@@ -1,5 +1,7 @@
 # Проекты, MCP-серверы, Marketplace и промпты
 
+[Оглавление](README.md) | [English](../en/projects-marketplace-prompts.md)
+
 ## Создание проекта
 
 Проект — изолированное рабочее пространство, объединяющее MCP-серверы, базы знаний, настройки доступа, project tokens и промпты. Откройте **Projects → Create project**.

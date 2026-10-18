@@ -1,5 +1,7 @@
 # MCPBox Developer Guide
 
+Пользовательская и эксплуатационная документация: [Русский](docs/website/ru/README.md) / [English](docs/website/en/README.md).
+
 English version: [DEVELOPER.md](./DEVELOPER.md)
 
 ## Обзор

@@ -1,5 +1,7 @@
 # Projects, MCP servers, Marketplace, and prompts
 
+[Documentation](README.md) | [Русский](../ru/projects-marketplace-prompts.md)
+
 ## Create a project
 
 A project is an isolated workspace that groups MCP servers, knowledge bases, access settings, project tokens, and prompts. Create it in **Projects → Create project**.

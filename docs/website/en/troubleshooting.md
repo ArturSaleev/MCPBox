@@ -1,5 +1,7 @@
 # Troubleshooting: simple checks first
 
+[Documentation](README.md) | [Русский](../ru/troubleshooting.md)
+
 When something does not work, do these checks in order. Most issues are an incorrect URL, a stopped server, or a blocked port.
 
 ## 1. MCPBox does not start

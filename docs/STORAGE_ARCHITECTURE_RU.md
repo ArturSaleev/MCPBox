@@ -1,6 +1,6 @@
 # Storage Architecture
 
-Этот документ фиксирует первую фазу storage-архитектуры `MCPBox` без изменений в `MCPBox`.
+Этот документ сохраняет историю поэтапной реализации storage. После объединения MCPBox/MCPBoxPro используется одно приложение. Текущий обзор: [RU](website/ru/knowledge-integrations.md) / [EN](website/en/knowledge-integrations.md); эксплуатация: [RU](website/ru/operations.md) / [EN](website/en/operations.md). Упоминания Free/Pro ниже относятся к прежней архитектуре.
 
 ## Базовый принцип
 
