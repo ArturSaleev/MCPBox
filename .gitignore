@@ -21,7 +21,6 @@ dist/
 package_store/
 knowledge_base/
 release/
-docs/
 mcpbox.db
 *.db
 *.db-shm
