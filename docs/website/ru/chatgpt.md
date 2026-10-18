@@ -4,6 +4,18 @@
 
 Это руководство позволяет ChatGPT использовать tools, настроенные внутри одного проекта MCPBox.
 
+## Локальные клиенты: прямое подключение без Tailscale
+
+Если MCPBox и установленное на компьютере приложение AI-клиента работают на одной машине, используйте локальный URL проекта:
+
+```text
+http://127.0.0.1:38182/mcp/<project-token>
+```
+
+Владелец проекта проверил этот сценарий в **локально установленном приложении Qwen Studio**. Эта проверка не распространяется на веб-версию Qwen Studio. Укажите URL и способ авторизации проекта в настройках MCP приложения.
+
+На другой машине `127.0.0.1` указывает на неё саму: используйте доступный сетевой адрес компьютера с MCPBox и соответствующие настройки listener/firewall. Это отдельный сценарий от подключения облачного ChatGPT, описанного далее.
+
 ## Что нужно заранее
 
 - работающий MCPBox project хотя бы с одним проверенным MCP server;
@@ -12,6 +24,34 @@
 - доступ к developer mode или custom apps в вашем тарифе/workspace ChatGPT.
 
 ChatGPT подключается к удалённым MCP servers, а не напрямую к приватному localhost или on-premises-адресу. Если сервер MCPBox приватный, используйте одобренный secure tunnel или сетевую схему, а не открывайте admin UI в интернет. Актуальные требования OpenAI описаны в [справке ChatGPT](https://help.openai.com/en/articles/12584461-developer-mode-and-full-mcp-connectors-in-chatgpt-beta).
+
+## Tailscale Funnel: вариант доступа облачного ChatGPT к локальному MCPBox
+
+**Tailscale не является обязательным для MCPBox.** Он нужен только как один из способов сделать локальный MCP endpoint доступным облачному ChatGPT. Если у вас уже есть публичный HTTPS endpoint, используйте его напрямую. Для локальных MCP-клиентов туннель не требуется.
+
+Для сценария «облачный ChatGPT → локальный MCPBox» рекомендуем **Tailscale Funnel**: он выдаёт публичный HTTPS-адрес и проксирует запросы к MCP listener без отдельной настройки домена и reverse proxy.
+
+1. Установите Tailscale на машину с MCPBox и войдите в свой tailnet. Для Funnel нужны MagicDNS, HTTPS-сертификаты и разрешение Funnel в политике tailnet; при первом запуске CLI может предложить включить необходимые настройки. См. [требования Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel).
+2. Запустите MCPBox и включите **Bearer authentication** для проекта. Убедитесь, что MCP listener работает на локальном порту `38182`.
+3. На той же машине выполните:
+
+   ```bash
+   tailscale funnel 38182
+   ```
+
+4. Скопируйте HTTPS-адрес из вывода команды и добавьте путь проекта. Например, для адреса `https://my-machine.example.ts.net` укажите в ChatGPT:
+
+   ```text
+   https://my-machine.example.ts.net/mcp/<project-token>
+   ```
+
+`38182` — локальный порт MCPBox, а не внешний HTTPS-порт: добавлять `:38182` к публичному URL не нужно. Если изменили MCP-порт, подставьте его в команду. Публикуйте MCP listener `38182`, а админку `38181` оставляйте приватной.
+
+Без `--bg` держите команду запущенной; для фоновой работы используйте `tailscale funnel --bg 38182`. Проверка: `tailscale funnel status`. Отключение этой публикации: `tailscale funnel 38182 off`. MCPBox и Tailscale должны оставаться запущенными.
+
+Funnel делает адрес доступным из интернета; авторизацию обеспечивает MCPBox. Обычный `tailscale serve` ограничивает доступ tailnet и для облачного ChatGPT не заменяет Funnel. После получения URL продолжайте настройку OAuth ниже.
+
+[Пример публикации локального сервера](https://tailscale.com/docs/reference/examples/funnel) · [Команды и фоновый режим](https://tailscale.com/docs/reference/tailscale-cli/funnel).
 
 ## Шаг 1. Подготовьте проект MCPBox
 

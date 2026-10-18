@@ -76,6 +76,8 @@ The example flag keeps MCP local to your machine. Without it, MCP defaults to al
 
 ## Connect an AI client
 
+**Verified by the project owner:** the locally installed **Qwen Studio application** connects to MCPBox on the same machine at `http://127.0.0.1:38182/mcp/<project-token>`, using the project authentication settings. Tailscale is not needed for this. The Qwen Studio web version has not been verified. Cloud-hosted ChatGPT requires a public HTTPS endpoint; Tailscale Funnel is one option for providing it.
+
 Use a client that supports MCP HTTP and your chosen authentication method. Connection and tool execution need to be verified for the particular client version; this page does not claim universal AI-client compatibility.
 
 - [ChatGPT connection and OAuth setup](docs/website/en/chatgpt.md).
