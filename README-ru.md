@@ -4,7 +4,7 @@
 
 Управляйте инструментами AI из одной панели: объединяйте их по проектам, настраивайте доступ и проверяйте состояние серверов и историю вызовов. MCPBox — бесплатное приложение с открытым исходным кодом под Apache-2.0, со встроенным веб-интерфейсом и локальным хранением данных.
 
-[Скачать v1.3.0](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.3.0) · [Документация](docs/website/ru/README.md) · [Сайт](https://mcpbox.sh) · [English](README.md)
+[Скачать v1.4.0](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.4.0) · [Документация](docs/website/ru/README.md) · [Сайт](https://mcpbox.sh) · [English](README.md)
 
 ## Зачем MCPBox
 
@@ -44,11 +44,11 @@ AI-клиент → MCP URL проекта → MCP-серверы + разреш
 
 | ОС | Intel / AMD (amd64) | ARM (arm64) |
 | --- | --- | --- |
-| macOS | [Скачать](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-macos-amd64) | [Скачать](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-macos-arm64) |
-| Windows | [Скачать](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-windows-amd64.exe) | [Скачать](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-windows-arm64.exe) |
-| Linux | [Скачать](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-linux-amd64) | [Скачать](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-linux-arm64) |
+| macOS | [Скачать](https://github.com/ArturSaleev/MCPBox/releases/download/v1.4.0/MCPBox-macos-amd64) | [Скачать](https://github.com/ArturSaleev/MCPBox/releases/download/v1.4.0/MCPBox-macos-arm64) |
+| Windows | [Скачать](https://github.com/ArturSaleev/MCPBox/releases/download/v1.4.0/MCPBox-windows-amd64.exe) | [Скачать](https://github.com/ArturSaleev/MCPBox/releases/download/v1.4.0/MCPBox-windows-arm64.exe) |
+| Linux | [Скачать](https://github.com/ArturSaleev/MCPBox/releases/download/v1.4.0/MCPBox-linux-amd64) | [Скачать](https://github.com/ArturSaleev/MCPBox/releases/download/v1.4.0/MCPBox-linux-arm64) |
 
-[Все релизы](https://github.com/ArturSaleev/MCPBox/releases) · [Описание v1.3.0](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.3.0)
+[Все релизы](https://github.com/ArturSaleev/MCPBox/releases) · [Описание v1.4.0](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.4.0)
 
 [Перед запуском проверьте SHA-256 файла](docs/website/ru/release-verification.md).
 
@@ -92,7 +92,7 @@ AI-клиент → MCP URL проекта → MCP-серверы + разреш
 
 ## Сборка из исходников
 
-Нужны Go 1.26+ и Node.js/npm. Выполните из корня репозитория:
+Нужны Go 1.26.9+ и Node.js/npm. Выполните из корня репозитория:
 
 ```bash
 npm --prefix html ci

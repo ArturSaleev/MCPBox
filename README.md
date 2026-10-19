@@ -4,7 +4,7 @@
 
 Manage your AI tools from one dashboard: group them into projects, control access, and inspect server health and request history. MCPBox is free, Apache-2.0 open-source software with an embedded web UI and local data storage.
 
-[Download v1.3.0](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.3.0) · [Documentation](docs/website/en/README.md) · [Website](https://mcpbox.sh) · [Русский](README-ru.md)
+[Download v1.4.0](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.4.0) · [Documentation](docs/website/en/README.md) · [Website](https://mcpbox.sh) · [Русский](README-ru.md)
 
 ## Why MCPBox
 
@@ -44,11 +44,11 @@ Choose your computer's architecture: arm64 for Apple Silicon Macs, amd64 for mos
 
 | OS | Intel / AMD (amd64) | ARM (arm64) |
 | --- | --- | --- |
-| macOS | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-macos-amd64) | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-macos-arm64) |
-| Windows | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-windows-amd64.exe) | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-windows-arm64.exe) |
-| Linux | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-linux-amd64) | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.3.0/MCPBox-linux-arm64) |
+| macOS | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.4.0/MCPBox-macos-amd64) | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.4.0/MCPBox-macos-arm64) |
+| Windows | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.4.0/MCPBox-windows-amd64.exe) | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.4.0/MCPBox-windows-arm64.exe) |
+| Linux | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.4.0/MCPBox-linux-amd64) | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.4.0/MCPBox-linux-arm64) |
 
-[All releases](https://github.com/ArturSaleev/MCPBox/releases) · [v1.3.0 release notes](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.3.0)
+[All releases](https://github.com/ArturSaleev/MCPBox/releases) · [v1.4.0 release notes](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.4.0)
 
 [Verify the file SHA-256 before running it](docs/website/en/release-verification.md).
 
@@ -92,7 +92,7 @@ Former MCPBoxPro features are included in the unified open-source MCPBox; no lic
 
 ## Build from source
 
-Requires Go 1.26+ and Node.js/npm. From the repository root:
+Requires Go 1.26.9+ and Node.js/npm. From the repository root:
 
 ```bash
 npm --prefix html ci
