@@ -227,7 +227,7 @@ export function ProjectServerDialogs({
                     {(inspection.capabilities ?? []).map((capability) => (
                       <span
                         key={capability}
-                        className="rounded-full border border-electric-blue/30 bg-electric-blue/12 px-2 py-1 text-xs font-medium text-electric-blue"
+                        className="rounded-full border border-electric-blue/30 bg-brand-solid/12 px-2 py-1 text-xs font-medium text-electric-blue"
                       >
                         {capability}
                       </span>
@@ -503,7 +503,7 @@ export function ProjectServerDialogs({
                     {(authServer.oauth_scopes ?? []).map((scope) => (
                       <span
                         key={scope}
-                        className="rounded-full border border-electric-blue/30 bg-electric-blue/12 px-2 py-1 text-xs font-medium text-electric-blue"
+                        className="rounded-full border border-electric-blue/30 bg-brand-solid/12 px-2 py-1 text-xs font-medium text-electric-blue"
                       >
                         {scope}
                       </span>
@@ -524,7 +524,7 @@ export function ProjectServerDialogs({
                 <button
                   onClick={() => void connectOAuth(authServer.id)}
                   disabled={busyServerId === authServer.id}
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {busyServerId === authServer.id ? (
                     <LoaderCircle className="h-4 w-4 animate-spin" />

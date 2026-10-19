@@ -31,7 +31,7 @@ export function ConfigSection({ servers, onAddServer, onDeleteServer }: ConfigSe
             <Tooltip.Trigger asChild>
               <button
                 onClick={onAddServer}
-                className="px-3 py-2 bg-electric-blue hover:bg-electric-blue/90 text-white rounded-md flex items-center gap-2 transition-colors"
+                className="px-3 py-2 bg-brand-solid hover:bg-brand-solid/90 text-white rounded-md flex items-center gap-2 transition-colors"
               >
                 <Plus className="w-4 h-4" />
                 <span>Add Server</span>

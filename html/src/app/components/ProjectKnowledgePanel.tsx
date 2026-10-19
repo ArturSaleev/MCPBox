@@ -109,7 +109,7 @@ export function ProjectKnowledgePanel({
                   setRAGCollectionForm((current) => ({ ...current, source_path: selectedProject.root_path }));
                 }
               }}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90"
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90"
             >
               <Plus className="h-4 w-4" />
               {messages.connectKnowledgeBaseTitle}
@@ -127,13 +127,13 @@ export function ProjectKnowledgePanel({
               <TabsList className="grid h-auto w-full grid-cols-2 rounded-xl border border-border bg-background p-1">
                 <TabsTrigger
                   value="select"
-                  className="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-all data-[state=active]:bg-electric-blue data-[state=active]:text-white data-[state=active]:shadow-md data-[state=active]:shadow-electric-blue/20"
+                  className="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-all data-[state=active]:bg-brand-solid data-[state=active]:text-white data-[state=active]:shadow-md data-[state=active]:shadow-electric-blue/20"
                 >
                   {labels.connect}
                 </TabsTrigger>
                 <TabsTrigger
                   value="create"
-                  className="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-all data-[state=active]:bg-electric-blue data-[state=active]:text-white data-[state=active]:shadow-md data-[state=active]:shadow-electric-blue/20"
+                  className="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-all data-[state=active]:bg-brand-solid data-[state=active]:text-white data-[state=active]:shadow-md data-[state=active]:shadow-electric-blue/20"
                 >
                   {labels.createCollection}
                 </TabsTrigger>
@@ -156,7 +156,7 @@ export function ProjectKnowledgePanel({
                       <button
                         onClick={() => void connectRAGCollectionToProject(collection.collection_id)}
                         disabled={linkingCollectionId === collection.collection_id}
-                        className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                        className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
                       >
                         {linkingCollectionId === collection.collection_id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                         {labels.connect}
@@ -210,7 +210,7 @@ export function ProjectKnowledgePanel({
                     <button
                       type="submit"
                       disabled={creatingRAGCollection}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
                     >
                       {creatingRAGCollection ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                       {labels.create}
@@ -229,7 +229,7 @@ export function ProjectKnowledgePanel({
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="rounded-xl border border-electric-blue/20 bg-electric-blue/8 p-4">
+          <div className="rounded-xl border border-electric-blue/20 bg-brand-solid/8 p-4">
             <div className="flex items-center gap-2 text-sm font-medium text-electric-blue">
               <Database className="h-4 w-4" />
               {labels.mcpToolReady}

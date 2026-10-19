@@ -120,7 +120,7 @@ func TestKnowledgeBaseZipUploadDoesNotRequireRagBoxConfigForBleveOnly(t *testing
 	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(runtime, mux, authService, nil, ragboxService, bindings, nil, nil, nil, nil)
+	RegisterRoutes(runtime, mux, authService, nil, ragboxService, bindings, nil, nil, nil)
 
 	loginRequest := httptest.NewRequest(http.MethodPost, "/api/pro/login", bytes.NewBufferString(`{"email":"admin@example.com","password":"password123","expires_in_days":30}`))
 	loginRequest.Header.Set("Content-Type", "application/json")

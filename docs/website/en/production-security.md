@@ -35,7 +35,7 @@ The important rules are simple: HTTPS outside, HTTP only inside the protected ne
 
 - Give each administrator their own account. Do not share an admin password or bootstrap token.
 - Use SSO when your organization requires centrally managed access.
-- Store passwords, project bearer tokens, API tokens, and RagBox/PolicyBox tokens in a secret manager where possible.
+- Store passwords, project bearer tokens, API tokens, and RagBox tokens in a secret manager where possible.
 - Use the smallest permissions needed for each user, service account, and MCP server.
 - Review every Marketplace package and MCP tool before enabling it. A tool may read, change, or send data.
 - Use a separate project for each independent business area or data-access boundary.

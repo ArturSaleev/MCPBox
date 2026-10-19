@@ -64,7 +64,7 @@ func TestStorageConfigUpdateDoesNotBreakBootstrapAuth(t *testing.T) {
 	}
 
 	mux := http.NewServeMux()
-	RegisterRoutes(runtime, mux, authService, nil, nil, nil, nil, storageService, storageManager, nil)
+	RegisterRoutes(runtime, mux, authService, nil, nil, nil, storageService, storageManager, nil)
 
 	loginBody := bytes.NewBufferString(`{"email":"admin@example.com","password":"password123","expires_in_days":30}`)
 	loginRequest := httptest.NewRequest(http.MethodPost, "/api/pro/login", loginBody)

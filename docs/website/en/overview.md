@@ -13,7 +13,6 @@ It is designed for private and on-premises deployments. MCPBox runs as a standal
 - A separate MCP endpoint for each project
 - Optional single sign-on through any OpenID Connect (OIDC) provider
 - Integrations with RagBox for knowledge bases and retrieval
-- Integrations with PolicyBox for runtime identity and access validation
 - Audit logs, analytics, and storage configuration
 
 MCPBox stores project configuration and published tool manifests. It is part of the access-control architecture, but it does not replace authorization in the target business system: the system that owns the data or action must still make the final domain authorization decision.

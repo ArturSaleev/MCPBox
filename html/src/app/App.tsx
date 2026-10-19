@@ -1,5 +1,6 @@
 import { FormEvent, Suspense, lazy, useEffect, useRef, useState } from 'react';
-import { Toaster, toast } from 'sonner';
+import { toast } from 'sonner';
+import { Toaster } from './components/ui/sonner';
 import {
   Bot,
   Database,
@@ -46,13 +47,6 @@ import { useOllama } from './hooks/useOllama';
 import { useServerTools } from './hooks/useServerTools';
 import type { ProPrincipal, ProTokenRecord, ProUserRecord, ProRoleRecord, ProSessionRecord, CreateProTokenResponse, CreateProUserResponse, UpdateProUserResponse, UpdateProUserPasswordResponse, DisableProUserResponse, EnableProUserResponse, CreateProSessionResponse, ProLocalLoginResponse, ProSSOConfig, ProScopePreset } from './pro/types';
 import type {
-  ProPolicyBoxConfig,
-  ProPolicyBoxRuntimeTicketPayload,
-  ProPolicyBoxRuntimeTicketResponse,
-  ProPolicyBoxRuntimeTokenResponse,
-  ProPolicyBoxRuntimeValidateResponse,
-} from './pro/policybox';
-import type {
   ProRagBoxConfig,
   ProRagBoxKnowledgeBaseStatus,
   ProRagBoxSearchResponse,
@@ -79,6 +73,7 @@ import type {
   ProjectOption,
 } from './market';
 
+const SkillsView = lazy(async () => { const module = await import('./components/SkillsView'); return { default: module.SkillsView }; });
 const CLIView = lazy(async () => { const module = await import('./components/CLIView'); return { default: module.CLIView }; });
 
 const KnowledgeView = lazy(async () => {
@@ -133,39 +128,6 @@ type LMStudioLaunchResponse = {
   deeplink: string;
 };
 
-type ProPolicyBoxAuditEvent = {
-  id: string;
-  type: string;
-  actor_id?: string;
-  target_id?: string;
-  metadata?: Record<string, string>;
-  occurred_at: string;
-};
-
-const defaultPolicyBoxRuntimePayload: ProPolicyBoxRuntimeTicketPayload = {
-  project_slug: 'workspace-assistant',
-  requested_scopes: ['chat:use', 'rag:query'],
-  context: {
-    tenant_id: 'tenant-main',
-    workspace_id: 'workspace-1',
-    resource_id: 'task-42',
-    department_id: 'operations',
-  },
-  metadata: {
-    source_system: 'external-platform',
-    page: 'assistant-console',
-  },
-  user: {
-    id: 'operator-1',
-    name: 'Ivan Ivanov',
-    role: 'operator',
-    attributes: {
-      department: 'operations',
-      region: 'kz-almaty',
-    },
-  },
-};
-
 const legacyCatalogSourceURL = 'https://webeasy.kz/mcpbox/catalog.json';
 const defaultCatalogSourceURL = 'https://mcpbox.sh/catalog.json';
 
@@ -182,7 +144,6 @@ const emptyProjectForm: ProjectFormState = {
   name: '',
   description: '',
   root_path: '',
-  identity_verification_enabled: false,
   bearer_auth_enabled: false,
   bearer_token: '',
   oauth_redirect_uri: '',
@@ -269,7 +230,7 @@ function modelNameFromPath(modelPath: string) {
 }
 
 export default function App() {
-  const [view, setView] = useState<'projects' | 'cli' | 'knowledge' | 'market' | 'logs' | 'settings'>('projects');
+  const [view, setView] = useState<'projects' | 'skills' | 'cli' | 'knowledge' | 'market' | 'logs' | 'settings'>('projects');
   const [language, setLanguage] = useState<Language>(detectInitialLanguage);
   const [editionMeta, setEditionMeta] = useState<EditionMeta>({
     edition_id: 'mcpbox',
@@ -410,7 +371,6 @@ export default function App() {
   const [proStorageConfig, setProStorageConfig] = useState<ProStorageConfig | null>(null);
   const [proStorageRuntimeStatus, setProStorageRuntimeStatus] = useState<ProStorageRuntimeStatus | null>(null);
   const [proStorageShadowStatus, setProStorageShadowStatus] = useState<ProStorageShadowStatus | null>(null);
-  const [proPolicyBoxConfig, setProPolicyBoxConfig] = useState<ProPolicyBoxConfig | null>(null);
   const [proRagBoxConfig, setProRagBoxConfig] = useState<ProRagBoxConfig | null>(null);
   const [proLoading, setProLoading] = useState(false);
   const [proLocalLoginLoading, setProLocalLoginLoading] = useState(false);
@@ -451,19 +411,6 @@ export default function App() {
   const [proNewSessionLabel, setProNewSessionLabel] = useState('');
   const [proNewSessionExpiresDays, setProNewSessionExpiresDays] = useState('30');
   const [proCreatedSessionToken, setProCreatedSessionToken] = useState<string | null>(null);
-  const [proPolicyBoxBaseURL, setProPolicyBoxBaseURL] = useState('');
-  const [proPolicyBoxAdminToken, setProPolicyBoxAdminToken] = useState('');
-  const [proPolicyBoxSaving, setProPolicyBoxSaving] = useState(false);
-  const [proPolicyBoxRuntimeDialogOpen, setProPolicyBoxRuntimeDialogOpen] = useState(false);
-  const [proPolicyBoxRuntimePayload, setProPolicyBoxRuntimePayload] = useState(
-    JSON.stringify(defaultPolicyBoxRuntimePayload, null, 2),
-  );
-  const [proPolicyBoxRuntimeTicket, setProPolicyBoxRuntimeTicket] = useState('');
-  const [proPolicyBoxRuntimeToken, setProPolicyBoxRuntimeToken] = useState('');
-  const [proPolicyBoxRuntimeResponseJSON, setProPolicyBoxRuntimeResponseJSON] = useState('');
-  const [proPolicyBoxIssuingTicket, setProPolicyBoxIssuingTicket] = useState(false);
-  const [proPolicyBoxExchangingTicket, setProPolicyBoxExchangingTicket] = useState(false);
-  const [proPolicyBoxValidatingToken, setProPolicyBoxValidatingToken] = useState(false);
   const [proStorageOperationalBackend, setProStorageOperationalBackend] = useState<'sqlite' | 'postgres'>('sqlite');
   const [proStoragePostgresHost, setProStoragePostgresHost] = useState('');
   const [proStoragePostgresPort, setProStoragePostgresPort] = useState('5432');
@@ -494,6 +441,8 @@ export default function App() {
   const [proRagBoxVectorConnections, setProRagBoxVectorConnections] = useState<ProRagBoxVectorConnection[]>([]);
   const [proRagBoxWorkspaces, setProRagBoxWorkspaces] = useState<ProRagBoxWorkspace[]>([]);
   const [proRagBoxBuiltinFallbackBackend, setProRagBoxBuiltinFallbackBackend] = useState('sqlite');
+  const [activeSettingsTab, setActiveSettingsTab] = useState<'storage' | 'ragbox' | 'access' | 'users' | 'sessions'>('storage');
+  const [proRagBoxConnectionError, setProRagBoxConnectionError] = useState<string | null>(null);
   const [proRagBoxLoadingVectorConnections, setProRagBoxLoadingVectorConnections] = useState(false);
   const [proRagBoxLoadingWorkspaces, setProRagBoxLoadingWorkspaces] = useState(false);
   const [proRagBoxCreatingVectorConnection, setProRagBoxCreatingVectorConnection] = useState(false);
@@ -522,7 +471,8 @@ export default function App() {
   const [proRagBoxUpsertingRecords, setProRagBoxUpsertingRecords] = useState(false);
   const [proRagBoxLastOperation, setProRagBoxLastOperation] = useState<ProRagBoxWriteResponse | null>(null);
   const [proRagBoxKnowledgeBaseStatus, setProRagBoxKnowledgeBaseStatus] = useState<Record<string, ProRagBoxKnowledgeBaseStatus>>({});
-  const [ragSearchDiagnostics, setRAGSearchDiagnostics] = useState<string | null>(null);
+  const [ragSearchDiagnosticsByCollection, setRAGSearchDiagnosticsByCollection] = useState<Record<string, string | null>>({});
+  const [ragSearchErrors, setRAGSearchErrors] = useState<Record<string, string | null>>({});
   const logsViewportRef = useRef<HTMLDivElement | null>(null);
   const logsStickToBottomRef = useRef(true);
   const marketAutoSyncTriggeredRef = useRef(false);
@@ -576,12 +526,10 @@ export default function App() {
             description: 'Full access to all Pro operations',
           },
         ];
-  const policyBoxIdentityAvailable = Boolean(proPolicyBoxConfig?.enabled && proPolicyBoxConfig?.configured);
 
   function defaultProjectForm(): ProjectFormState {
     return {
       ...emptyProjectForm,
-      identity_verification_enabled: policyBoxIdentityAvailable,
     };
   }
   const viewLoadingFallback = (
@@ -603,6 +551,7 @@ export default function App() {
     { id: 'cli' as const, label: 'CLI', icon: Terminal },
     { id: 'knowledge' as const, label: labels.knowledgeBase, icon: Database },
     { id: 'market' as const, label: labels.market, icon: ShoppingBag },
+    { id: 'skills' as const, label: 'Skills', icon: Bot },
     { id: 'logs' as const, label: labels.logs, icon: TextSearch },
     ...(hasProAccess ? [{ id: 'settings' as const, label: proCopy.nav, icon: Shield }] : []),
   ];
@@ -662,6 +611,8 @@ export default function App() {
   const activeRAGSearchResults = activeRAGSearchCollectionId
     ? ragSearchResults[activeRAGSearchCollectionId] ?? []
     : [];
+  const ragSearchDiagnostics = activeRAGSearchCollectionId ? ragSearchDiagnosticsByCollection[activeRAGSearchCollectionId] ?? null : null;
+  const ragSearchError = activeRAGSearchCollectionId ? ragSearchErrors[activeRAGSearchCollectionId] ?? null : null;
   const editingServerIntegration =
     editingServerId !== null ? serverIntegrationsByServerID[editingServerId] ?? null : null;
   const projectOptions: ProjectOption[] = projects.map((project) => ({
@@ -706,20 +657,18 @@ export default function App() {
     'sso_login',
   ]);
   const isProAuditLog = (entry: AuditLog) =>
-    proAuditActions.has(entry.action) || entry.action.startsWith('policybox:');
+    proAuditActions.has(entry.action);
   const proActivityCopy =
     language === 'ru'
       ? {
           title: 'Pro activity',
-          subtitle: 'События токенов, сессий, защищенного Pro API и подключенного PolicyBox',
+          subtitle: 'События токенов, сессий, защищенного Pro API',
           all: 'Вся активность',
-          proOnly: 'Pro + PolicyBox',
-          policyOnly: 'Только PolicyBox',
+          proOnly: 'Pro',
           created: 'Создано',
           used: 'Использовано',
           revoked: 'Отозвано',
-          policy: 'Policy events',
-          empty: 'Pro/PolicyBox activity пока нет.',
+          empty: 'Pro activity пока нет.',
           logFeedTab: 'Логи',
           analyticsTab: 'Аналитика',
           exportLogs: 'Выгрузить лог',
@@ -734,15 +683,13 @@ export default function App() {
         }
       : {
           title: 'Pro activity',
-          subtitle: 'Agent token, session, protected Pro API, and connected PolicyBox events',
+          subtitle: 'Agent token, session, protected Pro API events',
           all: 'All activity',
-          proOnly: 'Pro + PolicyBox',
-          policyOnly: 'PolicyBox only',
+          proOnly: 'Pro',
           created: 'Created',
           used: 'Used',
           revoked: 'Revoked',
-          policy: 'Policy events',
-          empty: 'No Pro/PolicyBox activity yet.',
+          empty: 'No Pro activity yet.',
           logFeedTab: 'Logs',
           analyticsTab: 'Analytics',
           exportLogs: 'Export log',
@@ -755,14 +702,12 @@ export default function App() {
           autoScrollPinned: 'Auto-scroll on',
           autoScrollDetached: 'History mode',
         };
-  const policyActivityLogs = logs.filter((entry) => entry.action.startsWith('policybox:'));
   const proActivityLogs = logs.filter(isProAuditLog);
   const visibleLogs =
-    logsFilterMode === 'pro' ? proActivityLogs : logsFilterMode === 'policy' ? policyActivityLogs : logs;
+    logsFilterMode === 'pro' ? proActivityLogs : logs;
   const proCreatedCount = proActivityLogs.filter((entry) => entry.action === 'token_created' || entry.action === 'session_created').length;
   const proUsedCount = proActivityLogs.filter((entry) => entry.action === 'token_used' || entry.action === 'session_used' || entry.action === 'local_login' || entry.action === 'sso_login').length;
   const proRevokedCount = proActivityLogs.filter((entry) => entry.action === 'token_revoked' || entry.action === 'session_revoked').length;
-  const policyEventCount = policyActivityLogs.length;
   const canWritePro = hasProScope(proPrincipal, 'pro:write');
   const canAdminPro = hasProScope(proPrincipal, 'pro:admin');
   const proAuthLocked = isProEdition && !proPrincipal;
@@ -911,14 +856,7 @@ export default function App() {
     setProStorageClearElasticsearchPassword(false);
   }, [proStorageConfig]);
 
-  useEffect(() => {
-    if (!proPolicyBoxConfig) {
-      return;
-    }
 
-    setProPolicyBoxBaseURL(proPolicyBoxConfig.base_url ?? '');
-    setProPolicyBoxAdminToken('');
-  }, [proPolicyBoxConfig]);
 
   useEffect(() => {
     if (!proRagBoxConfig) {
@@ -942,13 +880,13 @@ export default function App() {
   }, [hasProAccess, activeView, proAuthToken, proPrincipal]);
 
   useEffect(() => {
-    if (!hasProAccess || activeView !== 'settings' || !proAuthToken.trim() || !proPrincipal || !proRagBoxConfig?.admin_configured) {
+    if (!hasProAccess || !((activeView === 'settings' && activeSettingsTab === 'ragbox') || ((activeView === 'knowledge' || activeView === 'projects') && createRAGCollectionOpen)) || !proAuthToken.trim() || !proPrincipal || !proRagBoxConfig?.enabled || !proRagBoxConfig?.admin_configured) {
       return;
     }
 
     void loadProRagBoxVectorConnections();
     void loadProRagBoxWorkspaces();
-  }, [hasProAccess, activeView, proAuthToken, proPrincipal, proRagBoxConfig?.admin_configured]);
+  }, [hasProAccess, activeView, activeSettingsTab, createRAGCollectionOpen, proAuthToken, proPrincipal, proRagBoxConfig]);
 
   useEffect(() => {
     if (!hasProAccess) {
@@ -1155,13 +1093,14 @@ export default function App() {
     }
   }
 
-  async function loadProRagBoxVectorConnections() {
-    if (!hasProAccess || !proAuthToken.trim() || !proRagBoxConfig?.admin_configured) {
+  async function loadProRagBoxVectorConnections(config = proRagBoxConfig) {
+    if (!hasProAccess || !proAuthToken.trim() || !config?.enabled || !config?.admin_configured) {
       setProRagBoxVectorConnections([]);
       return;
     }
 
     setProRagBoxLoadingVectorConnections(true);
+    setProRagBoxConnectionError(null);
     try {
       const response = await proAPIRequest<ProRagBoxVectorConnectionListResponse>(
         proAuthToken,
@@ -1172,14 +1111,14 @@ export default function App() {
       setProRagBoxVectorConnections(response.items ?? []);
     } catch (loadError) {
       setProRagBoxVectorConnections([]);
-      toast.error(loadError instanceof Error ? loadError.message : proCopy.ragboxVectorConnectionsLoadFailed);
+      setProRagBoxConnectionError(loadError instanceof Error ? loadError.message : proCopy.ragboxVectorConnectionsLoadFailed);
     } finally {
       setProRagBoxLoadingVectorConnections(false);
     }
   }
 
-  async function loadProRagBoxWorkspaces() {
-    if (!hasProAccess || !proAuthToken.trim() || !proRagBoxConfig?.admin_configured) {
+  async function loadProRagBoxWorkspaces(config = proRagBoxConfig) {
+    if (!hasProAccess || !proAuthToken.trim() || !config?.enabled || !config?.admin_configured) {
       setProRagBoxWorkspaces([]);
       return;
     }
@@ -1192,8 +1131,9 @@ export default function App() {
         messages.requestFailed,
       );
       setProRagBoxWorkspaces(response.items ?? []);
-    } catch {
+    } catch (loadError) {
       setProRagBoxWorkspaces([]);
+      setProRagBoxConnectionError(current => current ?? (loadError instanceof Error ? loadError.message : proCopy.ragboxVectorConnectionsLoadFailed));
     } finally {
       setProRagBoxLoadingWorkspaces(false);
     }
@@ -1210,38 +1150,9 @@ export default function App() {
         `/api/logs${query}`,
         messages.requestFailed,
       );
-      let mergedLogs = nextLogs;
-      if (selectedLogsProjectId === null && proAuthToken.trim() && proPolicyBoxConfig?.enabled && proPolicyBoxConfig?.admin_configured) {
-        try {
-          const response = await proAPIRequest<{ items: ProPolicyBoxAuditEvent[] }>(
-            proAuthToken,
-            '/api/pro/policybox/audit',
-            messages.requestFailed,
-          );
-          const mappedLogs: AuditLog[] = response.items.map((event, index) => ({
-            id: -1 * (index + 1),
-            project_id: null,
-            server_id: null,
-            action: `policybox:${event.type}`,
-            actor: event.actor_id ?? 'policybox',
-            detail: JSON.stringify({
-              target_id: event.target_id ?? '',
-              metadata: event.metadata ?? {},
-            }),
-            created_at: event.occurred_at,
-          }));
-          mergedLogs = [...nextLogs, ...mappedLogs].sort(
-            (left, right) => new Date(left.created_at).getTime() - new Date(right.created_at).getTime(),
-          );
-        } catch (policyAuditError) {
-          console.warn('Failed to load PolicyBox audit logs:', policyAuditError);
-        }
-      } else {
-        mergedLogs = [...nextLogs].sort(
-          (left, right) => new Date(left.created_at).getTime() - new Date(right.created_at).getTime(),
-        );
-      }
-      setLogs(mergedLogs);
+      setLogs([...nextLogs].sort(
+        (left, right) => new Date(left.created_at).getTime() - new Date(right.created_at).getTime(),
+      ));
     } catch (loadError) {
       setActionError(loadError instanceof Error ? loadError.message : messages.loadProjectsError);
     } finally {
@@ -1388,7 +1299,6 @@ export default function App() {
       setProStorageConfig(null);
       setProStorageRuntimeStatus(null);
       setProStorageShadowStatus(null);
-      setProPolicyBoxConfig(null);
       setProRagBoxConfig(null);
       return;
     }
@@ -1409,27 +1319,17 @@ export default function App() {
       setProRoles(roles);
       setProSessions(sessions);
 
-      const [policyboxResult, ragboxResult] = await Promise.allSettled([
-        proAPIRequest<ProPolicyBoxConfig>(activeToken, '/api/pro/policybox/config', messages.requestFailed),
+      const [ragboxResult] = await Promise.allSettled([
         proAPIRequest<ProRagBoxConfig>(activeToken, '/api/pro/ragbox/config', messages.requestFailed),
       ]);
-
-      if (policyboxResult.status === 'fulfilled') {
-        setProPolicyBoxConfig(policyboxResult.value);
-      } else {
-        setProPolicyBoxConfig(null);
-        setActionError(policyboxResult.reason instanceof Error ? policyboxResult.reason.message : proCopy.policyboxSaveFailed);
-      }
 
       if (ragboxResult.status === 'fulfilled') {
         setProRagBoxConfig(ragboxResult.value);
         void loadProRagBoxKnowledgeBaseStatus();
-        if (ragboxResult.value.admin_configured) {
-          void loadProRagBoxVectorConnections();
-          void loadProRagBoxWorkspaces();
-        } else {
+        if (!ragboxResult.value.admin_configured) {
           setProRagBoxVectorConnections([]);
           setProRagBoxWorkspaces([]);
+          setProRagBoxConnectionError(null);
         }
       } else {
         setProRagBoxConfig(null);
@@ -1476,8 +1376,6 @@ export default function App() {
     setProStorageClearClickHousePassword(false);
     setProStorageElasticsearchPassword('');
     setProStorageClearElasticsearchPassword(false);
-    setProPolicyBoxConfig(null);
-    setProPolicyBoxAdminToken('');
     setProRagBoxConfig(null);
     setProRagBoxAdminToken('');
     setProRagBoxClearAdminToken(false);
@@ -2012,10 +1910,8 @@ export default function App() {
           { method: 'POST' },
         );
       }
-      if (config.admin_configured) {
-        await loadProRagBoxVectorConnections();
-        await loadProRagBoxWorkspaces();
-      } else {
+      if (!config.admin_configured) {
+        setProRagBoxConnectionError(null);
         setProRagBoxVectorConnections([]);
         setProRagBoxWorkspaces([]);
       }
@@ -2121,134 +2017,20 @@ export default function App() {
     }
   }
 
-  async function saveProPolicyBoxConfig(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!proAuthToken.trim()) {
-      toast.error(proCopy.verifyFailed);
-      return;
-    }
-
-    setProPolicyBoxSaving(true);
+  async function migratePolicyBoxProject() {
+    if (!selectedProject || !canAdminPro) return;
+    const question = language === 'ru'
+      ? 'Заменить авторизацию PolicyBox на bearer-токен MCPBox? Токен будет заменён, проект останется на паузе. Проверьте доступ и настройте клиентов перед возобновлением.'
+      : 'Replace PolicyBox authorization with an MCPBox bearer token? The credential will rotate and the project will stay paused. Review access and configure clients before resuming.';
+    if (!window.confirm(question)) return;
+    setBusyProjectId(selectedProject.project_id);
     try {
-      const config = await proAPIRequest<ProPolicyBoxConfig>(
-        proAuthToken,
-        '/api/pro/policybox/config',
-        messages.requestFailed,
-        {
-          method: 'PUT',
-          body: JSON.stringify({
-            base_url: proPolicyBoxBaseURL,
-            admin_token: proPolicyBoxAdminToken,
-          }),
-        },
-      );
-      setProPolicyBoxConfig(config);
-      setProPolicyBoxAdminToken('');
-      toast.success(proCopy.policyboxSaved);
-    } catch (saveError) {
-      toast.error(saveError instanceof Error ? saveError.message : proCopy.policyboxSaveFailed);
-    } finally {
-      setProPolicyBoxSaving(false);
-    }
-  }
-
-  async function issueProPolicyBoxRuntimeTicket() {
-    if (!proAuthToken.trim()) {
-      toast.error(proCopy.verifyFailed);
-      return;
-    }
-
-    let payload: ProPolicyBoxRuntimeTicketPayload;
-    try {
-      payload = JSON.parse(proPolicyBoxRuntimePayload) as ProPolicyBoxRuntimeTicketPayload;
-    } catch {
-      toast.error('Invalid PolicyBox runtime JSON payload');
-      return;
-    }
-
-    setProPolicyBoxIssuingTicket(true);
-    try {
-      const response = await proAPIRequest<ProPolicyBoxRuntimeTicketResponse>(
-        proAuthToken,
-        '/api/pro/policybox/runtime/ticket',
-        messages.requestFailed,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            payload,
-          }),
-        },
-      );
-      setProPolicyBoxRuntimeTicket(response.ticket ?? '');
-      setProPolicyBoxRuntimeResponseJSON(JSON.stringify(response, null, 2));
-    } catch (saveError) {
-      toast.error(saveError instanceof Error ? saveError.message : proCopy.policyboxSaveFailed);
-    } finally {
-      setProPolicyBoxIssuingTicket(false);
-    }
-  }
-
-  async function exchangeProPolicyBoxRuntimeTicket() {
-    if (!proAuthToken.trim()) {
-      toast.error(proCopy.verifyFailed);
-      return;
-    }
-    if (!proPolicyBoxRuntimeTicket.trim()) {
-      toast.error('PolicyBox ticket is required');
-      return;
-    }
-
-    setProPolicyBoxExchangingTicket(true);
-    try {
-      const response = await proAPIRequest<ProPolicyBoxRuntimeTokenResponse>(
-        proAuthToken,
-        '/api/pro/policybox/runtime/exchange',
-        messages.requestFailed,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            ticket: proPolicyBoxRuntimeTicket,
-          }),
-        },
-      );
-      setProPolicyBoxRuntimeToken(response.token ?? '');
-      setProPolicyBoxRuntimeResponseJSON(JSON.stringify(response, null, 2));
-    } catch (saveError) {
-      toast.error(saveError instanceof Error ? saveError.message : proCopy.policyboxSaveFailed);
-    } finally {
-      setProPolicyBoxExchangingTicket(false);
-    }
-  }
-
-  async function validateProPolicyBoxRuntimeToken() {
-    if (!proAuthToken.trim()) {
-      toast.error(proCopy.verifyFailed);
-      return;
-    }
-    if (!proPolicyBoxRuntimeToken.trim()) {
-      toast.error('PolicyBox runtime token is required');
-      return;
-    }
-
-    setProPolicyBoxValidatingToken(true);
-    try {
-      const response = await proAPIRequest<ProPolicyBoxRuntimeValidateResponse>(
-        proAuthToken,
-        '/api/pro/policybox/runtime/validate',
-        messages.requestFailed,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            token: proPolicyBoxRuntimeToken,
-          }),
-        },
-      );
-      setProPolicyBoxRuntimeResponseJSON(JSON.stringify(response, null, 2));
-    } catch (saveError) {
-      toast.error(saveError instanceof Error ? saveError.message : proCopy.policyboxSaveFailed);
-    } finally {
-      setProPolicyBoxValidatingToken(false);
-    }
+      const updated = await apiRequest<ProjectStatus>(`/api/projects/${selectedProject.project_id}/migrate-policybox`, messages.requestFailed, { method: 'POST' });
+      setProjects((current) => current.map((project) => project.project_id === updated.project_id ? updated : project));
+      await loadLogs();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : messages.requestFailed);
+    } finally { setBusyProjectId(null); }
   }
 
   async function ensureRagBoxWorkspace() {
@@ -2593,7 +2375,6 @@ export default function App() {
         name: projectForm.name,
         description: projectForm.description,
         root_path: projectForm.root_path,
-        identity_verification_enabled: projectForm.identity_verification_enabled,
         bearer_auth_enabled: projectForm.bearer_auth_enabled,
         oauth_redirect_uri: projectForm.oauth_redirect_uri,
       };
@@ -2650,7 +2431,6 @@ export default function App() {
             name: selectedProject.name,
             description: selectedProject.description,
             root_path: selectedProject.root_path,
-            identity_verification_enabled: selectedProject.identity_verification_enabled,
             bearer_auth_enabled: selectedProject.bearer_auth_enabled,
             oauth_redirect_uri: selectedProject.oauth_redirect_uri,
             prompt,
@@ -3094,7 +2874,6 @@ export default function App() {
       name: selectedProject.name,
       description: selectedProject.description,
       root_path: selectedProject.root_path,
-      identity_verification_enabled: selectedProject.identity_verification_enabled,
       bearer_auth_enabled: selectedProject.bearer_auth_enabled,
       bearer_token: selectedProject.bearer_token,
       oauth_redirect_uri: selectedProject.oauth_redirect_uri,
@@ -3723,13 +3502,14 @@ export default function App() {
   async function searchRAGCollection(collectionId: string) {
     const query = (ragSearchQueries[collectionId] ?? '').trim();
     if (!query) {
-      setActionError(messages.searchQueryRequired);
+      setRAGSearchErrors(current => ({ ...current, [collectionId]: messages.searchQueryRequired }));
       return;
     }
 
     setSearchingCollectionId(collectionId);
     setActionError(null);
-    setRAGSearchDiagnostics(null);
+    setRAGSearchDiagnosticsByCollection(current => ({ ...current, [collectionId]: null }));
+    setRAGSearchErrors(current => ({ ...current, [collectionId]: null }));
 
     try {
       if (canUseProRagBoxSearch(collectionId)) {
@@ -3746,7 +3526,7 @@ export default function App() {
           ...current,
           [collectionId]: mapProSearchHits(response.items),
         }));
-        setRAGSearchDiagnostics(formatRagSearchDiagnostics(response.diagnostics));
+        setRAGSearchDiagnosticsByCollection(current => ({ ...current, [collectionId]: formatRagSearchDiagnostics(response.diagnostics) }));
       } else {
         const response = await apiRequest<{ items: RAGSearchResult[] }>(
           `/api/rag/collections/${collectionId}/search`,
@@ -3761,10 +3541,9 @@ export default function App() {
           [collectionId]: response.items,
         }));
       }
-      setActiveRAGSearchCollectionId(collectionId);
-      setRAGSearchResultsOpen(true);
+
     } catch (submitError) {
-      setActionError(submitError instanceof Error ? submitError.message : messages.loadProjectsError);
+      setRAGSearchErrors(current => ({ ...current, [collectionId]: submitError instanceof Error ? submitError.message : messages.loadProjectsError }));
     } finally {
       setSearchingCollectionId(null);
     }
@@ -3894,6 +3673,7 @@ export default function App() {
 
   return (
     <AppShell
+      language={language}
       logoSrc={logo}
       labels={labels}
       navigationItems={visibleNavigationItems}
@@ -3914,6 +3694,8 @@ export default function App() {
       sidebar={
         activeView === 'projects' && !proAuthLocked ? (
           <ProjectsSidebar
+            key={`project-order:${proPrincipal?.user_id ?? 'local'}`}
+            orderStorageKey={`mcpbox-project-order:${proPrincipal?.user_id ?? 'local'}`}
             labels={labels}
             messages={messages}
             language={language}
@@ -3944,13 +3726,7 @@ export default function App() {
             duplicateProject={duplicateProject}
             duplicatingProjectId={duplicatingProjectId}
             selectedProject={selectedProject}
-            showIdentityVerification={policyBoxIdentityAvailable}
-            identityVerificationLabel={language === 'ru' ? 'Проверка идентификации' : 'Identity verification'}
-            identityVerificationHint={
-              language === 'ru'
-                ? 'Для этого проекта `/mcp/{project_token}` будет требовать Bearer token и сверять его через PolicyBox.'
-                : 'This project will require a Bearer token on `/mcp/{project_token}` and validate it through PolicyBox.'
-            }
+
           />
         ) : null
       }
@@ -3958,6 +3734,17 @@ export default function App() {
       actionError={actionError}
     >
       <Toaster position="top-right" richColors />
+      {activeView === 'projects' && selectedProject?.identity_verification_enabled ? (
+        <div role="alert" className="mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4">
+          <p className="font-semibold">{language === 'ru' ? 'Требуется переход с PolicyBox' : 'PolicyBox migration required'}</p>
+          <p className="mt-2 text-sm">{language === 'ru'
+            ? 'Подключения к этому проекту заблокированы. Перейдите на bearer-токен MCPBox, проверьте разрешения серверов и клиентов, затем снимите проект с паузы. Правила PolicyBox не переносятся автоматически.'
+            : 'Connections to this project are blocked. Switch to an MCPBox bearer token, review server and client permissions, then resume the project. PolicyBox rules are not converted automatically.'}</p>
+          {canAdminPro ? <button className="mt-3 rounded-md bg-brand-solid px-4 py-2 text-sm text-white disabled:opacity-50" disabled={busyProjectId === selectedProject.project_id} onClick={() => void migratePolicyBoxProject()}>
+            {language === 'ru' ? 'Перейти на bearer и поставить на паузу' : 'Migrate to bearer and pause'}
+          </button> : <p className="mt-2 text-sm">{language === 'ru' ? 'Обратитесь к администратору MCPBox.' : 'Contact your MCPBox administrator.'}</p>}
+        </div>
+      ) : null}
       <Suspense fallback={viewLoadingFallback}>
         {activeView === 'logs' ? (
             <LogsView
@@ -3992,7 +3779,6 @@ export default function App() {
               proCreatedCount={proCreatedCount}
               proUsedCount={proUsedCount}
               proRevokedCount={proRevokedCount}
-              policyEventCount={policyEventCount}
               logsViewportRef={logsViewportRef}
               onLogsViewportScroll={handleLogsViewportScroll}
               projectNameFromLog={projectNameFromLog}
@@ -4000,10 +3786,13 @@ export default function App() {
               serverNamesById={serverNamesById}
               projectNamesById={projectNamesById}
             />
-          ) : activeView === 'cli' ? (
+          ) : activeView === 'skills' ? (
+ <SkillsView language={language} />
+ ) : activeView === 'cli' ? (
             <CLIView language={language} />
           ) : activeView === 'knowledge' ? (
             <KnowledgeView
+              language={language}
               labels={labels}
               messages={messages}
               allRAGCollections={allRAGCollections}
@@ -4035,6 +3824,7 @@ export default function App() {
               setActiveRAGSearchCollectionId={setActiveRAGSearchCollectionId}
               activeRAGSearchResults={activeRAGSearchResults}
               ragSearchDiagnostics={ragSearchDiagnostics}
+              ragSearchError={ragSearchError}
               uploadKnowledgeBaseFile={uploadKnowledgeBaseFile}
               uploadingKnowledgeBaseId={uploadingKnowledgeBaseId}
               proCopy={proCopy}
@@ -4075,6 +3865,12 @@ export default function App() {
             />
           ) : activeView === 'settings' ? (
             <ProAccessView
+              language={language}
+              activeSettingsTab={activeSettingsTab}
+              onSettingsTabChange={setActiveSettingsTab}
+              proRagBoxConnectionError={proRagBoxConnectionError}
+              proRagBoxEndpoint={proRagBoxConfig?.base_url ?? ''}
+              onRetryRagBox={() => { void loadProRagBoxVectorConnections(); void loadProRagBoxWorkspaces(); }}
               logoSrc={logo}
               editionName={editionMeta.edition_name}
               proCopy={proCopy}
@@ -4123,22 +3919,6 @@ export default function App() {
               proStorageElasticsearchIndex={proStorageElasticsearchIndex}
               proStorageClearElasticsearchPassword={proStorageClearElasticsearchPassword}
               proStorageSaving={proStorageSaving}
-              proPolicyBoxBaseURL={proPolicyBoxBaseURL}
-              proPolicyBoxAdminToken={proPolicyBoxAdminToken}
-              proPolicyBoxAdminTokenConfigured={!!proPolicyBoxConfig?.admin_token_configured}
-              proPolicyBoxAdminTokenPreview={proPolicyBoxConfig?.admin_token_preview}
-              proPolicyBoxSaving={proPolicyBoxSaving}
-              proPolicyBoxConfigured={!!proPolicyBoxConfig?.configured}
-              proPolicyBoxAdminConfigured={!!proPolicyBoxConfig?.admin_configured}
-              proPolicyBoxRuntimeConfigured={!!proPolicyBoxConfig?.runtime_configured}
-              proPolicyBoxRuntimeDialogOpen={proPolicyBoxRuntimeDialogOpen}
-              proPolicyBoxRuntimePayload={proPolicyBoxRuntimePayload}
-              proPolicyBoxRuntimeTicket={proPolicyBoxRuntimeTicket}
-              proPolicyBoxRuntimeToken={proPolicyBoxRuntimeToken}
-              proPolicyBoxRuntimeResponseJSON={proPolicyBoxRuntimeResponseJSON}
-              proPolicyBoxIssuingTicket={proPolicyBoxIssuingTicket}
-              proPolicyBoxExchangingTicket={proPolicyBoxExchangingTicket}
-              proPolicyBoxValidatingToken={proPolicyBoxValidatingToken}
               proRagBoxBaseURL={proRagBoxBaseURL}
               proRagBoxAdminToken={proRagBoxAdminToken}
               proRagBoxAdminTokenConfigured={!!proRagBoxConfig?.admin_token_configured}
@@ -4287,12 +4067,6 @@ export default function App() {
               onSetProStorageElasticsearchPassword={setProStorageElasticsearchPassword}
               onSetProStorageElasticsearchIndex={setProStorageElasticsearchIndex}
               onSetProStorageClearElasticsearchPassword={setProStorageClearElasticsearchPassword}
-              onSetProPolicyBoxBaseURL={setProPolicyBoxBaseURL}
-              onSetProPolicyBoxAdminToken={setProPolicyBoxAdminToken}
-              onSetProPolicyBoxRuntimeDialogOpen={setProPolicyBoxRuntimeDialogOpen}
-              onSetProPolicyBoxRuntimePayload={setProPolicyBoxRuntimePayload}
-              onSetProPolicyBoxRuntimeTicket={setProPolicyBoxRuntimeTicket}
-              onSetProPolicyBoxRuntimeToken={setProPolicyBoxRuntimeToken}
               onSetProRagBoxBaseURL={setProRagBoxBaseURL}
               onSetProRagBoxAdminToken={setProRagBoxAdminToken}
               onSetProRagBoxClearAdminToken={setProRagBoxClearAdminToken}
@@ -4329,10 +4103,6 @@ export default function App() {
               onCreateProSession={createProSession}
               onRevokeCurrentProSession={revokeCurrentProSession}
               onSaveProStorageConfig={saveProStorageConfig}
-              onSaveProPolicyBoxConfig={saveProPolicyBoxConfig}
-              onIssueProPolicyBoxRuntimeTicket={issueProPolicyBoxRuntimeTicket}
-              onExchangeProPolicyBoxRuntimeTicket={exchangeProPolicyBoxRuntimeTicket}
-              onValidateProPolicyBoxRuntimeToken={validateProPolicyBoxRuntimeToken}
               onSaveProRagBoxConfig={saveProRagBoxConfig}
               onCreateProRagBoxVectorConnection={createProRagBoxVectorConnection}
               onSetDefaultProRagBoxVectorConnection={setDefaultProRagBoxVectorConnection}
@@ -4346,6 +4116,7 @@ export default function App() {
             />
           ) : (
             <ProjectsView
+              language={language}
               onCLIChanged={loadProjects}
               labels={labels}
               messages={messages}

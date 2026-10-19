@@ -123,6 +123,8 @@ func TestSharedAdminAPIScopeUsesAdminForSecretsAndDestructiveActions(t *testing.
 		{method: http.MethodPost, path: "/api/projects/15/oauth-clients", want: "pro:write"},
 		{method: http.MethodGet, path: "/api/projects/15/oauth-clients/2/token", want: "pro:admin"},
 		{method: http.MethodPost, path: "/api/projects/15/bearer-token", want: "pro:admin"},
+		{method: http.MethodPost, path: "/api/projects/15/migrate-policybox", want: "pro:admin"},
+		{method: http.MethodPost, path: "/api/agentbox/direct-bootstrap", want: ""},
 		{method: http.MethodGet, path: "/mcp/project-token", want: ""},
 	}
 
@@ -258,7 +260,7 @@ func TestProjectEndpointIgnoresStoppedSTDIOConnectors(t *testing.T) {
 	}
 }
 
-func TestProjectIdentityVerificationFlagRoundTrip(t *testing.T) {
+func TestLegacyProjectIdentityVerificationSurvivesOrdinaryEdits(t *testing.T) {
 	t.Parallel()
 
 	store, err := storage.NewStore(filepath.Join(t.TempDir(), "mcpbox.db"))
@@ -272,7 +274,7 @@ func TestProjectIdentityVerificationFlagRoundTrip(t *testing.T) {
 	createRequest := httptest.NewRequest(http.MethodPost, "/api/projects", bytes.NewBufferString(`{
 		"name":"Secure Workspace",
 		"description":"Requires verified identity",
-		"identity_verification_enabled":true,
+		"identity_verification_enabled":false,
 		"bearer_auth_enabled":true,
 		"oauth_redirect_uri":"https://chatgpt.com/connector/oauth/callback-id"
 	}`))
@@ -287,9 +289,11 @@ func TestProjectIdentityVerificationFlagRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(createResponse.Body.Bytes(), &created); err != nil {
 		t.Fatalf("json.Unmarshal(create) error = %v", err)
 	}
-	if !created.IdentityVerification {
-		t.Fatal("created.IdentityVerification = false, want true")
+	// Simulate an existing installation, not a new PolicyBox project.
+	if err := store.DB().Model(&models.Project{}).Where("id = ?", created.ID).Update("identity_verification", true).Error; err != nil {
+		t.Fatal(err)
 	}
+
 	if created.OAuthRedirectURI != "https://chatgpt.com/connector/oauth/callback-id" {
 		t.Fatalf("created.OAuthRedirectURI = %q", created.OAuthRedirectURI)
 	}
@@ -351,8 +355,8 @@ func TestProjectIdentityVerificationFlagRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(updateResponse.Body.Bytes(), &updated); err != nil {
 		t.Fatalf("json.Unmarshal(update) error = %v", err)
 	}
-	if updated.IdentityVerificationEnabled {
-		t.Fatal("updated.IdentityVerificationEnabled = true, want false")
+	if !updated.IdentityVerificationEnabled {
+		t.Fatal("updated.IdentityVerificationEnabled = false, legacy gate was cleared")
 	}
 	if updated.OAuthRedirectURI != "https://chatgpt.com/connector/oauth/updated-callback-id" {
 		t.Fatalf("updated.OAuthRedirectURI = %q", updated.OAuthRedirectURI)

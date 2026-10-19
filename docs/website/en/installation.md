@@ -10,7 +10,6 @@ This guide covers a standard on-premises installation of MCPBox.
 - Permission to run the application and open the selected TCP ports
 - For optional SSO: an OIDC application registered with your identity provider
 - For optional knowledge-base integration: a reachable RagBox instance
-- For optional runtime access validation: a reachable PolicyBox instance
 
 ## 1. Download and verify the binary
 
@@ -135,7 +134,6 @@ Register the redirect URL exactly as shown in your identity provider. For a loca
 Configure integrations from the Administration interface after signing in.
 
 - **RagBox** provides knowledge-base ingestion, vector connections, and retrieval. MCPBox checks the configured RagBox connection before treating it as active.
-- **PolicyBox** provides runtime identity and access validation. When identity checking is enabled for a project, access to that project’s MCP endpoint requires a valid runtime bearer token that matches the project binding.
 
 Keep service credentials separate and grant only the permissions each integration needs.
 
@@ -154,6 +152,6 @@ If the new release changes your deployment topology, update firewall rules, reve
 | --- | --- |
 | The UI is unavailable | Confirm that the process is running and that `MCPBOX_HOST` / `MCPBOX_PORT` are correct. |
 | Cannot sign in | Confirm the local admin credentials, or verify the OIDC variables and redirect URL. |
-| MCP clients cannot connect | Check the MCP host/port, firewall, reverse proxy, project token, and any PolicyBox runtime-token requirement. |
+| MCP clients cannot connect | Check the MCP host/port, firewall, reverse proxy, project token, and project bearer/OAuth credentials. |
 
 Defaults above describe current source. Published v1.3.0 uses the earlier MCP bind `0.0.0.0`; explicitly set `--mcp-host 127.0.0.1` until updating. Enable direct remote access with `--mcp-host 0.0.0.0` or `MCPBOX_MCP_HOST=0.0.0.0`. [Network access and project isolation](network-access.md).

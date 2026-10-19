@@ -205,7 +205,7 @@ export function ProjectOAuthClientsDialog({
           <button
             type="submit"
             disabled={creating}
-            className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:opacity-60"
+            className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:opacity-60"
           >
             {creating ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
             {labels.addOAuthClient}
@@ -218,7 +218,7 @@ export function ProjectOAuthClientsDialog({
         ) : null}
 
         {revealedToken ? (
-          <div className="rounded-xl border border-electric-blue/30 bg-electric-blue/5 p-4">
+          <div className="rounded-xl border border-electric-blue/30 bg-brand-solid/5 p-4">
             <div className="mb-2 flex items-center justify-between gap-3">
               <span className="text-sm font-medium">{revealedClientName}</span>
               <button type="button" onClick={() => { setRevealedToken(''); setRevealedClientName(''); }} aria-label={labels.hideToken}>

@@ -29,8 +29,6 @@
 | Администрирование RagBox | `/api/pro/ragbox/admin/vector-connections`, `/api/pro/ragbox/admin/workspaces` |
 | Базы знаний RagBox | `GET /api/pro/ragbox/knowledge-bases`, `POST /api/pro/ragbox/knowledge-bases/sync` |
 | Upload в базу знаний | `POST /api/pro/ragbox/collections/{collectionID}/files:upload`, multipart: `file`, `storage_mode=keep|transient` |
-| Конфигурация PolicyBox | `GET, PUT /api/pro/policybox/config` |
-| Тестовый flow PolicyBox | `POST /api/pro/policybox/runtime/ticket`, `/exchange`, `/validate` |
 | Storage | `GET, PUT /api/pro/storage/config`; `GET /api/pro/storage/runtime-status`, `/shadow-status` |
 
 API развивается вместе с релизами MCPBox. Эта страница — операционный обзор; точные поля payload следует сверять с UI работающего сервиса и документацией конкретного релиза. Не автоматизируйте destructive operations без проверки в непроизводственной среде.
@@ -59,3 +57,5 @@ curl --fail-with-body \
 - [Storage routes](../../../internal/prohttp/routes.go)
 - [CLI schema and API](../../CLI.md)
 - [Authentication middleware](../../../internal/proauth/middleware.go)
+
+`POST /api/projects/{id}/migrate-policybox` требует `pro:admin`: заменяет bearer-токен, отключает legacy-флаг и ставит проект на паузу. Старые `/api/pro/policybox/*`, `/connect/runtime` и `/api/agentbox/bootstrap` отвечают `410 Gone`. Direct bootstrap сохраняется: `POST /api/agentbox/direct-bootstrap` принимает `mcp_url`, `page_url`, `page_title` и использует bearer/OAuth проекта, его паузу и migration gate. См. [миграцию](policybox-migration.md).

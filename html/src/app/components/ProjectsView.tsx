@@ -4,6 +4,8 @@ import { Server } from 'lucide-react';
 
 import { dictionaries } from '../i18n';
 import type { CatalogItem, InstalledPackage } from '../market';
+import { ProjectSkillsPanel } from './ProjectSkillsPanel';
+import type { Language } from '../i18n';
 import { ProjectCLIPanel } from './CLIView';
 import { ProjectKnowledgePanel } from './ProjectKnowledgePanel';
 import { ProjectLaunchPanel } from './ProjectLaunchPanel';
@@ -180,6 +182,7 @@ type AuthServer = {
 };
 
 type ProjectsViewProps = {
+  language: Language;
   onCLIChanged?: () => void | Promise<void>;
   labels: typeof dictionaries.en.labels;
   messages: typeof dictionaries.en.messages;
@@ -318,6 +321,7 @@ type ProjectsViewProps = {
 };
 
 export function ProjectsView({
+  language,
   onCLIChanged,
   labels,
   messages,
@@ -488,9 +492,9 @@ export function ProjectsView({
       />
 
       <Tabs defaultValue="mcp" className="gap-5">
-        <TabsList className="grid h-auto w-full grid-cols-4 rounded-2xl border border-border bg-card p-1.5">
+        <TabsList className="grid h-auto w-full grid-cols-3 xl:grid-cols-5 rounded-2xl border border-border bg-card p-1.5">
           <TabsTrigger
-            className="h-auto rounded-xl px-4 py-3 text-sm font-semibold text-muted-foreground transition-all data-[state=active]:border-electric-blue data-[state=active]:bg-electric-blue data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-electric-blue/20"
+            className="h-auto rounded-xl px-4 py-3 text-sm font-semibold text-muted-foreground transition-all data-[state=active]:border-electric-blue data-[state=active]:bg-brand-solid data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-electric-blue/20"
             value="mcp"
           >
             <span className="flex items-center gap-2">
@@ -500,9 +504,10 @@ export function ProjectsView({
               </span>
             </span>
           </TabsTrigger>
-          <TabsTrigger value="cli" className="h-auto rounded-xl px-4 py-3 text-sm font-semibold text-muted-foreground data-[state=active]:bg-electric-blue data-[state=active]:text-white">CLI</TabsTrigger>
+          <TabsTrigger value="skills" className="h-auto rounded-xl px-4 py-3 text-sm font-semibold text-muted-foreground data-[state=active]:bg-brand-solid data-[state=active]:text-white">Skills</TabsTrigger>
+          <TabsTrigger value="cli" className="h-auto rounded-xl px-4 py-3 text-sm font-semibold text-muted-foreground data-[state=active]:bg-brand-solid data-[state=active]:text-white">CLI</TabsTrigger>
           <TabsTrigger
-            className="h-auto rounded-xl px-4 py-3 text-sm font-semibold text-muted-foreground transition-all data-[state=active]:border-electric-blue data-[state=active]:bg-electric-blue data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-electric-blue/20"
+            className="h-auto rounded-xl px-4 py-3 text-sm font-semibold text-muted-foreground transition-all data-[state=active]:border-electric-blue data-[state=active]:bg-brand-solid data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-electric-blue/20"
             value="rag"
           >
             <span className="flex items-center gap-2">
@@ -513,7 +518,7 @@ export function ProjectsView({
             </span>
           </TabsTrigger>
           <TabsTrigger
-            className="h-auto rounded-xl px-4 py-3 text-sm font-semibold text-muted-foreground transition-all data-[state=active]:border-electric-blue data-[state=active]:bg-electric-blue data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-electric-blue/20"
+            className="h-auto rounded-xl px-4 py-3 text-sm font-semibold text-muted-foreground transition-all data-[state=active]:border-electric-blue data-[state=active]:bg-brand-solid data-[state=active]:text-white data-[state=active]:shadow-lg data-[state=active]:shadow-electric-blue/20"
             value="prompt"
           >
             <span className="flex items-center gap-2">
@@ -525,6 +530,7 @@ export function ProjectsView({
           </TabsTrigger>
         </TabsList>
 
+        <TabsContent value="skills"><ProjectSkillsPanel key={selectedProject.project_id} projectID={selectedProject.project_id} language={language} onChanged={onCLIChanged} /></TabsContent>
         <TabsContent value="mcp" className="space-y-6">
           <ProjectServersPanel
             labels={labels}

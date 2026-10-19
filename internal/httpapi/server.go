@@ -29,6 +29,7 @@ import (
 	"github.com/ArturSaleev/MCPBox/internal/installer"
 	"github.com/ArturSaleev/MCPBox/internal/models"
 	"github.com/ArturSaleev/MCPBox/internal/orchestrator"
+	"github.com/ArturSaleev/MCPBox/internal/skills"
 	"github.com/ArturSaleev/MCPBox/internal/storage"
 )
 
@@ -136,6 +137,7 @@ func slugFromText(value string) string {
 }
 
 type Server struct {
+	skills              *skills.Service
 	store               *storage.Store
 	registry            *orchestrator.Registry
 	installer           *installer.Service
@@ -449,6 +451,11 @@ func NewServerWithInstaller(store *storage.Store, registry *orchestrator.Registr
 	}
 
 	s.registerRoutes()
+	recoveryCtx, recoveryCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := s.skills.RecoverJobs(recoveryCtx); err != nil {
+		log.Printf("Skill job recovery: %v", err)
+	}
+	recoveryCancel()
 	for _, registrar := range options.HTTPRegistrars {
 		if registrar != nil {
 			registrar(s.mux)
@@ -519,14 +526,18 @@ func (s *Server) withAdminAPIAuthorization(next http.Handler) http.Handler {
 
 func sharedAdminAPIScope(r *http.Request) string {
 	cleanedPath := path.Clean("/" + strings.TrimSpace(r.URL.Path))
-	if !strings.HasPrefix(cleanedPath, "/api/") || cleanedPath == "/api/meta" || strings.HasPrefix(cleanedPath, "/api/pro/") {
+	if !strings.HasPrefix(cleanedPath, "/api/") || cleanedPath == "/api/meta" || (cleanedPath == "/api/agentbox/direct-bootstrap" || cleanedPath == "/api/agentbox/bootstrap") || strings.HasPrefix(cleanedPath, "/api/pro/") {
 		return ""
 	}
 
 	if strings.HasSuffix(cleanedPath, "/token") && strings.Contains(cleanedPath, "/oauth-clients/") {
 		return "pro:admin"
 	}
-	if strings.HasSuffix(cleanedPath, "/bearer-token") || strings.HasSuffix(cleanedPath, "/regenerate-token") {
+	if strings.HasSuffix(cleanedPath, "/migrate-policybox") || strings.HasSuffix(cleanedPath, "/bearer-token") || strings.HasSuffix(cleanedPath, "/regenerate-token") {
+		return "pro:admin"
+	}
+
+	if strings.HasPrefix(cleanedPath, "/api/skills/") && r.Method != http.MethodGet && r.Method != http.MethodHead {
 		return "pro:admin"
 	}
 
@@ -545,6 +556,8 @@ func sharedAdminAPIScope(r *http.Request) string {
 }
 
 func (s *Server) registerRoutes() {
+	s.registerAgentBoxRoutes()
+	s.registerSkillRoutes()
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("GET /api/meta", s.handleMeta)
 	s.mux.HandleFunc("GET /api/logs", s.handleListLogs)
@@ -605,11 +618,16 @@ func (s *Server) handleCreateProject(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.IdentityVerificationEnabled {
+		writeError(w, http.StatusBadRequest, errors.New("PolicyBox has been removed; use project bearer authentication"))
+		return
+	}
+
 	project := &models.Project{
 		Name:                 strings.TrimSpace(req.Name),
 		Description:          strings.TrimSpace(req.Description),
 		RootPath:             strings.TrimSpace(req.RootPath),
-		IdentityVerification: req.IdentityVerificationEnabled,
+		IdentityVerification: false,
 		BearerAuthEnabled:    req.BearerAuthEnabled,
 		OAuthRedirectURI:     strings.TrimSpace(req.OAuthRedirectURI),
 	}
@@ -788,6 +806,8 @@ func (s *Server) handleProjectAction(w http.ResponseWriter, r *http.Request) {
 		s.handleSetProjectPaused(w, r, projectID, false)
 	case "duplicate":
 		s.handleDuplicateProject(w, r, *project)
+	case "migrate-policybox":
+		s.handleMigratePolicyBox(w, r, projectID)
 	case "bearer-token":
 		s.handleRegenerateProjectBearerToken(w, r, projectID)
 	default:
@@ -860,6 +880,11 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.IdentityVerificationEnabled && !project.IdentityVerification {
+		writeError(w, http.StatusBadRequest, errors.New("PolicyBox has been removed"))
+		return
+	}
+
 	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		writeError(w, http.StatusBadRequest, errors.New("name is required"))
@@ -884,7 +909,7 @@ func (s *Server) handleProjectUpdate(w http.ResponseWriter, r *http.Request) {
 		strings.TrimSpace(req.RootPath),
 		strings.TrimSpace(req.Prompt),
 		promptProfilesJSON,
-		req.IdentityVerificationEnabled,
+		project.IdentityVerification,
 		req.BearerAuthEnabled,
 		strings.TrimSpace(req.OAuthRedirectURI),
 	); err != nil {
@@ -1386,59 +1411,23 @@ func (s *Server) handleConnect(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	endpointAuthorized := projectEndpointBearerAuthorized(r, *project)
-	if !endpointAuthorized && project.BearerAuthEnabled {
-		oauthClient, clientErr := s.store.GetProjectOAuthClientByToken(r.Context(), project.ID, bearerTokenFromRequest(r))
-		if clientErr != nil {
-			writeError(w, http.StatusInternalServerError, clientErr)
-			return
-		}
-		if oauthClient != nil {
-			endpointAuthorized = true
-			actor = strings.TrimSpace(oauthClient.Name)
-			r = r.Clone(connectruntime.WithAccess(r.Context(), &connectruntime.Access{Actor: actor}))
-		}
-	}
-	if !endpointAuthorized {
-		s.logAudit(r.Context(), &project.ID, nil, "connect_blocked_bearer_auth", actor, "missing or invalid bearer token")
-		w.Header().Set(
-			"WWW-Authenticate",
-			fmt.Sprintf(`Bearer resource_metadata="%s"`, s.absoluteConnectURL(r, "/.well-known/oauth-protected-resource")),
-		)
-		writeError(w, http.StatusUnauthorized, errors.New("missing or invalid bearer token"))
+	var authorized bool
+	r, authorized = s.authorizeProjectConnection(w, r, project)
+	if !authorized {
 		return
 	}
-	if project.IsPaused {
-		s.logAudit(r.Context(), &project.ID, nil, "connect_blocked_project_paused", actor, "")
-		writeError(w, http.StatusForbidden, errors.New("project is paused"))
-		return
-	}
-	if s.projectAuthorizer != nil {
-		authorizedAccess, authErr := s.projectAuthorizer(r, connectruntime.Project{
-			ID:                   project.ID,
-			Token:                project.Token,
-			IdentityVerification: project.IdentityVerification,
-		})
-		if authErr != nil {
-			status := http.StatusForbidden
-			if accessErr := (*connectruntime.AuthorizationError)(nil); errors.As(authErr, &accessErr) && accessErr.StatusCode > 0 {
-				status = accessErr.StatusCode
-			}
-			s.logAudit(r.Context(), &project.ID, nil, "connect_blocked_identity_verification", actor, truncateDetail(authErr.Error()))
-			writeError(w, status, authErr)
-			return
-		}
-		if authorizedAccess != nil {
-			r = r.Clone(connectruntime.WithAccess(r.Context(), authorizedAccess))
-			if strings.TrimSpace(authorizedAccess.Actor) != "" {
-				actor = strings.TrimSpace(authorizedAccess.Actor)
-			}
-		}
+	if access := connectruntime.FromContext(r.Context()); access != nil && strings.TrimSpace(access.Actor) != "" {
+		actor = access.Actor
 	}
 
 	servers := s.projectConnectServers(*project)
-	if len(servers) == 0 && len(project.RAGCollections) == 0 && !projectHasActiveCLI(*project) {
-		err := errors.New("project has no enabled MCP servers, CLI or connected knowledge bases configured")
+	connectedSkills, err := s.skills.List(r.Context(), project.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	if len(servers) == 0 && len(project.RAGCollections) == 0 && !projectHasActiveCLI(*project) && len(connectedSkills) == 0 {
+		err := errors.New("project has no enabled MCP servers, CLI, Skills or connected knowledge bases configured")
 		s.logAudit(r.Context(), &project.ID, nil, "connect_failed", actor, truncateDetail(err.Error()))
 		writeError(w, http.StatusBadGateway, err)
 		return
@@ -2034,7 +2023,11 @@ func dedupeNonEmptyStrings(values []string) []string {
 }
 
 func (s *Server) projectConnectionReady(project models.Project) bool {
-	return len(s.projectConnectServers(project)) > 0 || len(project.RAGCollections) > 0 || projectHasActiveCLI(project)
+	if project.IdentityVerification {
+		return false
+	}
+	connected, err := s.skills.List(context.Background(), project.ID)
+	return len(s.projectConnectServers(project)) > 0 || len(project.RAGCollections) > 0 || projectHasActiveCLI(project) || (err == nil && len(connected) > 0)
 }
 
 func (s *Server) connectURL(r *http.Request, token string) string {
@@ -2140,7 +2133,7 @@ func isConnectPath(requestPath string) bool {
 }
 
 func isConnectProtocolPath(requestPath string) bool {
-	return strings.HasPrefix(requestPath, "/.well-known/") || strings.HasPrefix(requestPath, "/oauth/")
+	return strings.HasPrefix(requestPath, "/api/agentbox/") || strings.HasPrefix(requestPath, "/.well-known/") || strings.HasPrefix(requestPath, "/oauth/")
 }
 
 func isWildcardHost(host string) bool {
@@ -3761,4 +3754,64 @@ func projectEndpointBearerAuthorized(r *http.Request, project models.Project) bo
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
+}
+
+func (s *Server) authorizeProjectConnection(w http.ResponseWriter, r *http.Request, project *models.Project) (*http.Request, bool) {
+	actor := clientActor(r)
+	if project.IdentityVerification {
+		s.logAudit(r.Context(), &project.ID, nil, "connect_blocked_policybox_migration", actor, "legacy project requires explicit migration")
+		writeError(w, http.StatusForbidden, errors.New("PolicyBox has been removed; migrate this project in MCPBox settings before connecting"))
+		return r, false
+	}
+	endpointAuthorized := projectEndpointBearerAuthorized(r, *project)
+	if !endpointAuthorized && project.BearerAuthEnabled {
+		oauthClient, clientErr := s.store.GetProjectOAuthClientByToken(r.Context(), project.ID, bearerTokenFromRequest(r))
+		if clientErr != nil {
+			writeError(w, http.StatusInternalServerError, clientErr)
+			return r, false
+		}
+		if oauthClient != nil {
+			endpointAuthorized = true
+			actor = strings.TrimSpace(oauthClient.Name)
+			r = r.Clone(connectruntime.WithAccess(r.Context(), &connectruntime.Access{Actor: actor}))
+		}
+	}
+	if !endpointAuthorized {
+		s.logAudit(r.Context(), &project.ID, nil, "connect_blocked_bearer_auth", actor, "missing or invalid bearer token")
+		w.Header().Set(
+			"WWW-Authenticate",
+			fmt.Sprintf(`Bearer resource_metadata="%s"`, s.absoluteConnectURL(r, "/.well-known/oauth-protected-resource")),
+		)
+		writeError(w, http.StatusUnauthorized, errors.New("missing or invalid bearer token"))
+		return r, false
+	}
+	if project.IsPaused {
+		s.logAudit(r.Context(), &project.ID, nil, "connect_blocked_project_paused", actor, "")
+		writeError(w, http.StatusForbidden, errors.New("project is paused"))
+		return r, false
+	}
+	if s.projectAuthorizer != nil {
+		authorizedAccess, authErr := s.projectAuthorizer(r, connectruntime.Project{
+			ID:                   project.ID,
+			Token:                project.Token,
+			IdentityVerification: project.IdentityVerification,
+		})
+		if authErr != nil {
+			status := http.StatusForbidden
+			if accessErr := (*connectruntime.AuthorizationError)(nil); errors.As(authErr, &accessErr) && accessErr.StatusCode > 0 {
+				status = accessErr.StatusCode
+			}
+			s.logAudit(r.Context(), &project.ID, nil, "connect_blocked_identity_verification", actor, truncateDetail(authErr.Error()))
+			writeError(w, status, authErr)
+			return r, false
+		}
+		if authorizedAccess != nil {
+			r = r.Clone(connectruntime.WithAccess(r.Context(), authorizedAccess))
+			if strings.TrimSpace(authorizedAccess.Actor) != "" {
+				actor = strings.TrimSpace(authorizedAccess.Actor)
+			}
+		}
+	}
+
+	return r, true
 }

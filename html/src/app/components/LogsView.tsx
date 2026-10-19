@@ -78,7 +78,7 @@ type PerformanceMetricsResponse = {
   recent_failures: PerformanceFailureRecord[];
 };
 
-type LogsFilterMode = 'all' | 'pro' | 'policy';
+type LogsFilterMode = 'all' | 'pro';
 
 type KnowledgeSearchAuditDetail = {
   collections?: string[];
@@ -107,11 +107,9 @@ type ProActivityCopy = {
   subtitle: string;
   all: string;
   proOnly: string;
-  policyOnly: string;
   created: string;
   used: string;
   revoked: string;
-  policy: string;
   empty: string;
   logFeedTab: string;
   analyticsTab: string;
@@ -151,7 +149,6 @@ type LogsViewProps = {
   proCreatedCount: number;
   proUsedCount: number;
   proRevokedCount: number;
-  policyEventCount: number;
   logsViewportRef: RefObject<HTMLDivElement | null>;
   onLogsViewportScroll: () => void;
   projectNameFromLog: (projectID: number) => string;
@@ -161,18 +158,6 @@ type LogsViewProps = {
 };
 
 function formatAuditAction(action: string) {
-  if (action === 'policybox:ticket.created') {
-    return 'policybox -> ticket_created';
-  }
-  if (action === 'policybox:session.created') {
-    return 'policybox -> session_created';
-  }
-  if (action === 'policybox:session.revoked') {
-    return 'policybox -> session_revoked';
-  }
-  if (action.startsWith('policybox:')) {
-    return action.replace('policybox:', 'policybox -> ').replaceAll('.', '_');
-  }
   if (action === 'tool_call_project_knowledge_search') {
     return 'tool_call -> search_project_knowledge';
   }
@@ -267,34 +252,7 @@ function genericAuditDetail(detail: string) {
 }
 
 function formatAuditDetail(entry: AuditLog) {
-  if (entry.action.startsWith('policybox:')) {
-    try {
-      const parsed = JSON.parse(entry.detail) as {
-        target_id?: string;
-        metadata?: Record<string, string>;
-      };
-      const parts: string[] = [];
-      if (entry.action === 'policybox:ticket.created' && parsed.target_id) {
-        parts.push(`project="${parsed.target_id}"`);
-      } else if (entry.action === 'policybox:session.created' && parsed.target_id) {
-        parts.push(`project="${parsed.target_id}"`);
-      } else if (entry.action === 'policybox:session.revoked' && parsed.target_id) {
-        parts.push(`session="${parsed.target_id}"`);
-      } else if (parsed.target_id) {
-        parts.push(`target="${parsed.target_id}"`);
-      }
-      if (parsed.metadata && Object.keys(parsed.metadata).length > 0) {
-        parts.push(
-          ...Object.entries(parsed.metadata).map(([key, value]) => `${key}="${value}"`),
-        );
-      }
-      if (parts.length > 0) {
-        return parts.join(' ');
-      }
-    } catch {
-      return entry.detail;
-    }
-  }
+
 
   if (
     entry.action === 'token_created' ||
@@ -562,7 +520,6 @@ export function LogsView({
   proCreatedCount,
   proUsedCount,
   proRevokedCount,
-  policyEventCount,
   logsViewportRef,
   onLogsViewportScroll,
   projectNameFromLog,
@@ -620,7 +577,7 @@ export function LogsView({
               onClick={() => setActiveTab('feed')}
               className={`rounded-full px-4 py-2 transition-colors ${
                 activeTab === 'feed'
-                  ? 'bg-electric-blue text-white'
+                  ? 'bg-brand-solid text-white'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
             >
@@ -630,7 +587,7 @@ export function LogsView({
               onClick={() => setActiveTab('analytics')}
               className={`rounded-full px-4 py-2 transition-colors ${
                 activeTab === 'analytics'
-                  ? 'bg-electric-blue text-white'
+                  ? 'bg-brand-solid text-white'
                   : 'text-muted-foreground hover:text-foreground'
               }`}
             >
@@ -709,7 +666,7 @@ export function LogsView({
                     onClick={() => setLogsFilterMode('all')}
                     className={`rounded-full px-3 py-1 transition-colors ${
                       logsFilterMode === 'all'
-                        ? 'bg-electric-blue text-white'
+                        ? 'bg-brand-solid text-white'
                         : 'text-muted-foreground hover:text-foreground'
                     }`}
                   >
@@ -719,22 +676,13 @@ export function LogsView({
                     onClick={() => setLogsFilterMode('pro')}
                     className={`rounded-full px-3 py-1 transition-colors ${
                       logsFilterMode === 'pro'
-                        ? 'bg-electric-blue text-white'
+                        ? 'bg-brand-solid text-white'
                         : 'text-muted-foreground hover:text-foreground'
                     }`}
                   >
                     {proActivityCopy.proOnly}
                   </button>
-                  <button
-                    onClick={() => setLogsFilterMode('policy')}
-                    className={`rounded-full px-3 py-1 transition-colors ${
-                      logsFilterMode === 'policy'
-                        ? 'bg-electric-blue text-white'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {proActivityCopy.policyOnly}
-                  </button>
+
                 </div>
               ) : null}
               <div className="rounded-full border border-border bg-background px-3 py-1 text-xs text-muted-foreground">
@@ -749,7 +697,7 @@ export function LogsView({
                     <div className="font-medium">{proActivityCopy.title}</div>
                     <div className="break-words text-sm text-muted-foreground">{proActivityCopy.subtitle}</div>
                   </div>
-                  <div className="grid gap-2 sm:grid-cols-4">
+                  <div className="grid gap-2 sm:grid-cols-3">
                     <div className="rounded-lg border border-border bg-card px-3 py-2 text-sm">
                       <div className="text-muted-foreground">{proActivityCopy.created}</div>
                       <div className="mt-1 text-lg font-semibold">{proCreatedCount}</div>
@@ -762,10 +710,7 @@ export function LogsView({
                       <div className="text-muted-foreground">{proActivityCopy.revoked}</div>
                       <div className="mt-1 text-lg font-semibold">{proRevokedCount}</div>
                     </div>
-                    <div className="rounded-lg border border-border bg-card px-3 py-2 text-sm">
-                      <div className="text-muted-foreground">{proActivityCopy.policy}</div>
-                      <div className="mt-1 text-lg font-semibold">{policyEventCount}</div>
-                    </div>
+
                   </div>
                 </div>
               </div>
@@ -778,10 +723,10 @@ export function LogsView({
               </div>
             ) : visibleLogs.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border bg-background px-4 py-8 text-center text-muted-foreground">
-                {logsFilterMode === 'pro' || logsFilterMode === 'policy' ? proActivityCopy.empty : messages.noLogs}
+                {logsFilterMode === 'pro' ? proActivityCopy.empty : messages.noLogs}
               </div>
             ) : (
-              <div className="w-full overflow-hidden rounded-xl border border-border bg-[#0b0f14]">
+              <div className="w-full overflow-hidden rounded-xl border border-border bg-log-background">
                 <div
                   ref={logsViewportRef}
                   onScroll={onLogsViewportScroll}
@@ -793,44 +738,40 @@ export function LogsView({
                     return (
                       <div
                         key={entry.id}
-                        className="w-full min-w-0 max-w-full overflow-hidden border-b border-white/5 px-4 py-3 font-mono text-xs text-slate-200 last:border-b-0"
+                        className="w-full min-w-0 max-w-full overflow-hidden border-b border-border px-4 py-3 font-mono text-xs text-foreground last:border-b-0"
                         style={{ contain: 'inline-size' }}
                       >
                         <div className="flex w-full min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-1 overflow-hidden">
-                          <span className="shrink-0 text-slate-500">
+                          <span className="shrink-0 text-muted-foreground">
                             {new Date(entry.created_at).toLocaleTimeString()}
                           </span>
                           <span className="max-w-full break-all text-electric-blue">{formatAuditAction(entry.action)}</span>
-                          {entry.action.startsWith('policybox:') ? (
-                            <span className="shrink-0 rounded-full border border-sky-400/30 bg-sky-400/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.12em] text-sky-300">
-                              PolicyBox
-                            </span>
-                          ) : null}
-                          <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-emerald-300">
+
+                          <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-success">
                             {proActivityCopy.actor}
                           </span>
-                          <span className="min-w-0 max-w-full break-all text-slate-200">
+                          <span className="min-w-0 max-w-full break-all text-foreground">
                             {entry.actor || labels.unknownActor}
                           </span>
                           {metadata.ip ? (
-                            <span className="min-w-0 max-w-full break-all text-slate-400">
+                            <span className="min-w-0 max-w-full break-all text-muted-foreground">
                               {proActivityCopy.requestIP}: {metadata.ip}
                             </span>
                           ) : null}
                           {entry.project_id ? (
-                            <span className="min-w-0 max-w-full break-all text-emerald-400">
+                            <span className="min-w-0 max-w-full break-all text-success">
                               {projectNameFromLog(entry.project_id)}
                             </span>
                           ) : null}
                           {entry.server_id ? (
-                            <span className="min-w-0 max-w-full break-all text-amber-300">
+                            <span className="min-w-0 max-w-full break-all text-warning">
                               {serverNameFromLog(entry.server_id)}
                             </span>
                           ) : null}
                         </div>
                         {entry.detail ? (
                           <div
-                            className="mt-1 block w-full min-w-0 max-w-full overflow-hidden whitespace-pre-wrap text-slate-300/85"
+                            className="mt-1 block w-full min-w-0 max-w-full overflow-hidden whitespace-pre-wrap text-log-detail"
                             style={{
                               overflowWrap: 'anywhere',
                               wordBreak: 'break-word',

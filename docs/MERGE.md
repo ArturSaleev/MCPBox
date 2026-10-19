@@ -1,5 +1,6 @@
 # Обновление до единого MCPBox 1.3.0
 
+> Историческая заметка об объединении v1.3.0. В текущих исходниках интеграция PolicyBox удалена; см. [миграцию](website/ru/policybox-migration.md).
 [English upgrade guide](website/en/operations.md) | [Русская эксплуатационная инструкция](website/ru/operations.md)
 
 MCPBox и MCPBoxPro объединены в одном Go-модуле `github.com/ArturSaleev/MCPBox`, одном frontend `html/src` и одном исполняемом файле `MCPBox`. Код бывших расширений находится в `internal/pro*`; префиксы сохранены для совместимости. Проверка коммерческой лицензии в приложение не включена. На весь объединённый проект распространяется существующая Apache-2.0 в LICENSE.

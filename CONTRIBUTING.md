@@ -35,12 +35,12 @@ Current source defaults both listeners to loopback; administration uses `38181`,
 - Add meaningful regression tests for changed behavior, particularly authentication, project isolation, execution limits and persistent state. Documentation-only changes do not need backend tests.
 - Preserve user databases, settings and external integration data. Use additive migrations where possible and document any upgrade or rollback impact.
 - Keep secrets out of code, fixtures, screenshots, logs and generated assets. Use synthetic data in examples.
-- RagBox and PolicyBox are separate integrations. Do not add Skills integration or remove PolicyBox as an unrelated cleanup.
+- RagBox is a separate integration. Preserve its data and boundaries; do not add unrelated integrations.
 - Update both English and Russian documentation when changing documented behavior. Keep compatibility identifiers such as `/api/pro/*` and `MCPBOX_PRO_*` unless the change includes a migration plan.
 
 ## Validation
 
-Run checks relevant to the change and report their actual results. Backend changes normally require `GOWORK=off go test ./...`; concurrency-sensitive changes may also need a targeted `go test -race`. UI changes require a frontend rebuild and a check of the resulting application. External OAuth, AI clients, RagBox and PolicyBox require separate integration checks; do not describe unit tests as live integration validation.
+Run checks relevant to the change and report their actual results. Backend changes normally require `GOWORK=off go test ./...`; concurrency-sensitive changes may also need a targeted `go test -race`. UI changes require a frontend rebuild and a check of the resulting application. External OAuth, AI clients, RagBox require separate integration checks; do not describe unit tests as live integration validation.
 
 Documentation link checks:
 

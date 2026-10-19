@@ -18,6 +18,10 @@ RAG improves answers grounded in your organization’s documents, but it does no
 
 MCPBox always creates a managed folder for uploaded files. Upload mode **Keep** retains the uploaded original for future reindexing. **Transient** processes the file and removes the original after successful processing. Archive uploads (`.zip`, `.tar`, `.tgz`, and `.tar.gz`) are unpacked and processed as batches.
 
+### Collection cards and search
+
+The Knowledge Base page keeps upload and folder indexing actions on each compact card. Use the **!** button in the page header for usage help, or the **!** on a collection for its paths, service details and RagBox status. **Search** opens a dialog containing both the query and results, including loading, empty and error states.
+
 ### Supported local file types and limits
 
 The local extractor supports `.txt`, `.md`, `.csv`, `.docx`, `.xlsx`, `.pptx`, `.pdf`, `.go`, `.js`, and `.php`. It indexes extractable text, not visual layout; scanned PDFs without a text layer may produce no usable content.
@@ -41,17 +45,23 @@ MCPBox checks the connection when saving the configuration. For a RagBox-backed 
 
 `dual` keeps local Bleve and RagBox in sync. `ragbox_only` relies on RagBox. Automatic local reindexing is disabled in both modes to prevent duplicate background work; use uploads, source synchronization, or a manual sync instead.
 
+### Settings navigation and connection errors
+
+Settings groups **Storage** and **RagBox** under System, and **Access**, **Users**, and **Sessions** under Security. On smaller screens, choose a section from the dropdown. The **!** button opens general help; bootstrap and shadow-sync details can be expanded in Storage. PostgreSQL fields appear when PostgreSQL is selected.
+
+RagBox vector connections and workspaces load when their section or a knowledge-base editor needs them. A saved address/token indicates configuration, not service availability. If RagBox is unreachable, its section shows a scoped warning with **Retry** and expandable technical details. Check that the service is running, the saved URL is reachable from the MCPBox server, and its admin token is valid. `127.0.0.1` refers to the machine or container running MCPBox. Local Bleve search does not require RagBox.
+
 ## Logging and analytics
 
-Open **Logs** to review the audit trail and **Analytics** to review request volume, errors, latency, traffic, and recent failures. Logs can be filtered by project and by Access/Policy activity, refreshed, and exported from the visible list.
+Open **Logs** to review the audit trail and **Analytics** to review request volume, errors, latency, traffic, and recent failures. Logs can be filtered by project and by access activity, refreshed, and exported from the visible list.
 
 Use logs to investigate failed MCP calls, server health checks, knowledge-base actions, configuration changes, and access activity. Avoid writing secrets or sensitive personal data into project names, prompts, custom headers, or request metadata because operational logs may retain those values.
 
 ## Other settings
 
-### PolicyBox
+### Migrating from PolicyBox
 
-In **Settings → PolicyBox**, provide the PolicyBox base URL and its admin token. Bind the PolicyBox project to the MCPBox project. When project identity verification is enabled, callers to the project MCP endpoint must present a valid PolicyBox runtime bearer token whose project binding matches. Test ticket, exchange, and validation flows in the runtime playground before enabling this for users.
+The integration has been removed from current source. Existing projects have an explicit [migration that preserves data](policybox-migration.md).
 
 ### Storage
 

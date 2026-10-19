@@ -41,13 +41,13 @@ MCPBox - это control plane на Go для MCP-серверов.
 
 - `internal/proauth`, `internal/prosso`: пользователи, роли, токены, сессии и OIDC SSO.
 - `internal/prohttp`: защищённый административный API, OAuth проектов, endpoints интеграций и runtime-авторизация.
-- `internal/propolicy`, `internal/proprojects`: интеграция PolicyBox, опубликованные manifests, привязки и shadow-записи проектов.
+- `internal/proprojects`: shadow-записи проектов.
 - `internal/proragbox`: настройки RagBox, bindings, ingest и поиск.
 - `internal/prostorage`: настройки bootstrap-хранилища и опциональное подключение operational PostgreSQL. Это не означает перенос всех таблиц общего ядра в PostgreSQL; см. [архитектуру хранения](docs/STORAGE_ARCHITECTURE_RU.md).
 - `internal/cli`: сохраняемые определения CLI, обнаружение каталога и выполнение с ограничениями; см. [документацию CLI](docs/CLI.md).
 - `html/src/app/pro`: UI доступа и интеграций, который собирается вместе с общим frontend в `internal/httpapi/ui/dist`.
 
-SQLite остаётся bootstrap-базой по умолчанию. База по умолчанию и относительные runtime-пути разрешаются рядом с исполняемым файлом независимо от текущей директории терминала. Сохранена совместимость с `.mcpboxpro/rag-shadow`. RagBox и PolicyBox остаются отдельными опциональными сервисами.
+SQLite остаётся bootstrap-базой по умолчанию. База по умолчанию и относительные runtime-пути разрешаются рядом с исполняемым файлом независимо от текущей директории терминала. Сохранена совместимость с `.mcpboxpro/rag-shadow`. RagBox остаётся отдельным опциональным сервисом.
 
 Listeners по умолчанию: `127.0.0.1:38181` для админки и `127.0.0.1:38182` для MCP. Настройка через `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, `MCPBOX_MCP_PORT` или соответствующие CLI flags.
 

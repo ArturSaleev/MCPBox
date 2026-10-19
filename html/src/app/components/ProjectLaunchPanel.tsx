@@ -413,7 +413,7 @@ export function ProjectLaunchPanel({
                   <div className="flex items-start gap-3">
                     <Info className="mt-0.5 h-5 w-5 text-blue-500" />
                     <div>
-                      <p className="text-sm font-medium text-blue-500">{labels.tip}</p>
+                      <p className="text-sm font-medium text-electric-blue">{labels.tip}</p>
                       <p className="mt-1 text-sm text-muted-foreground">
                         {messages.launchProjectTip}
                       </p>

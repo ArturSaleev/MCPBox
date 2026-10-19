@@ -207,7 +207,7 @@ export function GlobalLogsView({ logs, projects, onClearLogs }: GlobalLogsViewPr
             </div>
 
             {/* Console Content */}
-            <div className="flex-1 overflow-y-auto p-4 bg-[#0a0a0a] font-mono text-sm">
+            <div className="flex-1 overflow-y-auto p-4 bg-log-background font-mono text-sm">
               {filteredLogs.length === 0 ? (
                 <div className="h-full flex items-center justify-center text-muted-foreground">
                   <div className="text-center">

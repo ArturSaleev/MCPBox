@@ -40,7 +40,7 @@ Configure `MCPBOX_PRO_OIDC_ISSUER_URL`, `MCPBOX_PRO_OIDC_CLIENT_ID`, `MCPBOX_PRO
 | `MCPBOX_PRO_OIDC_AUTO_CREATE_USERS` | `true` |
 | `MCPBOX_PRO_OIDC_ALLOWED_HD` | empty |
 
-`MCPBOX_RUNTIME_CONTEXT_HMAC_SECRET` configures the signed runtime-context integration; see the [PolicyBox protocol notes](../../POLICYBOX_RUNTIME_INTEGRATION_RU.md) before enabling that flow. It is separate from the admin bootstrap credential.
+The `MCPBOX_RUNTIME_CONTEXT_HMAC_SECRET` setting is no longer used. See [migration](policybox-migration.md).
 
 ## Data and integrations
 
@@ -48,10 +48,14 @@ The default `mcpbox.db` is next to the resolved executable, independently of the
 
 The Go embedding API accepts `app.Options.StoreDSN`; it is not a documented executable `--db` flag or environment variable. Relative DSNs are resolved beside the executable; absolute and special `:` / `file:` DSNs are preserved. `go run .` uses a temporary executable: build a persistent binary for a persistent installation.
 
-Configure RagBox, PolicyBox, PostgreSQL and log backends in Settings. SQLite remains the bootstrap database. Selecting PostgreSQL does not migrate every core table. Inspect storage runtime and shadow status after a change; see [integrations](knowledge-integrations.md).
+Configure RagBox, PostgreSQL and log backends in Settings. SQLite remains the bootstrap database. Selecting PostgreSQL does not migrate every core table. Inspect storage runtime and shadow status after a change; see [integrations](knowledge-integrations.md).
 
 Compatibility names `MCPBOX_PRO_*`, `/api/pro/*`, `pro:*`, and `.mcpboxpro` remain in the unified application and do not require a paid edition.
 
 Sources: [runtime](../../../app/runtime.go), [entry point](../../../main.go), [SSO](../../../internal/prosso/service.go), [launcher](../../../internal/httpapi/llamacpp.go).
 
 Defaults above describe current source. Published v1.3.0 uses the earlier MCP bind `0.0.0.0`; explicitly set `--mcp-host 127.0.0.1` until updating. Enable direct remote access with `--mcp-host 0.0.0.0` or `MCPBOX_MCP_HOST=0.0.0.0`. [Network access and project isolation](network-access.md).
+
+## Appearance
+
+Use the sun, moon or monitor button at the bottom of the navigation to choose **Light**, **Dark** or **System**. The same control is available on the sign-in screen. System follows the operating system appearance, including changes while MCPBox is open. An explicit Light/Dark choice overrides the system preference. The choice is saved in this browser under `mcpbox-theme` and applies to pages, forms, menus, dialogs and notifications; it does not change server or project settings.

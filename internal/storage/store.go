@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/ArturSaleev/MCPBox/internal/models"
+	"github.com/ArturSaleev/MCPBox/internal/skills"
 	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -72,6 +73,7 @@ func NewStore(dsn string) (*Store, error) {
 		return nil, err
 	}
 	if err := db.AutoMigrate(
+		&skills.CatalogCache{}, &skills.Skill{}, &skills.Binding{}, &skills.Job{},
 		&models.ProjectCatalogSettings{},
 		&models.IntegrationCatalogItem{},
 		&models.InstalledIntegration{},
@@ -552,6 +554,17 @@ func (s *Store) DuplicateProject(ctx context.Context, source *models.Project, na
 			}
 		}
 
+		var skillBindings []skills.Binding
+		if err := tx.Where("project_id = ?", source.ID).Find(&skillBindings).Error; err != nil {
+			return err
+		}
+		for _, binding := range skillBindings {
+			binding.ProjectID = duplicated.ID
+			binding.CreatedAt = time.Time{}
+			if err := tx.Create(&binding).Error; err != nil {
+				return err
+			}
+		}
 		for _, entry := range source.CLIs {
 			if err := tx.Create(&models.ProjectCLI{ProjectID: duplicated.ID, CLIID: entry.ID}).Error; err != nil {
 				return err
@@ -773,6 +786,19 @@ func (s *Store) ListAutoStartServers(ctx context.Context) ([]models.MCPServer, e
 
 func (s *Store) DeleteProject(ctx context.Context, projectID uint) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var running int64
+		if err := tx.Model(&skills.Job{}).Where("project_id = ? AND status = ?", projectID, "running").Count(&running).Error; err != nil {
+			return err
+		}
+		if running > 0 {
+			return errors.New("project has a running Skill job")
+		}
+		if err := tx.Where("project_id = ?", projectID).Delete(&skills.Binding{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("project_id = ?", projectID).Delete(&skills.Job{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("project_id = ?", projectID).Delete(&models.ProjectCLI{}).Error; err != nil {
 			return err
 		}
@@ -1092,4 +1118,24 @@ func (s *Store) ListRecentPerformanceFailures(
 	}
 	err := query.Find(&metrics).Error
 	return metrics, err
+}
+
+// MigratePolicyBoxProject keeps legacy tables/configuration untouched. The
+// conditional update rotates credentials and pauses the project atomically;
+// an ordinary project cannot be changed by retrying a migration request.
+func (s *Store) MigratePolicyBoxProject(ctx context.Context, projectID uint) error {
+	token, err := NewProjectBearerToken()
+	if err != nil {
+		return err
+	}
+	result := s.db.WithContext(ctx).Model(&models.Project{}).
+		Where("id = ? AND identity_verification = ?", projectID, true).
+		Updates(map[string]any{"identity_verification": false, "bearer_auth_enabled": true, "bearer_token": token, "is_paused": true})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errors.New("project does not require PolicyBox migration")
+	}
+	return nil
 }

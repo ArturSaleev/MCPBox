@@ -2,10 +2,12 @@ import type { ReactNode } from 'react';
 
 import type { LucideIcon } from 'lucide-react';
 
+import type { Language } from '../i18n';
+import { ThemeSwitcher } from './ThemeSwitcher';
 import { dictionaries } from '../i18n';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 
-type ViewId = 'projects' | 'cli' | 'knowledge' | 'market' | 'logs' | 'pro' | 'settings';
+type ViewId = 'projects' | 'skills' | 'cli' | 'knowledge' | 'market' | 'logs' | 'pro' | 'settings';
 
 type NavigationItem = {
   id: ViewId;
@@ -15,6 +17,7 @@ type NavigationItem = {
 
 type AppShellProps = {
   logoSrc: string;
+  language: Language;
   labels: typeof dictionaries.en.labels;
   navigationItems: NavigationItem[];
   view: ViewId;
@@ -29,6 +32,7 @@ type AppShellProps = {
 
 export function AppShell({
   logoSrc,
+  language,
   labels,
   navigationItems,
   view,
@@ -42,9 +46,10 @@ export function AppShell({
 }: AppShellProps) {
   return (
     <div className="min-h-screen bg-background text-foreground">
+      {immersive ? <div className="fixed right-5 top-5 z-40"><ThemeSwitcher language={language} /></div> : null}
       <div className="flex min-h-screen w-full">
         {!immersive ? (
-          <aside className="sticky top-0 flex h-screen w-20 shrink-0 flex-col items-center border-r border-border bg-sidebar/55 px-3 py-6">
+          <aside className="sticky top-0 flex h-screen w-20 shrink-0 flex-col items-center border-r border-border bg-sidebar/55 px-3 py-4 overflow-y-auto">
             <div className="flex h-full flex-col items-center gap-3">
               <div className="mb-2 flex h-12 w-12 items-center justify-center">
                 <img src={logoSrc} alt={labels.appTitle} className="max-h-full w-auto object-contain" />
@@ -61,7 +66,7 @@ export function AppShell({
                         aria-label={item.label}
                         className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl border transition-colors ${
                           isActive
-                            ? 'border-electric-blue/40 bg-electric-blue text-white shadow-[0_12px_30px_rgba(38,132,255,0.22)]'
+                            ? 'border-electric-blue/40 bg-brand-solid text-white shadow-[0_12px_30px_rgba(38,132,255,0.22)]'
                             : 'border-transparent bg-card text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground'
                         }`}
                       >
@@ -74,7 +79,10 @@ export function AppShell({
                   </Tooltip>
                 );
               })}
-              {footer ? <div className="mt-auto pt-3">{footer}</div> : null}
+              <div className="mt-auto flex flex-col items-center gap-3 pt-3">
+                <ThemeSwitcher language={language} />
+                {footer}
+              </div>
             </div>
           </aside>
         ) : null}

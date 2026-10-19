@@ -42,13 +42,13 @@ The same command updates an existing local account with the same email. Password
 
 - `internal/proauth`, `internal/prosso`: local users, roles, tokens, sessions, OIDC SSO.
 - `internal/prohttp`: authenticated administration routes, project OAuth, integration endpoints, and runtime authorization.
-- `internal/propolicy`, `internal/proprojects`: PolicyBox integration, published manifests, project bindings and shadows.
+- `internal/proprojects`: project shadows.
 - `internal/proragbox`: external RagBox configuration, bindings, ingest, and search.
 - `internal/prostorage`: bootstrap storage settings and optional operational PostgreSQL connectivity. This does not imply that every shared-core table has moved to PostgreSQL; see [storage architecture](docs/STORAGE_ARCHITECTURE_RU.md).
 - `internal/cli`: persistent CLI definitions, catalog discovery, and bounded execution; see [CLI documentation](docs/CLI.md).
 - `html/src/app/pro`: access and integration UI, built together with the shared frontend into `internal/httpapi/ui/dist`.
 
-SQLite remains the default bootstrap database. Default database and relative runtime data paths are resolved beside the executable, independently of the terminal working directory. Existing `.mcpboxpro/rag-shadow` paths remain compatible. RagBox and PolicyBox are separate optional services.
+SQLite remains the default bootstrap database. Default database and relative runtime data paths are resolved beside the executable, independently of the terminal working directory. Existing `.mcpboxpro/rag-shadow` paths remain compatible. RagBox is a separate optional service.
 
 Default listeners are `127.0.0.1:38181` for administration and `127.0.0.1:38182` for MCP. Configure them with `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, `MCPBOX_MCP_PORT`, or the corresponding CLI flags.
 

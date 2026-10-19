@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 
-import { Copy, Database, LoaderCircle, Pencil, Plus, Shield, Trash2 } from 'lucide-react';
+import { CircleAlert, Copy, Database, KeyRound, LoaderCircle, Pencil, Plus, RefreshCw, Server, Shield, Trash2, Users, Clock } from 'lucide-react';
 
 import type { ProRagBoxWriteResponse } from '../pro/ragbox';
 import type {
@@ -86,7 +86,6 @@ type ProCopy = {
   revokeCurrentSession: string;
   settingsTabAccess: string;
   settingsTabStorage: string;
-  settingsTabPolicybox: string;
   storageTitle: string;
   storageDescription: string;
   storageBootstrapBackend: string;
@@ -137,33 +136,6 @@ type ProCopy = {
   storageShadowLinks: string;
   storageLastSync: string;
   storageNeverSynced: string;
-  policyboxTitle: string;
-  policyboxDescription: string;
-  policyboxStartupTokensHint: string;
-  policyboxJWTSecretHint: string;
-  policyboxBaseURL: string;
-  policyboxAdminToken: string;
-  policyboxAdminTokenPlaceholder: string;
-  policyboxAdminTokenConfigured: string;
-  policyboxSave: string;
-  policyboxConfigured: string;
-  policyboxNotConfigured: string;
-  policyboxAdminReady: string;
-  policyboxRuntimeReady: string;
-  policyboxAdminMissing: string;
-  policyboxRuntimeMissing: string;
-  policyboxRuntimeManage: string;
-  policyboxRuntimeDialogTitle: string;
-  policyboxRuntimeDialogDescription: string;
-  policyboxRuntimeClientId: string;
-  policyboxRuntimeClientSecret: string;
-  policyboxRuntimeRequestJson: string;
-  policyboxRuntimeTicket: string;
-  policyboxRuntimeToken: string;
-  policyboxRuntimeResponseJson: string;
-  policyboxRuntimeIssueTicket: string;
-  policyboxRuntimeExchangeToken: string;
-  policyboxRuntimeValidateToken: string;
   ragboxTitle: string;
   ragboxDescription: string;
   ragboxEnabled: string;
@@ -367,9 +339,16 @@ type RagBoxWorkspaceOption = {
   status: string;
 };
 
-type SettingsTabID = 'access' | 'storage' | 'policybox' | 'ragbox' | 'users' | 'sessions';
+
+type SettingsTabID = 'access' | 'storage' | 'ragbox' | 'users' | 'sessions';
 
 type ProAccessViewProps = {
+  language: 'en' | 'ru';
+  activeSettingsTab: SettingsTabID;
+  onSettingsTabChange: (tab: SettingsTabID) => void;
+  proRagBoxConnectionError: string | null;
+  proRagBoxEndpoint: string;
+  onRetryRagBox: () => void;
   logoSrc: string;
   editionName: string;
   proCopy: ProCopy;
@@ -418,22 +397,6 @@ type ProAccessViewProps = {
   proStorageElasticsearchIndex: string;
   proStorageClearElasticsearchPassword: boolean;
   proStorageSaving: boolean;
-  proPolicyBoxBaseURL: string;
-  proPolicyBoxAdminToken: string;
-  proPolicyBoxAdminTokenConfigured: boolean;
-  proPolicyBoxAdminTokenPreview?: string;
-  proPolicyBoxSaving: boolean;
-  proPolicyBoxConfigured: boolean;
-  proPolicyBoxAdminConfigured: boolean;
-  proPolicyBoxRuntimeConfigured: boolean;
-  proPolicyBoxRuntimeDialogOpen: boolean;
-  proPolicyBoxRuntimePayload: string;
-  proPolicyBoxRuntimeTicket: string;
-  proPolicyBoxRuntimeToken: string;
-  proPolicyBoxRuntimeResponseJSON: string;
-  proPolicyBoxIssuingTicket: boolean;
-  proPolicyBoxExchangingTicket: boolean;
-  proPolicyBoxValidatingToken: boolean;
   proRagBoxBaseURL: string;
   proRagBoxAdminToken: string;
   proRagBoxAdminTokenConfigured: boolean;
@@ -571,12 +534,6 @@ type ProAccessViewProps = {
   onSetProStorageElasticsearchPassword: (value: string) => void;
   onSetProStorageElasticsearchIndex: (value: string) => void;
   onSetProStorageClearElasticsearchPassword: (value: boolean) => void;
-  onSetProPolicyBoxBaseURL: (value: string) => void;
-  onSetProPolicyBoxAdminToken: (value: string) => void;
-  onSetProPolicyBoxRuntimeDialogOpen: (open: boolean) => void;
-  onSetProPolicyBoxRuntimePayload: (value: string) => void;
-  onSetProPolicyBoxRuntimeTicket: (value: string) => void;
-  onSetProPolicyBoxRuntimeToken: (value: string) => void;
   onSetProRagBoxBaseURL: (value: string) => void;
   onSetProRagBoxAdminToken: (value: string) => void;
   onSetProRagBoxClearAdminToken: (value: boolean) => void;
@@ -613,10 +570,6 @@ type ProAccessViewProps = {
   onCreateProSession: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onRevokeCurrentProSession: () => Promise<void>;
   onSaveProStorageConfig: (event: FormEvent<HTMLFormElement>) => Promise<void>;
-  onSaveProPolicyBoxConfig: (event: FormEvent<HTMLFormElement>) => Promise<void>;
-  onIssueProPolicyBoxRuntimeTicket: () => Promise<void>;
-  onExchangeProPolicyBoxRuntimeTicket: () => Promise<void>;
-  onValidateProPolicyBoxRuntimeToken: () => Promise<void>;
   onSaveProRagBoxConfig: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onCreateProRagBoxVectorConnection: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onSetDefaultProRagBoxVectorConnection: (connectionId: string) => Promise<void>;
@@ -630,6 +583,7 @@ type ProAccessViewProps = {
 };
 
 export function ProAccessView({
+  language, activeSettingsTab, onSettingsTabChange, proRagBoxConnectionError, proRagBoxEndpoint, onRetryRagBox,
   logoSrc,
   editionName,
   proCopy,
@@ -678,22 +632,6 @@ export function ProAccessView({
   proStorageElasticsearchIndex,
   proStorageClearElasticsearchPassword,
   proStorageSaving,
-  proPolicyBoxBaseURL,
-  proPolicyBoxAdminToken,
-  proPolicyBoxAdminTokenConfigured,
-  proPolicyBoxAdminTokenPreview,
-  proPolicyBoxSaving,
-  proPolicyBoxConfigured,
-  proPolicyBoxAdminConfigured,
-  proPolicyBoxRuntimeConfigured,
-  proPolicyBoxRuntimeDialogOpen,
-  proPolicyBoxRuntimePayload,
-  proPolicyBoxRuntimeTicket,
-  proPolicyBoxRuntimeToken,
-  proPolicyBoxRuntimeResponseJSON,
-  proPolicyBoxIssuingTicket,
-  proPolicyBoxExchangingTicket,
-  proPolicyBoxValidatingToken,
   proRagBoxBaseURL,
   proRagBoxAdminToken,
   proRagBoxAdminTokenConfigured,
@@ -807,12 +745,6 @@ export function ProAccessView({
   onSetProStorageElasticsearchPassword,
   onSetProStorageElasticsearchIndex,
   onSetProStorageClearElasticsearchPassword,
-  onSetProPolicyBoxBaseURL,
-  onSetProPolicyBoxAdminToken,
-  onSetProPolicyBoxRuntimeDialogOpen,
-  onSetProPolicyBoxRuntimePayload,
-  onSetProPolicyBoxRuntimeTicket,
-  onSetProPolicyBoxRuntimeToken,
   onSetProRagBoxBaseURL,
   onSetProRagBoxAdminToken,
   onSetProRagBoxClearAdminToken,
@@ -849,10 +781,6 @@ export function ProAccessView({
   onCreateProSession,
   onRevokeCurrentProSession,
   onSaveProStorageConfig,
-  onSaveProPolicyBoxConfig,
-  onIssueProPolicyBoxRuntimeTicket,
-  onExchangeProPolicyBoxRuntimeTicket,
-  onValidateProPolicyBoxRuntimeToken,
   onSaveProRagBoxConfig,
   onCreateProRagBoxVectorConnection,
   onSetDefaultProRagBoxVectorConnection,
@@ -864,7 +792,28 @@ export function ProAccessView({
   onRevokeProToken,
   onRevokeProSession,
 }: ProAccessViewProps) {
-  const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTabID>('storage');
+  const [helpOpen, setHelpOpen] = useState(false);
+  const copy = language === 'ru' ? {
+    section: 'Раздел настроек', help: 'О настройках', storage: 'Базы данных и журналы', ragbox: 'Внешний поиск и векторные базы',
+    access: 'API-токены и единый вход', users: 'Пользователи и роли', sessions: 'Активные подключения',
+    system: 'Система', security: 'Безопасность', details: 'Технические подробности',
+    offline: 'Не удалось получить данные RagBox', retry: 'Повторить',
+    offlineHint: 'Проверьте, запущен ли RagBox, доступен ли его адрес с сервера MCPBox и действителен ли admin token. Локальный поиск Bleve работает независимо от RagBox.',
+    idle: 'RagBox — необязательный внешний сервис. Для локального поиска достаточно Bleve. Укажите адрес и admin token, только если хотите подключить RagBox.',
+    adminStored: 'Admin token сохранён', configLabel: 'Конфигурация', unavailable: 'Список недоступен. Повторите загрузку после восстановления соединения.', loading: 'Загружаем данные RagBox…', configured: 'Настройки сохранены', notConfigured: 'Не настроено',
+    storageHint: 'Изменение основного хранилища требует резервной копии и проверки переноса данных. Активный backend может отличаться от выбранного при недоступности внешней базы.',
+    savedHint: 'Изменения применяются кнопкой сохранения в соответствующем разделе.',
+  } : {
+    section: 'Settings section', help: 'About settings', storage: 'Databases and logs', ragbox: 'External search and vector databases',
+    access: 'API tokens and single sign-on', users: 'Users and roles', sessions: 'Active connections',
+    system: 'System', security: 'Security', details: 'Technical details',
+    offline: 'Could not load RagBox data', retry: 'Retry',
+    offlineHint: 'Check that RagBox is running, its address is reachable from the MCPBox server and the admin token is valid. Local Bleve search works independently of RagBox.',
+    idle: 'RagBox is an optional external service. Bleve is sufficient for local search. Set an address and admin token only if you want to connect RagBox.',
+    adminStored: 'Admin token saved', configLabel: 'Configuration', unavailable: 'The list is unavailable. Retry after restoring the connection.', loading: 'Loading RagBox data…', configured: 'Configuration saved', notConfigured: 'Not configured',
+    storageHint: 'Changing operational storage requires a backup and verified data migration. The active backend may differ from the selected backend when an external database is unavailable.',
+    savedHint: 'Apply changes with the save button in the relevant section.',
+  };
   const [activeStorageTab, setActiveStorageTab] = useState<'backends' | 'logs'>('backends');
   const [createVectorConnectionOpen, setCreateVectorConnectionOpen] = useState(false);
   const filteredKnowledgeBases = ragBoxProjectKnowledgeBases.filter(
@@ -916,7 +865,7 @@ export function ProAccessView({
             <button
               type="submit"
               disabled={proLocalLoginLoading}
-              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {proLocalLoginLoading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
               {proCopy.login}
@@ -927,7 +876,7 @@ export function ProAccessView({
             <div className="mt-6 border-t border-border pt-6">
               <button
                 onClick={onStartProSSOSignIn}
-                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-electric-blue/30 bg-background px-4 text-sm font-medium text-electric-blue transition-colors hover:bg-electric-blue/12"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-electric-blue/30 bg-background px-4 text-sm font-medium text-electric-blue transition-colors hover:bg-brand-solid/12"
               >
                 <Shield className="h-4 w-4" />
                 {proCopy.signInSSO}
@@ -953,64 +902,56 @@ export function ProAccessView({
     { value: '90', label: proCopy.ninetyDays },
     { value: '365', label: proCopy.oneYear },
   ];
-  const settingsTabs: Array<{ id: SettingsTabID; label: string }> = [
-    { id: 'storage', label: proCopy.settingsTabStorage },
-    { id: 'policybox', label: proCopy.settingsTabPolicybox },
-    { id: 'ragbox', label: proCopy.settingsTabRagbox },
-    { id: 'access', label: proCopy.settingsTabAccess },
-    { id: 'users', label: proCopy.settingsTabUsers },
-    { id: 'sessions', label: proCopy.settingsTabSessions },
+  const settingsTabs = [
+    { id: 'storage' as const, label: proCopy.settingsTabStorage, description: copy.storage, icon: Database, group: copy.system },
+    { id: 'ragbox' as const, label: proCopy.settingsTabRagbox, description: copy.ragbox, icon: Server, group: copy.system },
+    { id: 'access' as const, label: proCopy.settingsTabAccess, description: copy.access, icon: KeyRound, group: copy.security },
+    { id: 'users' as const, label: proCopy.settingsTabUsers, description: copy.users, icon: Users, group: copy.security },
+    { id: 'sessions' as const, label: proCopy.settingsTabSessions, description: copy.sessions, icon: Clock, group: copy.security },
   ];
   return (
     <>
-      <section className="space-y-6">
-        <div className="rounded-2xl border border-border bg-card p-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <p className="text-sm uppercase tracking-[0.24em] text-electric-blue">
-              MCPBOX
-            </p>
-            <h2 className="mt-2 text-3xl font-semibold">{proCopy.settingsTitle}</h2>
-            <p className="mt-2 max-w-3xl text-muted-foreground">{proCopy.settingsSubtitle}</p>
+      <section className="min-w-0 space-y-5">
+        <header className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border bg-card p-5">
+          <div className="min-w-0">
+            <p className="text-xs font-medium uppercase tracking-[0.2em] text-electric-blue">MCPBOX</p>
+            <h2 className="mt-1 text-2xl font-semibold">{proCopy.settingsTitle}</h2>
           </div>
-          <div className="rounded-xl border border-border bg-background px-4 py-3">
-            <div className="text-sm text-muted-foreground">{proCopy.me}</div>
-            <div className="mt-1 text-lg font-semibold">
-              {proPrincipal ? proPrincipal.name : proCopy.statusReady}
-            </div>
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <div className="min-w-0 text-right text-sm"><span className="text-muted-foreground">{proCopy.me}</span><p className="break-words font-medium">{proPrincipal.name}</p></div>
+            <button type="button" aria-label={copy.help} title={copy.help} onClick={() => setHelpOpen(true)} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border hover:bg-accent"><CircleAlert className="h-5 w-5" /></button>
           </div>
-        </div>
-        <div className="mt-6 flex flex-wrap gap-2">
-          {settingsTabs.map((tab) => {
-            const isActive = activeSettingsTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setActiveSettingsTab(tab.id)}
-                className={`inline-flex h-10 items-center justify-center rounded-xl border px-4 text-sm font-medium transition-colors ${
-                  isActive
-                    ? 'border-electric-blue bg-electric-blue/8 text-electric-blue'
-                    : 'border-border bg-background text-foreground hover:bg-accent'
-                }`}
-              >
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
+        </header>
+        <div className="grid min-w-0 items-start gap-5 xl:grid-cols-[240px_minmax(0,1fr)]">
+          <label className="block space-y-2 rounded-2xl border border-border bg-card p-4 xl:hidden">
+            <span className="text-sm font-medium">{copy.section}</span>
+            <select value={activeSettingsTab} onChange={event => onSettingsTabChange(event.target.value as SettingsTabID)} className="h-11 w-full rounded-lg border border-border bg-input-background px-3 text-sm" aria-controls="settings-content">
+              {[copy.system, copy.security].map(group => <optgroup key={group} label={group}>{settingsTabs.filter(tab => tab.group === group).map(tab => <option key={tab.id} value={tab.id}>{tab.label}</option>)}</optgroup>)}
+            </select>
+          </label>
+          <nav aria-label={proCopy.settingsTitle} className="hidden rounded-2xl border border-border bg-card p-3 xl:sticky xl:top-5 xl:block">
+            {[copy.system, copy.security].map(group => <div key={group} className="mb-3 last:mb-0">
+              <p className="px-3 py-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">{group}</p>
+              <div className="grid gap-1 sm:grid-cols-2 xl:grid-cols-1">
+                {settingsTabs.filter(tab => tab.group === group).map(tab => <button key={tab.id} type="button" aria-current={activeSettingsTab === tab.id ? 'page' : undefined} onClick={() => onSettingsTabChange(tab.id)} className={`flex min-w-0 items-start gap-3 rounded-xl border p-3 text-left transition-colors ${activeSettingsTab === tab.id ? 'border-electric-blue/40 bg-brand-solid/10 text-electric-blue' : 'border-transparent hover:bg-accent'}`}>
+                  <tab.icon className="mt-0.5 h-5 w-5 shrink-0" /><span className="min-w-0"><span className="block text-sm font-semibold">{tab.label}</span><span className="mt-1 block text-xs text-muted-foreground">{tab.description}</span></span>
+                </button>)}
+              </div>
+            </div>)}
+          </nav>
+          <div id="settings-content" role="region" aria-label={settingsTabs.find(tab => tab.id === activeSettingsTab)?.label} className="min-w-0 space-y-5">
       <div className={`${activeSettingsTab === 'sessions' ? 'hidden' : 'grid'} gap-6 xl:grid-cols-[1.1fr_0.9fr]`}>
         <section className={`${activeSettingsTab === 'storage' ? 'block' : 'hidden'} rounded-2xl border border-border bg-card p-6 xl:col-span-2`}>
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h3 className="text-xl font-semibold">{proCopy.storageTitle}</h3>
-              <p className="mt-2 max-w-3xl text-sm text-muted-foreground">{proCopy.storageDescription}</p>
+              <p className="mt-2 max-w-3xl text-sm text-muted-foreground">{copy.savedHint}</p>
             </div>
           </div>
 
-          <div className="mt-6 grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
+          <details className="mt-5 rounded-xl border border-border bg-background p-4">
+            <summary className="cursor-pointer text-sm font-medium">{proCopy.storageBootstrapBackend} · {proStorageConfig?.bootstrap_backend ?? 'sqlite'} · {proCopy.storageShadowsTitle}</summary>
+          <div className="mt-4 grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
             <div className="rounded-2xl border border-border bg-background p-4">
               <div className="text-sm text-muted-foreground">{proCopy.storageBootstrapBackend}</div>
               <div className="mt-1 text-2xl font-semibold">{proStorageConfig?.bootstrap_backend ?? 'sqlite'}</div>
@@ -1046,6 +987,7 @@ export function ProAccessView({
             </div>
           </div>
 
+          </details>
           <div className="mt-6 flex flex-wrap gap-2">
             {[
               { id: 'backends', label: proCopy.storageTabBackends },
@@ -1059,7 +1001,7 @@ export function ProAccessView({
                   onClick={() => setActiveStorageTab(tab.id as 'backends' | 'logs')}
                   className={`inline-flex h-10 items-center justify-center rounded-xl border px-4 text-sm font-medium transition-colors ${
                     isActive
-                      ? 'border-electric-blue bg-electric-blue/8 text-electric-blue'
+                      ? 'border-electric-blue bg-brand-solid/8 text-electric-blue'
                       : 'border-border bg-background text-foreground hover:bg-accent'
                   }`}
                 >
@@ -1069,7 +1011,8 @@ export function ProAccessView({
             })}
           </div>
 
-          <form className="mt-6 grid gap-4 lg:grid-cols-2" onSubmit={onSaveProStorageConfig}>
+          <div className="mt-5 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm text-foreground">{copy.storageHint}</div>
+          <form className="mt-5 grid gap-4 lg:grid-cols-2" onSubmit={onSaveProStorageConfig}>
             <div className={`${activeStorageTab === 'backends' ? 'contents' : 'hidden'}`}>
               <label className="block space-y-2 lg:col-span-2">
                 <span className="text-sm text-muted-foreground">{proCopy.storageOperationalBackend}</span>
@@ -1088,6 +1031,7 @@ export function ProAccessView({
                 {proCopy.storageBackendHint}
               </div>
 
+              {proStorageOperationalBackend === 'postgres' ? <>
               <label className="block space-y-2">
                 <span className="text-sm text-muted-foreground">{proCopy.storagePostgresHost}</span>
                 <input
@@ -1102,6 +1046,7 @@ export function ProAccessView({
               <label className="block space-y-2">
                 <span className="text-sm text-muted-foreground">{proCopy.storagePostgresPort}</span>
                 <input
+                  type="number" min="1" max="65535" step="1"
                   value={proStoragePostgresPort}
                   onChange={(event) => onSetProStoragePostgresPort(event.target.value)}
                   disabled={!canAdminPro || proStorageOperationalBackend !== 'postgres'}
@@ -1158,6 +1103,7 @@ export function ProAccessView({
                 <div className="text-xs text-muted-foreground">{proCopy.storagePostgresPasswordRequired}</div>
               </label>
 
+              </> : null}
               <label className="flex items-center gap-3 rounded-md border border-border bg-background px-3 py-3 text-sm lg:col-span-2">
                 <input
                   type="checkbox"
@@ -1374,168 +1320,10 @@ export function ProAccessView({
               <button
                 type="submit"
                 disabled={!canAdminPro || proStorageSaving}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
               >
                 {proStorageSaving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Database className="h-4 w-4" />}
-                {proCopy.storageSave}
-              </button>
-            </div>
-          </form>
-        </section>
-
-        <section className={`${activeSettingsTab === 'policybox' ? 'block' : 'hidden'} rounded-2xl border border-border bg-card p-6 xl:col-span-2`}>
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <h3 className="text-xl font-semibold">{proCopy.policyboxTitle}</h3>
-              <p className="mt-2 max-w-3xl text-sm text-muted-foreground">{proCopy.policyboxDescription}</p>
-              <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                <div className="rounded-xl border border-border bg-background px-4 py-3 text-sm text-muted-foreground">
-                  {proCopy.policyboxStartupTokensHint}
-                </div>
-                <div className="rounded-xl border border-border bg-background px-4 py-3 text-sm text-muted-foreground">
-                  {proCopy.policyboxJWTSecretHint}
-                </div>
-              </div>
-            </div>
-            <div className="rounded-xl border border-border bg-background px-4 py-3">
-              <div className="text-sm text-muted-foreground">{proCopy.statusReady}</div>
-              <div className="mt-1 text-lg font-semibold">
-                {proPolicyBoxConfigured ? proCopy.policyboxConfigured : proCopy.policyboxNotConfigured}
-              </div>
-            </div>
-          </div>
-
-          <form className="mt-6 grid gap-4 lg:grid-cols-2" onSubmit={onSaveProPolicyBoxConfig}>
-            <label className="block space-y-2">
-              <span className="text-sm text-muted-foreground">{proCopy.policyboxBaseURL}</span>
-              <input
-                value={proPolicyBoxBaseURL}
-                onChange={(event) => onSetProPolicyBoxBaseURL(event.target.value)}
-                disabled={!canAdminPro}
-                className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue disabled:cursor-not-allowed disabled:opacity-70"
-                placeholder="http://127.0.0.1:38180"
-              />
-            </label>
-
-            <label className="block space-y-2">
-              <span className="text-sm text-muted-foreground">{proCopy.policyboxAdminToken}</span>
-              <input
-                type="password"
-                value={proPolicyBoxAdminToken}
-                onChange={(event) => onSetProPolicyBoxAdminToken(event.target.value)}
-                disabled={!canAdminPro}
-                className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue disabled:cursor-not-allowed disabled:opacity-70"
-                placeholder={proCopy.policyboxAdminTokenPlaceholder}
-              />
-              {proPolicyBoxAdminTokenPreview ? (
-                <div className="text-xs text-muted-foreground">{proCopy.policyboxAdminTokenConfigured}: {proPolicyBoxAdminTokenPreview}</div>
-              ) : null}
-            </label>
-
-            <div className="rounded-md border border-border bg-background px-3 py-3 text-sm text-muted-foreground">
-              {proPolicyBoxAdminConfigured ? proCopy.policyboxAdminReady : proCopy.policyboxAdminMissing}
-            </div>
-
-            <div className="rounded-md border border-border bg-background px-3 py-3 text-sm text-muted-foreground">
-              {proPolicyBoxRuntimeConfigured ? proCopy.policyboxRuntimeReady : proCopy.policyboxRuntimeMissing}
-            </div>
-
-            <Dialog open={proPolicyBoxRuntimeDialogOpen} onOpenChange={onSetProPolicyBoxRuntimeDialogOpen}>
-              <DialogTrigger asChild>
-                <button
-                  type="button"
-                  disabled={!canAdminPro || !proPolicyBoxAdminConfigured}
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
-                >
-                  <Shield className="h-4 w-4" />
-                  {proCopy.policyboxRuntimeManage}
-                </button>
-              </DialogTrigger>
-              <DialogContent className="w-[80vw] max-w-[80vw] min-w-[80vw]">
-                <DialogHeader>
-                  <DialogTitle>{proCopy.policyboxRuntimeDialogTitle}</DialogTitle>
-                  <DialogDescription>{proCopy.policyboxRuntimeDialogDescription}</DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <div className="grid gap-4 xl:grid-cols-[1.05fr_0.95fr]">
-                    <div className="space-y-3 rounded-xl border border-border bg-background p-4">
-                      <div className="text-sm font-medium">{proCopy.policyboxRuntimeRequestJson}</div>
-                      <Textarea
-                        value={proPolicyBoxRuntimePayload}
-                        onChange={(event) => onSetProPolicyBoxRuntimePayload(event.target.value)}
-                        disabled={!canAdminPro}
-                        className="min-h-[460px] font-mono text-xs"
-                        spellCheck={false}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => void onIssueProPolicyBoxRuntimeTicket()}
-                        disabled={!canAdminPro || proPolicyBoxIssuingTicket}
-                        className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
-                      >
-                        {proPolicyBoxIssuingTicket ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
-                        {proCopy.policyboxRuntimeIssueTicket}
-                      </button>
-                    </div>
-                    <div className="space-y-3 rounded-xl border border-border bg-background p-4">
-                      <label className="block space-y-2">
-                        <span className="text-sm text-muted-foreground">{proCopy.policyboxRuntimeTicket}</span>
-                        <input
-                          value={proPolicyBoxRuntimeTicket}
-                          onChange={(event) => onSetProPolicyBoxRuntimeTicket(event.target.value)}
-                          disabled={!canAdminPro}
-                          className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue disabled:cursor-not-allowed disabled:opacity-70"
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => void onExchangeProPolicyBoxRuntimeTicket()}
-                        disabled={!canAdminPro || proPolicyBoxExchangingTicket}
-                        className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
-                      >
-                        {proPolicyBoxExchangingTicket ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
-                        {proCopy.policyboxRuntimeExchangeToken}
-                      </button>
-                      <label className="block space-y-2">
-                        <span className="text-sm text-muted-foreground">{proCopy.policyboxRuntimeToken}</span>
-                        <Textarea
-                          value={proPolicyBoxRuntimeToken}
-                          onChange={(event) => onSetProPolicyBoxRuntimeToken(event.target.value)}
-                          disabled={!canAdminPro}
-                          className="min-h-[140px] font-mono text-xs"
-                          spellCheck={false}
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => void onValidateProPolicyBoxRuntimeToken()}
-                        disabled={!canAdminPro || proPolicyBoxValidatingToken}
-                        className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-border px-4 text-sm font-medium transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
-                      >
-                        {proPolicyBoxValidatingToken ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
-                        {proCopy.policyboxRuntimeValidateToken}
-                      </button>
-                      <div className="text-sm font-medium">{proCopy.policyboxRuntimeResponseJson}</div>
-                      <Textarea
-                        value={proPolicyBoxRuntimeResponseJSON}
-                        readOnly
-                        className="min-h-[230px] font-mono text-xs"
-                        spellCheck={false}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </DialogContent>
-            </Dialog>
-
-            <div className="lg:col-span-2">
-              <button
-                type="submit"
-                disabled={!canAdminPro || proPolicyBoxSaving}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {proPolicyBoxSaving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
-                {proCopy.policyboxSave}
+                {proStorageSaving ? proCopy.loading : proCopy.storageSave}
               </button>
             </div>
           </form>
@@ -1545,15 +1333,22 @@ export function ProAccessView({
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h3 className="text-xl font-semibold">{proCopy.ragboxTitle}</h3>
-              <p className="mt-2 max-w-3xl text-sm text-muted-foreground">{proCopy.ragboxDescription}</p>
+              <p className="mt-2 text-sm text-muted-foreground">{copy.ragbox}</p>
             </div>
-            <div className="rounded-xl border border-border bg-background px-4 py-3">
-              <div className="text-sm text-muted-foreground">{proCopy.statusReady}</div>
-              <div className="mt-1 text-lg font-semibold">
-                {proRagBoxConfigured ? proCopy.ragboxConfigured : proCopy.ragboxNotConfigured}
+            <div className="inline-flex w-fit flex-wrap items-center gap-2 rounded-xl border border-border bg-background px-3 py-2 text-sm">
+              <div className="text-muted-foreground">{copy.configLabel}:</div>
+              <div className="font-medium">
+                {proRagBoxConfigured ? copy.configured : copy.notConfigured}
               </div>
             </div>
           </div>
+
+          {proRagBoxConnectionError ? <div role="alert" className="mt-5 space-y-3 rounded-xl border border-warning/40 bg-warning/10 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3"><h4 className="flex items-center gap-2 font-semibold"><CircleAlert className="h-4 w-4 shrink-0" />{copy.offline}</h4><button type="button" onClick={onRetryRagBox} disabled={proRagBoxLoadingVectorConnections || proRagBoxLoadingWorkspaces} className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${proRagBoxLoadingVectorConnections || proRagBoxLoadingWorkspaces ? 'animate-spin' : ''}`} />{copy.retry}</button></div>
+            <p className="text-sm">{copy.offlineHint}</p>
+            <p className="break-all font-mono text-xs">{proRagBoxEndpoint}</p>
+            <details><summary className="cursor-pointer text-sm">{copy.details}</summary><p className="mt-2 break-all text-xs text-muted-foreground">{proRagBoxConnectionError}</p></details>
+          </div> : proRagBoxLoadingVectorConnections || proRagBoxLoadingWorkspaces ? <p role="status" className="mt-5 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="h-4 w-4 animate-spin" />{copy.loading}</p> : !proRagBoxAdminConfigured ? <p className="mt-5 rounded-xl border border-border bg-background p-4 text-sm text-muted-foreground">{copy.idle}</p> : null}
 
           <form className="mt-6 grid gap-4 lg:grid-cols-2" onSubmit={onSaveProRagBoxConfig}>
             <label className="block space-y-2">
@@ -1563,7 +1358,7 @@ export function ProAccessView({
                 onChange={(event) => onSetProRagBoxBaseURL(event.target.value)}
                 disabled={!canAdminPro}
                 className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue disabled:cursor-not-allowed disabled:opacity-70"
-                placeholder="http://127.0.0.1:18092"
+                type="url" placeholder="http://127.0.0.1:38180"
               />
             </label>
 
@@ -1638,28 +1433,28 @@ export function ProAccessView({
             </div>
 
             <div className="rounded-md border border-border bg-background px-3 py-3 text-sm text-muted-foreground">
-              {proRagBoxConfigured ? proCopy.ragboxConfigured : proCopy.ragboxNotConfigured}
+              {proRagBoxConfigured ? copy.configured : copy.notConfigured}
             </div>
 
             <div className="rounded-md border border-border bg-background px-3 py-3 text-sm text-muted-foreground">
-              {proRagBoxAdminConfigured ? proCopy.ragboxAdminReady : proCopy.ragboxAdminMissing}
+              {proRagBoxAdminConfigured ? copy.adminStored : proCopy.ragboxAdminMissing}
             </div>
 
             <div className="lg:col-span-2">
               <button
                 type="submit"
                 disabled={!canAdminPro || proRagBoxSaving}
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
               >
                 {proRagBoxSaving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
-                {proCopy.ragboxSave}
+                {proRagBoxSaving ? proCopy.loading : proCopy.ragboxSave}
               </button>
             </div>
           </form>
 
-          <div className="mt-6 grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+          <div className="mt-6 grid gap-6 2xl:grid-cols-[1.1fr_0.9fr]">
             <section className="rounded-2xl border border-border bg-background p-5">
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <h4 className="text-base font-semibold">{proCopy.ragboxVectorConnectionsTitle}</h4>
                   <p className="mt-1 text-sm text-muted-foreground">
@@ -1677,13 +1472,13 @@ export function ProAccessView({
                     <button
                       type="button"
                       disabled={!canAdminPro}
-                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                      className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
                     >
                       <Plus className="h-4 w-4" />
                       {proCopy.ragboxVectorConnectionCreate}
                     </button>
                   </DialogTrigger>
-                  <DialogContent className="sm:max-w-2xl">
+                  <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
                     <DialogHeader>
                       <DialogTitle>{proCopy.ragboxVectorConnectionCreateTitle}</DialogTitle>
                       <DialogDescription>{proCopy.ragboxVectorConnectionsHint}</DialogDescription>
@@ -1898,7 +1693,7 @@ export function ProAccessView({
                         <button
                           type="submit"
                           disabled={!canAdminPro || proRagBoxCreatingVectorConnection}
-                          className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                          className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
                         >
                           {proRagBoxCreatingVectorConnection ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                           {proCopy.ragboxVectorConnectionCreate}
@@ -1914,7 +1709,7 @@ export function ProAccessView({
                   <div className="text-sm text-muted-foreground">{proCopy.loading}</div>
                 ) : proRagBoxVectorConnections.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
-                    {proCopy.ragboxVectorConnectionsEmpty}
+                    {proRagBoxConnectionError ? copy.unavailable : proCopy.ragboxVectorConnectionsEmpty}
                   </div>
                 ) : (
                   proRagBoxVectorConnections.map((connection) => (
@@ -2016,7 +1811,7 @@ export function ProAccessView({
                   type="button"
                   onClick={() => void onEnsureRagBoxWorkspace()}
                   disabled={!canAdminPro || !proRagBoxBindingProjectId || proRagBoxEnsuringWorkspace}
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {proRagBoxEnsuringWorkspace ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
                   {proCopy.ragboxEnsureWorkspace}
@@ -2037,7 +1832,7 @@ export function ProAccessView({
               <DialogTrigger asChild>
                 <button
                   disabled={!canWritePro}
-                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   <Plus className="h-4 w-4" />
                   {proCopy.createToken}
@@ -2082,7 +1877,7 @@ export function ProAccessView({
                             disabled={isDisabled}
                             className={`rounded-xl border p-3 text-left transition-colors ${
                               isActive
-                                ? 'border-electric-blue bg-electric-blue/8'
+                                ? 'border-electric-blue bg-brand-solid/8'
                                 : 'border-border bg-background hover:bg-accent'
                             } ${isDisabled ? 'cursor-not-allowed opacity-55' : ''}`}
                           >
@@ -2120,7 +1915,7 @@ export function ProAccessView({
                           onClick={() => onSetProNewTokenExpiresDays(preset.value)}
                           className={`rounded-xl border px-3 py-2 text-sm transition-colors ${
                             proNewTokenExpiresDays.trim() === preset.value
-                              ? 'border-electric-blue bg-electric-blue/8 text-electric-blue'
+                              ? 'border-electric-blue bg-brand-solid/8 text-electric-blue'
                               : 'border-border bg-background hover:bg-accent'
                           }`}
                         >
@@ -2140,7 +1935,7 @@ export function ProAccessView({
                   <button
                     type="submit"
                     disabled={proCreatingToken || !canWritePro}
-                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
                   >
                     {proCreatingToken ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                     {proCopy.createToken}
@@ -2151,7 +1946,7 @@ export function ProAccessView({
           </div>
 
           {proCreatedTokenValue ? (
-            <div className="mt-5 rounded-xl border border-electric-blue/30 bg-electric-blue/8 p-4">
+            <div className="mt-5 rounded-xl border border-electric-blue/30 bg-brand-solid/8 p-4">
               <div className="text-sm font-medium">{proCopy.oneTimeSecret}</div>
               <code className="mt-2 block overflow-x-auto rounded-lg bg-background px-3 py-3 text-xs text-electric-blue">
                 {proCreatedTokenValue}
@@ -2189,7 +1984,7 @@ export function ProAccessView({
                         {token.scopes.map((scope) => (
                           <span
                             key={`${token.id}-${scope}`}
-                            className="rounded-full border border-electric-blue/20 bg-electric-blue/8 px-2.5 py-1 text-[11px] font-medium text-electric-blue"
+                            className="rounded-full border border-electric-blue/20 bg-brand-solid/8 px-2.5 py-1 text-[11px] font-medium text-electric-blue"
                           >
                             {scope}
                           </span>
@@ -2273,7 +2068,7 @@ export function ProAccessView({
                   {proPrincipal.scopes.map((scope) => (
                     <span
                       key={`principal-${scope}`}
-                      className="rounded-full border border-electric-blue/20 bg-electric-blue/8 px-2.5 py-1 text-[11px] font-medium text-electric-blue"
+                      className="rounded-full border border-electric-blue/20 bg-brand-solid/8 px-2.5 py-1 text-[11px] font-medium text-electric-blue"
                     >
                       {scope}
                     </span>
@@ -2303,7 +2098,7 @@ export function ProAccessView({
                 <DialogTrigger asChild>
                   <button
                     disabled={!canAdminPro}
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
                   >
                     <Plus className="h-4 w-4" />
                     {proCopy.createUser}
@@ -2343,7 +2138,7 @@ export function ProAccessView({
                     <button
                       type="submit"
                       disabled={proCreatingUser || !canAdminPro}
-                      className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                      className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
                     >
                       {proCreatingUser ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                       {proCopy.createUser}
@@ -2442,7 +2237,7 @@ export function ProAccessView({
                 <div className="mt-2 text-sm text-muted-foreground">{role.description}</div>
                 <div className="mt-3 flex flex-wrap gap-2">
                   {role.scopes.map((scope) => (
-                    <span key={`${role.id}-${scope}`} className="rounded-full border border-electric-blue/20 bg-electric-blue/8 px-2.5 py-1 text-[11px] font-medium text-electric-blue">
+                    <span key={`${role.id}-${scope}`} className="rounded-full border border-electric-blue/20 bg-brand-solid/8 px-2.5 py-1 text-[11px] font-medium text-electric-blue">
                       {scope}
                     </span>
                   ))}
@@ -2480,7 +2275,7 @@ export function ProAccessView({
                 <DialogTrigger asChild>
                   <button
                     disabled={!canAdminPro || proUsers.length === 0}
-                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
                   >
                     <Plus className="h-4 w-4" />
                     {proCopy.createSession}
@@ -2525,7 +2320,7 @@ export function ProAccessView({
                           onClick={() => onSetProNewSessionExpiresDays(preset.value)}
                           className={`rounded-xl border px-3 py-2 text-sm transition-colors ${
                             proNewSessionExpiresDays.trim() === preset.value
-                              ? 'border-electric-blue bg-electric-blue/8 text-electric-blue'
+                              ? 'border-electric-blue bg-brand-solid/8 text-electric-blue'
                               : 'border-border bg-background hover:bg-accent'
                           }`}
                         >
@@ -2545,7 +2340,7 @@ export function ProAccessView({
                   <button
                     type="submit"
                     disabled={proCreatingSession || !canAdminPro}
-                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
                   >
                     {proCreatingSession ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                     {proCopy.issueSession}
@@ -2557,7 +2352,7 @@ export function ProAccessView({
           </div>
 
           {proCreatedSessionToken ? (
-            <div className="mt-5 rounded-xl border border-electric-blue/30 bg-electric-blue/8 p-4">
+            <div className="mt-5 rounded-xl border border-electric-blue/30 bg-brand-solid/8 p-4">
               <div className="text-sm font-medium">{proCopy.createdSessionToken}</div>
               <code className="mt-2 block overflow-x-auto rounded-lg bg-background px-3 py-3 text-xs text-electric-blue">
                 {proCreatedSessionToken}
@@ -2596,7 +2391,7 @@ export function ProAccessView({
                         #{session.id} · user #{session.user_id} · {session.auth_method}
                       </div>
                       {proPrincipal?.session_id === session.id ? (
-                        <div className="mt-2 inline-flex rounded-full border border-electric-blue/20 bg-electric-blue/8 px-2.5 py-1 text-[11px] font-medium text-electric-blue">
+                        <div className="mt-2 inline-flex rounded-full border border-electric-blue/20 bg-brand-solid/8 px-2.5 py-1 text-[11px] font-medium text-electric-blue">
                           {proCopy.currentSession}
                         </div>
                       ) : null}
@@ -2634,7 +2429,17 @@ export function ProAccessView({
           </div>
         </section>
       </div>
+          </div>
+        </div>
       </section>
+      <Dialog open={helpOpen} onOpenChange={setHelpOpen}>
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-xl">
+          <DialogHeader><DialogTitle>{copy.help}</DialogTitle><DialogDescription>{proCopy.settingsSubtitle}</DialogDescription></DialogHeader>
+          <p className="text-sm text-muted-foreground">{copy.savedHint}</p>
+          <p className="text-sm text-muted-foreground">{proCopy.storageDescription}</p>
+          <p className="text-sm text-muted-foreground">{proCopy.ragboxDescription}</p>
+        </DialogContent>
+      </Dialog>
       <Dialog open={proEditUserOpen} onOpenChange={onSetProEditUserOpen}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
@@ -2655,7 +2460,7 @@ export function ProAccessView({
             <button
               type="submit"
               disabled={proUpdatingUserRoles || !canAdminPro}
-              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {proUpdatingUserRoles ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Pencil className="h-4 w-4" />}
               {proCopy.editUserRoles}
@@ -2695,7 +2500,7 @@ export function ProAccessView({
             <button
               type="submit"
               disabled={proUpdatingUserPassword || !canAdminPro}
-              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+              className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {proUpdatingUserPassword ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Shield className="h-4 w-4" />}
               {proCopy.changeUserPassword}

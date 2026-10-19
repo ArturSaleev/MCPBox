@@ -9,13 +9,13 @@ export type ProjectPromptProfile = {
 };
 
 export type ProjectStatus = {
+  identity_verification_enabled: boolean;
   project_id: number;
   name: string;
   description: string;
   root_path: string;
   token: string;
   is_paused: boolean;
-  identity_verification_enabled: boolean;
   bearer_auth_enabled: boolean;
   bearer_token: string;
   oauth_redirect_uri: string;
@@ -76,7 +76,6 @@ export type ProjectFormState = {
   name: string;
   description: string;
   root_path: string;
-  identity_verification_enabled: boolean;
   bearer_auth_enabled: boolean;
   bearer_token: string;
   oauth_redirect_uri: string;
@@ -241,7 +240,7 @@ export type EditionMeta = {
   capabilities: string[];
 };
 
-export type LogsFilterMode = 'all' | 'pro' | 'policy';
+export type LogsFilterMode = 'all' | 'pro';
 
 export type ServerInspection = {
   protocol_version: string;

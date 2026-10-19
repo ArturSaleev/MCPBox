@@ -13,7 +13,6 @@ func registerMetaRoutes(mux *http.ServeMux, auth *proauth.Service, sso *prosso.S
 			"auth",
 			"local_auth",
 			"agent_tokens",
-			"policybox_config",
 			"ragbox_config",
 			"storage_config",
 		}

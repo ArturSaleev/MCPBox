@@ -139,7 +139,7 @@ export function ProjectPromptPanel({
   return (
     <section className="rounded-2xl border border-border bg-card p-6">
       <div className="mb-4 flex items-start gap-3">
-        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-electric-blue/10 text-electric-blue">
+        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand-solid/10 text-electric-blue">
           <FileText className="h-5 w-5" />
         </div>
         <div>
@@ -292,7 +292,7 @@ export function ProjectPromptPanel({
             type="button"
             onClick={() => void updateProjectPrompt(basePrompt, normalizeProfileDrafts(profiles))}
             disabled={updatingPrompt}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {updatingPrompt ? labels.saving : labels.save}
           </button>

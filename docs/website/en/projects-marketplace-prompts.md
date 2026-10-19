@@ -11,12 +11,17 @@ Fill in:
 - **Name** — a clear business-facing project name.
 - **Description** — the project’s purpose, users, and permitted tasks.
 - **Root path** — optional local path used by file-oriented integrations.
-- **Identity verification** — enable when the project is bound to PolicyBox and MCP calls must carry a validated runtime identity.
 - **Bearer authentication** — enable when external clients must authenticate.
 
 For ChatGPT, create a separate named OAuth connection with the users button next to the project connection information. Each connection has its own hidden callback URL and token. Neither is shown in the table; the token can only be revealed with its dedicated action.
 
 After saving, open the project and select its MCP connection URL, `http://<server>:<mcp-port>/mcp/<project-token>`, to copy it. Treat project tokens and OAuth client tokens as secrets; disable or delete the affected connection if a client token is exposed.
+
+## Arrange the project list
+
+Drag a project by the grip on its left edge to place it above or below another project. The up/down buttons also work on touch screens; when the grip has keyboard focus, use Arrow Up/Down. Moving a project keeps the current selection and does not start, pause, or change its services.
+
+The custom order is saved for the current MCPBox user in this browser. It survives page reloads, navigation, and status refreshes. Newly added projects appear at the end; removed projects are omitted. The preference does not synchronize across browsers or devices.
 
 ## Add an MCP server manually
 
@@ -69,4 +74,4 @@ If the information is absent or uncertain, say so and ask the user to contact su
 Reply in the user’s language with concise, actionable steps.
 ```
 
-Prompts guide model behavior; they are not an authorization mechanism. Do not put passwords, API keys, access tokens, or private data into prompts. Enforce access rules with MCP server permissions, project authentication, PolicyBox, and the target system.
+Prompts guide model behavior; they are not an authorization mechanism. Do not put passwords, API keys, access tokens, or private data into prompts. Enforce access rules with MCP server permissions, project authentication, and the target system.

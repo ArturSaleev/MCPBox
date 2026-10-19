@@ -9,7 +9,7 @@
 3. [Настройки и переменные окружения](configuration.md)
 4. [Проекты, серверы, Marketplace и промпты](projects-marketplace-prompts.md)
 5. [CLI: подключение команд к проекту](cli.md)
-6. [Базы знаний, RagBox, PolicyBox и хранилища](knowledge-integrations.md)
+6. [Базы знаний, RagBox и хранилища](knowledge-integrations.md)
 7. [Подключение ChatGPT](chatgpt.md)
 8. [HTTP API и авторизация](api.md)
 9. [Безопасность production](production-security.md)
@@ -27,3 +27,5 @@
 [Участие в разработке](../../../CONTRIBUTING-ru.md) · [Приватные security reports](../../../SECURITY-ru.md).
 
 [CI и проверка сборок](ci.md).
+
+- [Переход с PolicyBox](policybox-migration.md)

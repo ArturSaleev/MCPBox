@@ -119,7 +119,7 @@ Passwords require at least 8 characters. This command updates an existing local 
 | Admin UI / API | `http://127.0.0.1:38181/` |
 | Project MCP | `http://<server>:38182/mcp/<project-token>` |
 
-Current source defaults MCP to `127.0.0.1`. Published v1.3.0 binaries use `0.0.0.0`; explicitly set `MCPBOX_MCP_HOST=127.0.0.1` for those binaries. Override listeners with `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, `MCPBOX_MCP_PORT`. Admin tokens, project bearer credentials and PolicyBox runtime tokens serve different purposes.
+Current source defaults MCP to `127.0.0.1`. Published v1.3.0 binaries use `0.0.0.0`; explicitly set `MCPBOX_MCP_HOST=127.0.0.1` for those binaries. Override listeners with `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, `MCPBOX_MCP_PORT`. Admin tokens and project bearer credentials serve different purposes.
 
 ## Data and upgrades
 
@@ -147,4 +147,10 @@ For releases, install frontend dependencies then run `./build-release.sh host` o
 
 ## License
 
-[Apache License 2.0](LICENSE). RagBox and PolicyBox are separate integrations with their own configuration and data.
+[Apache License 2.0](LICENSE). RagBox is an optional integration with its own configuration and data.
+
+Current source removes the PolicyBox integration. Published v1.3.0 retains its earlier behavior. Before upgrading, see [migration from PolicyBox](docs/website/en/policybox-migration.md).
+
+### Skills catalog and server execution
+
+Skills provide a searchable catalog, downloaded packages, project bindings, server Docker execution, input uploads and result downloads. See [Skills documentation](docs/SKILLS.md).

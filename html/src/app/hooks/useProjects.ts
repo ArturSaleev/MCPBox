@@ -7,7 +7,6 @@ export type ProjectFormState = {
   name: string;
   description: string;
   root_path: string;
-  identity_verification_enabled: boolean;
   bearer_auth_enabled: boolean;
   bearer_token: string;
   oauth_redirect_uri: string;
@@ -45,7 +44,6 @@ const emptyProjectForm: ProjectFormState = {
   name: '',
   description: '',
   root_path: '',
-  identity_verification_enabled: false,
   bearer_auth_enabled: false,
   bearer_token: '',
   oauth_redirect_uri: '',
@@ -134,7 +132,6 @@ export function useProjects(messages: { requestFailed: string; projectCreated: s
           name: selectedProject.name,
           description: selectedProject.description,
           root_path: selectedProject.root_path,
-          identity_verification_enabled: selectedProject.identity_verification_enabled,
           prompt,
         }),
       });

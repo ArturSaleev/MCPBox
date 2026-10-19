@@ -1,6 +1,9 @@
+import { useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 
-import { AlertCircle, Copy, LoaderCircle, Plus, Radio, RefreshCw } from 'lucide-react';
+import { AlertCircle, ArrowDown, ArrowUp, Copy, GripVertical, LoaderCircle, Plus, Radio, RefreshCw } from 'lucide-react';
+
+import { moveProject, readProjectOrder, reconcileProjectOrder } from '../utils/project-order';
 
 import type { Language } from '../i18n';
 import { dictionaries } from '../i18n';
@@ -24,7 +27,6 @@ type ProjectFormState = {
   name: string;
   description: string;
   root_path: string;
-  identity_verification_enabled: boolean;
   bearer_auth_enabled: boolean;
   bearer_token: string;
   oauth_redirect_uri: string;
@@ -43,6 +45,7 @@ type SidebarProject = {
 };
 
 type ProjectsSidebarProps = {
+  orderStorageKey: string;
   labels: typeof dictionaries.en.labels;
   messages: typeof dictionaries.en.messages;
   language: Language;
@@ -74,6 +77,7 @@ type ProjectsSidebarProps = {
 };
 
 export function ProjectsSidebar({
+  orderStorageKey,
   labels,
   messages,
   language,
@@ -101,6 +105,41 @@ export function ProjectsSidebar({
   duplicatingProjectId,
   selectedProject,
 }: ProjectsSidebarProps) {
+  const [savedOrder, setSavedOrder] = useState<number[]>(() => {
+    try { return readProjectOrder(window.localStorage.getItem(orderStorageKey)); } catch { return []; }
+  });
+  const [draggedId, setDraggedId] = useState<number | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ id: number; after: boolean } | null>(null);
+  const draggedIdRef = useRef<number | null>(null);
+  const [announcement, setAnnouncement] = useState('');
+  const [storageError, setStorageError] = useState(false);
+  const orderedIds = reconcileProjectOrder(projects.map(project => project.project_id), savedOrder);
+  const projectsById = new Map(projects.map(project => [project.project_id, project]));
+  const orderedProjects = orderedIds.map(id => projectsById.get(id)!);
+  const copy = language === 'ru' ? {
+    drag: 'Переместить проект', up: 'Поднять проект', down: 'Опустить проект',
+    hint: 'Перетащите проект за ручку. Или используйте стрелки вверх и вниз.',
+    moved: (name: string, position: number) => `${name}: позиция ${position} из ${projects.length}.`,
+    failed: 'Порядок изменён, но браузер не смог сохранить его для следующего входа.',
+  } : {
+    drag: 'Move project', up: 'Move project up', down: 'Move project down',
+    hint: 'Drag a project by its handle, or use the up and down arrows.',
+    moved: (name: string, position: number) => `${name}: position ${position} of ${projects.length}.`,
+    failed: 'The order changed, but the browser could not save it for your next visit.',
+  };
+  function reorder(source: number, target: number, after: boolean) {
+    const next = moveProject(orderedIds, source, target, after);
+    if (next.every((id, index) => id === orderedIds[index])) return;
+    setSavedOrder(next);
+    try { window.localStorage.setItem(orderStorageKey, JSON.stringify(next)); setStorageError(false); }
+    catch { setStorageError(true); }
+    setAnnouncement(copy.moved(projectsById.get(source)?.name ?? '', next.indexOf(source) + 1));
+  }
+  function finishDrag() {
+    draggedIdRef.current = null;
+    setDraggedId(null);
+    setDropTarget(null);
+  }
   return (
     <aside className="w-full max-w-sm border-r border-border bg-sidebar/40">
       <div className="border-b border-border px-6 py-5">
@@ -155,7 +194,7 @@ export function ProjectsSidebar({
                 }}
               >
                 <DialogTrigger asChild>
-                  <button className="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-electric-blue px-3 text-xs font-medium text-white transition-colors hover:bg-electric-blue/90">
+                  <button className="inline-flex h-8 items-center justify-center gap-2 rounded-md bg-brand-solid px-3 text-xs font-medium text-white transition-colors hover:bg-brand-solid/90">
                     <Plus className="h-3.5 w-3.5" />
                     {labels.createProject}
                   </button>
@@ -229,7 +268,7 @@ export function ProjectsSidebar({
                     <button
                       type="submit"
                       disabled={creatingProject}
-                      className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                      className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
                     >
                       {creatingProject ? (
                         <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -271,7 +310,7 @@ export function ProjectsSidebar({
                     <button
                       type="submit"
                       disabled={!selectedProject || duplicatingProjectId === selectedProject.project_id}
-                      className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                      className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
                     >
                       {duplicatingProjectId === selectedProject?.project_id ? (
                         <LoaderCircle className="h-4 w-4 animate-spin" />
@@ -297,30 +336,75 @@ export function ProjectsSidebar({
             </div>
           ) : (
             <div className="space-y-2">
-              {projects.map((project) => {
+              <p id="project-order-help" className="sr-only">{copy.hint}</p>
+              <p role="status" aria-live="polite" className="sr-only">{announcement}</p>
+              {storageError ? <p role="status" className="rounded-lg border border-warning/30 bg-warning/10 p-2 text-xs">{copy.failed}</p> : null}
+              <div className="space-y-2" role="list" aria-label={labels.projects}>
+              {orderedProjects.map((project, index) => {
                 const runningCount = project.servers.filter(
                   (server) => server.status === 'Running',
                 ).length;
 
                 return (
-                  <button
+                  <div
+                    role="listitem"
                     key={project.project_id}
-                    onClick={() => setSelectedProjectId(project.project_id)}
-                    className={`w-full rounded-xl border p-4 text-left transition-colors ${
+                    onDragOver={event => {
+                      if (draggedIdRef.current === null || draggedIdRef.current === project.project_id) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = 'move';
+                      const bounds = event.currentTarget.getBoundingClientRect();
+                      const after = event.clientY > bounds.top + bounds.height / 2;
+                      setDropTarget(current => current?.id === project.project_id && current.after === after ? current : { id: project.project_id, after });
+                    }}
+                    onDragLeave={event => {
+                      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(current => current?.id === project.project_id ? null : current);
+                    }}
+                    onDrop={event => {
+                      event.preventDefault();
+                      const source = draggedIdRef.current;
+                      if (source !== null) {
+                        const bounds = event.currentTarget.getBoundingClientRect();
+                        reorder(source, project.project_id, event.clientY > bounds.top + bounds.height / 2);
+                      }
+                      finishDrag();
+                    }}
+                    className={`relative flex items-center gap-1 rounded-xl border px-1 transition-colors ${draggedId === project.project_id ? 'opacity-50' : ''} ${
+                      dropTarget?.id === project.project_id ? (dropTarget.after ? 'after:absolute after:inset-x-0 after:-bottom-1 after:h-0.5 after:bg-electric-blue' : 'before:absolute before:inset-x-0 before:-top-1 before:h-0.5 before:bg-electric-blue') : ''
+                    } ${
                       selectedProjectId === project.project_id
-                        ? 'border-electric-blue bg-electric-blue/8'
+                        ? 'border-electric-blue bg-brand-solid/8'
                         : 'border-border bg-card hover:bg-accent/60'
                     }`}
                   >
+                    <button type="button" draggable={projects.length > 1} disabled={projects.length < 2}
+                      aria-label={`${copy.drag}: ${project.name}`} aria-describedby="project-order-help" title={copy.hint}
+                      onDragStart={event => {
+                        draggedIdRef.current = project.project_id;
+                        event.dataTransfer.effectAllowed = 'move';
+                        event.dataTransfer.setData('text/plain', String(project.project_id));
+                        setDraggedId(project.project_id);
+                      }}
+                      onDragEnd={finishDrag}
+                      onKeyDown={event => {
+                        if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+                        event.preventDefault();
+                        const targetIndex = index + (event.key === 'ArrowUp' ? -1 : 1);
+                        if (orderedIds[targetIndex] !== undefined) reorder(project.project_id, orderedIds[targetIndex], event.key === 'ArrowDown');
+                      }}
+                      className="flex h-10 w-6 shrink-0 cursor-grab items-center justify-center rounded-md text-muted-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-electric-blue active:cursor-grabbing disabled:cursor-default disabled:opacity-30">
+                      <GripVertical className="h-4 w-4" />
+                    </button>
+                    <button type="button" onClick={() => setSelectedProjectId(project.project_id)} aria-current={selectedProjectId === project.project_id ? 'page' : undefined} className="min-w-0 flex-1 rounded-lg px-2 py-4 text-left focus-visible:outline-2 focus-visible:outline-electric-blue">
                     <div className="flex items-start justify-between gap-3">
-                      <div className="font-medium">{project.name}</div>
+                      <div className="min-w-0 break-words font-medium">{project.name}</div>
                       {project.connection_ready ? (
                         <Radio className="mt-0.5 h-4 w-4 text-status-running" />
                       ) : (
                         <AlertCircle className="mt-0.5 h-4 w-4 text-amber-500" />
                       )}
                     </div>
-                    <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       <span>{messages.serverCount(project.servers.length)}</span>
                       <span>•</span>
                       <span>{messages.runningCount(runningCount)}</span>
@@ -331,9 +415,15 @@ export function ProjectsSidebar({
                         </>
                       ) : null}
                     </div>
-                  </button>
+                    </button>
+                    <div className="flex shrink-0 flex-col gap-1">
+                      <button type="button" aria-label={`${copy.up}: ${project.name}`} title={copy.up} disabled={index === 0} onClick={() => reorder(project.project_id, orderedIds[index - 1], false)} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-electric-blue disabled:opacity-25"><ArrowUp className="h-3.5 w-3.5" /></button>
+                      <button type="button" aria-label={`${copy.down}: ${project.name}`} title={copy.down} disabled={index === orderedIds.length - 1} onClick={() => reorder(project.project_id, orderedIds[index + 1], true)} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent focus-visible:outline-2 focus-visible:outline-electric-blue disabled:opacity-25"><ArrowDown className="h-3.5 w-3.5" /></button>
+                    </div>
+                  </div>
                 );
               })}
+              </div>
             </div>
           )}
         </section>

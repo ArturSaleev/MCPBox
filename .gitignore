@@ -19,6 +19,7 @@ dist/
 
 # Local runtime data
 package_store/
+skill_store/
 knowledge_base/
 release/
 mcpbox.db
@@ -43,3 +44,6 @@ coverage.out
 
 # Python validation cache
 __pycache__/
+
+# Local HTML snapshots used by the Skills catalog parser
+catalog/skills-pages/

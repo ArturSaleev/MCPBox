@@ -14,13 +14,14 @@ const (
 )
 
 type Project struct {
-	CLIs                  []CLI                    `gorm:"many2many:project_clis;" json:"clis,omitempty"`
-	ID                    uint                     `gorm:"primaryKey" json:"id"`
-	Name                  string                   `gorm:"size:255;not null" json:"name"`
-	Description           string                   `gorm:"type:text" json:"description"`
-	RootPath              string                   `gorm:"size:1024" json:"root_path"`
-	Token                 string                   `gorm:"size:64;uniqueIndex;not null" json:"token"`
-	IsPaused              bool                     `gorm:"not null;default:false" json:"is_paused"`
+	CLIs        []CLI  `gorm:"many2many:project_clis;" json:"clis,omitempty"`
+	ID          uint   `gorm:"primaryKey" json:"id"`
+	Name        string `gorm:"size:255;not null" json:"name"`
+	Description string `gorm:"type:text" json:"description"`
+	RootPath    string `gorm:"size:1024" json:"root_path"`
+	Token       string `gorm:"size:64;uniqueIndex;not null" json:"token"`
+	IsPaused    bool   `gorm:"not null;default:false" json:"is_paused"`
+	// IdentityVerification is a retained legacy migration gate, not an active integration.
 	IdentityVerification  bool                     `gorm:"not null;default:false" json:"identity_verification_enabled"`
 	BearerAuthEnabled     bool                     `gorm:"not null;default:false" json:"bearer_auth_enabled"`
 	BearerToken           string                   `gorm:"size:64" json:"bearer_token"`

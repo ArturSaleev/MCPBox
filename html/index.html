@@ -5,6 +5,16 @@
       <meta charset="UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <title>MCPBOX</title>
+      <script>
+        // Resolve the saved preference before styles/app startup to avoid a theme flash.
+        (() => {
+          let preference = 'system';
+          try { preference = localStorage.getItem('mcpbox-theme') || 'system'; } catch {}
+          const dark = preference === 'dark' || (preference !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.classList.add(dark ? 'dark' : 'light');
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+        })();
+      </script>
       <style>html, body { height: 100%; margin: 0; } #root { height: 100%; }</style>
     </head>
 

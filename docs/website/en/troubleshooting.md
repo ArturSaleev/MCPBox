@@ -17,7 +17,7 @@ Confirm MCPBox is running. On the same server, open `http://127.0.0.1:38181/`. I
 
 ## 3. An MCP client cannot connect
 
-Check the project MCP URL, including its project token. Then check whether the MCP server is enabled and healthy in the project. For an external client, confirm the HTTPS reverse proxy, firewall, and certificate. If bearer authentication or PolicyBox identity checking is enabled, make sure the client has the correct token.
+Check the project MCP URL, including its project token. Then check whether the MCP server is enabled and healthy in the project. For an external client, confirm the HTTPS reverse proxy, firewall, and certificate. If bearer authentication is enabled, make sure the client has the correct project credential. Legacy PolicyBox projects need [migration](policybox-migration.md).
 
 For ChatGPT OAuth connections, inspect the `outcome` field in MCPBox **Logs**:
 
@@ -32,9 +32,9 @@ Read the server health error and Logs. Verify that the package’s runtime exist
 
 Check that the collection contains supported files and that text can actually be extracted. Scanned PDFs often need OCR before indexing. Reindex after changing source documents. Keep unrelated documents in separate collections and ask users specific questions that include useful names, dates, or terms.
 
-## 6. RagBox or PolicyBox cannot be saved
+## 6. RagBox cannot be saved
 
-Confirm the base URL is reachable from the MCPBox server, not only from your laptop. Recheck tenant ID and tokens, then use the integration status or runtime playground. Never paste a token into a public chat or a shared screenshot.
+Confirm the base URL is reachable from the MCPBox server, not only from your laptop. Recheck tenant ID and tokens, then use the integration status. Never paste a token into a public chat or a shared screenshot.
 
 ## What to send to support
 

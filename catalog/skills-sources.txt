@@ -1,0 +1,33 @@
+# Repositories discovered from 95 public mcpservers.org HTML pages.
+# OpenAI is retained from the initial built-in catalog.
+# One repository per line. Lines beginning with # are ignored.
+https://github.com/101-skills/skills
+https://github.com/PleasePrompto/notebooklm-skill
+https://github.com/addyosmani/agent-skills
+https://github.com/addyosmani/web-quality-skills
+https://github.com/agentspace-so/runcomfy-agent-skills
+https://github.com/anthropics/skills
+https://github.com/antibrow/anti-detect-browser-skills
+https://github.com/browser-act/skills
+https://github.com/caffeinelabs/skills
+https://github.com/coreyhaines31/marketingskills
+https://github.com/doany-ai/skills
+https://github.com/dontbesilent2025/dbskill
+https://github.com/genmedia-labs/skills
+https://github.com/halt-catch-fire/skills
+https://github.com/higgsfield-ai/skills
+https://github.com/juliusbrussee/caveman
+https://github.com/larksuite/cli
+https://github.com/lllllllama/rigorpilot-skills
+https://github.com/mattpocock/skills
+https://github.com/microsoft/azure-skills
+https://github.com/microsoft/skills
+https://github.com/nexscope-ai/amazon-skills
+https://github.com/openai/skills
+https://github.com/qu-skills/skills
+https://github.com/runcomfy-com/skills
+https://github.com/samber/cc-skills
+https://github.com/scrapegraphai/just-scrape
+https://github.com/squirrelscan/skills
+https://github.com/supabase/agent-skills
+https://github.com/vercel-labs/agent-browser

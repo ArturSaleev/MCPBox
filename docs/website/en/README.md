@@ -9,7 +9,7 @@ Documentation for the unified Apache-2.0 MCPBox application. Start with installa
 3. [Configuration and environment variables](configuration.md)
 4. [Projects, servers, Marketplace and prompts](projects-marketplace-prompts.md)
 5. [CLI: expose commands to a project](cli.md)
-6. [Knowledge bases, RagBox, PolicyBox and storage](knowledge-integrations.md)
+6. [Knowledge bases, RagBox and storage](knowledge-integrations.md)
 7. [Connect ChatGPT](chatgpt.md)
 8. [HTTP API and authentication](api.md)
 9. [Production security](production-security.md)
@@ -27,3 +27,5 @@ RU and EN use matching page names. Update both versions when behavior changes. C
 [Contributing](../../../CONTRIBUTING.md) · [Private security reports](../../../SECURITY.md).
 
 [CI and release checks](ci.md).
+
+- [Migrating from PolicyBox](policybox-migration.md)

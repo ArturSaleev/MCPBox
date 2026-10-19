@@ -183,7 +183,7 @@ function statusTone(status: string) {
     : status === 'Disabled'
       ? 'bg-amber-500/10 text-amber-600 border-amber-500/30'
       : status === 'Remote'
-        ? 'bg-electric-blue/12 text-electric-blue border-electric-blue/30'
+        ? 'bg-brand-solid/12 text-electric-blue border-electric-blue/30'
         : 'bg-muted text-muted-foreground border-border';
 }
 
@@ -392,7 +392,7 @@ export function ProjectServersPanel({
           }}
         >
           <DialogTrigger asChild>
-            <button className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90">
+            <button className="inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90">
               <Plus className="h-4 w-4" />
               {labels.addServer}
             </button>
@@ -407,13 +407,13 @@ export function ProjectServersPanel({
               <TabsList className="grid h-auto w-full grid-cols-2 rounded-xl border border-border bg-background p-1">
                 <TabsTrigger
                   value="stdio_http"
-                  className="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-all data-[state=active]:bg-electric-blue data-[state=active]:text-white data-[state=active]:shadow-md data-[state=active]:shadow-electric-blue/20"
+                  className="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-all data-[state=active]:bg-brand-solid data-[state=active]:text-white data-[state=active]:shadow-md data-[state=active]:shadow-electric-blue/20"
                 >
                   STDIO / HTTP
                 </TabsTrigger>
                 <TabsTrigger
                   value="installed"
-                  className="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-all data-[state=active]:bg-electric-blue data-[state=active]:text-white data-[state=active]:shadow-md data-[state=active]:shadow-electric-blue/20"
+                  className="rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground transition-all data-[state=active]:bg-brand-solid data-[state=active]:text-white data-[state=active]:shadow-md data-[state=active]:shadow-electric-blue/20"
                 >
                   Installed
                 </TabsTrigger>
@@ -583,7 +583,7 @@ export function ProjectServersPanel({
                   </label>
 
                   {editingServerIntegrationCatalogItemId === 'filesystem' ? (
-                    <div className="space-y-2 rounded-xl border border-electric-blue/20 bg-electric-blue/8 p-4">
+                    <div className="space-y-2 rounded-xl border border-electric-blue/20 bg-brand-solid/8 p-4">
                       <div className="text-sm font-medium text-electric-blue">Shared Folder</div>
                       <p className="text-sm text-muted-foreground">
                         Filesystem MCP uses this folder path as its main accessible directory.
@@ -632,7 +632,7 @@ export function ProjectServersPanel({
 
                   <div className="space-y-3 rounded-xl border border-border bg-background p-4">
                     <div className="text-sm text-muted-foreground">Authentication</div>
-                    <div className="rounded-lg border border-electric-blue/20 bg-electric-blue/8 px-3 py-3 text-sm text-muted-foreground">
+                    <div className="rounded-lg border border-electric-blue/20 bg-brand-solid/8 px-3 py-3 text-sm text-muted-foreground">
                       Custom remote servers now default to direct URL, bearer env, and headers. OAuth-based remote integrations should be added from the Market tab.
                     </div>
                     {serverForm.auth_type === 'oauth2' ? (
@@ -721,7 +721,7 @@ export function ProjectServersPanel({
                   <button
                     type="submit"
                     disabled={addingServer}
-                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                    className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
                   >
                     {addingServer ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                     {editingServerId ? 'Save Server' : labels.addServer}
@@ -782,7 +782,7 @@ export function ProjectServersPanel({
                       <button
                         type="submit"
                         disabled={addingCatalogItemId === installedConfigItem.id}
-                        className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                        className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
                       >
                         {addingCatalogItemId === installedConfigItem.id ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                         {labels.addToProject}
@@ -815,7 +815,7 @@ export function ProjectServersPanel({
                                   {item.runtime.type || 'runtime'}
                                 </span>
                                 {alreadyInProject ? (
-                                  <span className="rounded-full border border-electric-blue/30 bg-electric-blue/12 px-2 py-1 text-xs font-medium text-electric-blue">
+                                  <span className="rounded-full border border-electric-blue/30 bg-brand-solid/12 px-2 py-1 text-xs font-medium text-electric-blue">
                                     Already in project
                                   </span>
                                 ) : null}
@@ -833,7 +833,7 @@ export function ProjectServersPanel({
                               type="button"
                               onClick={() => void addInstalledItem(item)}
                               disabled={busy || !item.enabled}
-                              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
                             >
                               {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                               {labels.addToProject}
@@ -1016,7 +1016,7 @@ export function ProjectServersPanel({
                     </span>
                   ) : null}
                   {(server.disabled_tool_names?.length ?? 0) > 0 ? (
-                    <span className="shrink-0 whitespace-nowrap rounded-full border border-electric-blue/30 bg-electric-blue/12 px-2 py-1 text-xs font-medium text-electric-blue">
+                    <span className="shrink-0 whitespace-nowrap rounded-full border border-electric-blue/30 bg-brand-solid/12 px-2 py-1 text-xs font-medium text-electric-blue">
                       {messages.disabledToolsBadge(server.disabled_tool_names.length)}
                     </span>
                   ) : null}

@@ -29,8 +29,6 @@ MCPBox has a web UI and HTTP API. Every administration endpoint, including the s
 | RagBox administration | `/api/pro/ragbox/admin/vector-connections`, `/api/pro/ragbox/admin/workspaces` |
 | RagBox knowledge bases | `GET /api/pro/ragbox/knowledge-bases`, `POST /api/pro/ragbox/knowledge-bases/sync` |
 | Upload to knowledge base | `POST /api/pro/ragbox/collections/{collectionID}/files:upload` with multipart fields `file` and `storage_mode=keep|transient` |
-| PolicyBox configuration | `GET, PUT /api/pro/policybox/config` |
-| PolicyBox test flow | `POST /api/pro/policybox/runtime/ticket`, `/exchange`, `/validate` |
 | Storage | `GET, PUT /api/pro/storage/config`; `GET /api/pro/storage/runtime-status` and `/shadow-status` |
 
 The API evolves with MCPBox releases. Treat this page as an operational overview and use the running service’s UI and release documentation for the exact payload fields. Do not automate destructive operations until they have been tested in a non-production environment.
@@ -59,3 +57,5 @@ For `401`, check credentials; for `403`, check permissions. Send MCP JSON-RPC to
 - [Storage routes](../../../internal/prohttp/routes.go)
 - [CLI schema and API](../../CLI.md)
 - [Authentication middleware](../../../internal/proauth/middleware.go)
+
+`POST /api/projects/{id}/migrate-policybox` requires `pro:admin`: rotates the bearer credential, clears the legacy flag, and pauses the project. Retired `/api/pro/policybox/*`, `/connect/runtime`, and `/api/agentbox/bootstrap` return `410 Gone`. Direct bootstrap remains: `POST /api/agentbox/direct-bootstrap` accepts `mcp_url`, `page_url`, `page_title` and uses project bearer/OAuth authentication, pause and migration gates. See [migration](policybox-migration.md).

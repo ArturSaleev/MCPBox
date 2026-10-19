@@ -222,10 +222,18 @@ func (s *Server) dispatchProjectJSONRPC(
 
 	switch request.Method {
 	case "initialize":
+		connectedSkills, err := s.skills.List(ctx, project.ID)
+		if err != nil {
+			return nil, false, err
+		}
+		instructions := "MCPBox project aggregation endpoint."
+		if len(connectedSkills) > 0 {
+			instructions += " When Skills are relevant to the user's task, use list_skills to discover project Skills and get_skill to load a matching Skill. Script execution and job files live on the MCPBox server."
+		}
 		result := map[string]any{
 			"protocolVersion": "2025-06-18",
 			"capabilities": map[string]any{
-				"tools":     map[string]any{},
+				"tools":     map[string]any{"listChanged": true},
 				"resources": map[string]any{},
 				"prompts":   map[string]any{},
 			},
@@ -234,7 +242,7 @@ func (s *Server) dispatchProjectJSONRPC(
 				"title":   project.Name,
 				"version": "1.0.0",
 			},
-			"instructions": "MCPBox project aggregation endpoint.",
+			"instructions": instructions,
 		}
 		return mustMarshal(projectResponseEnvelope{
 			JSONRPC: "2.0",
@@ -267,6 +275,13 @@ func (s *Server) dispatchProjectJSONRPC(
 		if projectHasActiveCLI(project) {
 			tools = append(tools, projectCLITools()...)
 		}
+		connectedSkills, err := s.skills.List(ctx, project.ID)
+		if err != nil {
+			return nil, false, err
+		}
+		if len(connectedSkills) > 0 {
+			tools = append(tools, projectSkillTools()...)
+		}
 		result := struct {
 			Tools []aggregatedToolResult `json:"tools"`
 		}{
@@ -291,6 +306,10 @@ func (s *Server) dispatchProjectJSONRPC(
 		var params toolCallParams
 		if err := json.Unmarshal(request.Params, &params); err != nil {
 			return nil, false, errors.New("invalid tools/call params")
+		}
+		if isSkillTool(params.Name) {
+			result := s.callSkillTool(ctx, project, params.Name, params.Arguments, actor)
+			return mustMarshal(projectResponseEnvelope{JSONRPC: "2.0", ID: request.ID, Result: result}), true, nil
 		}
 		if isCLITool(params.Name) && projectHasActiveCLI(project) {
 			result := s.callCLITool(ctx, project, params.Name, params.Arguments, actor)
@@ -1122,7 +1141,7 @@ func assignToolAliases(tools []aggregateTool, reserveCLI ...bool) {
 		}
 	}
 	for index := range tools {
-		if counts[desiredAliases[index]] == 1 && !(reserved && isCLITool(desiredAliases[index])) {
+		if counts[desiredAliases[index]] == 1 && !isSkillTool(desiredAliases[index]) && !(reserved && isCLITool(desiredAliases[index])) {
 			tools[index].Alias = desiredAliases[index]
 			continue
 		}
@@ -1338,4 +1357,22 @@ func cursorParams(cursor string) map[string]any {
 		return map[string]any{}
 	}
 	return map[string]any{"cursor": cursor}
+}
+
+// notifyProjectToolsChanged invalidates tool discovery for active project SSE
+// sessions. Hold the read lock while sending: unregister closes streams under
+// the write lock. Slow clients must not block binding changes or other clients.
+func (s *Server) notifyProjectToolsChanged(projectID uint) {
+	payload := mustMarshal(map[string]any{"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
+	s.sessionMu.RLock()
+	defer s.sessionMu.RUnlock()
+	for _, session := range s.sessions {
+		if session.ProjectID != projectID || session.Stream == nil {
+			continue
+		}
+		select {
+		case session.Stream <- payload:
+		default:
+		}
+	}
 }

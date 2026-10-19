@@ -280,7 +280,7 @@ export function MarketView({
 
           {/*<div className="rounded-2xl border border-electric-blue/20 bg-[linear-gradient(180deg,rgba(14,165,233,0.14),rgba(14,165,233,0.03))] p-4">*/}
           {/*  <div className="flex items-center gap-3">*/}
-          {/*    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-electric-blue text-white shadow-[0_10px_30px_rgba(14,165,233,0.3)]">*/}
+          {/*    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-brand-solid text-white shadow-[0_10px_30px_rgba(14,165,233,0.3)]">*/}
           {/*      <ShoppingBag className="h-5 w-5" />*/}
           {/*    </div>*/}
           {/*    <div>*/}
@@ -327,7 +327,7 @@ export function MarketView({
                   onClick={() => setSelectedCatalogCategory(category)}
                   className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left text-sm font-medium transition-colors ${
                     selectedCatalogCategory === category
-                      ? 'border-electric-blue bg-electric-blue text-white'
+                      ? 'border-electric-blue bg-brand-solid text-white'
                       : 'border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground'
                   }`}
                 >
@@ -344,7 +344,7 @@ export function MarketView({
             <button
               onClick={() => void onSyncCatalog()}
               disabled={catalogSyncing}
-              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+              className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {catalogSyncing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               {labels.syncCatalog}
@@ -395,14 +395,14 @@ export function MarketView({
                     <button
                       type="button"
                       onClick={() => setCatalogSourceMode('server')}
-                      className={`rounded-lg px-3 py-2 text-sm transition-colors ${catalogSourceMode === 'server' ? 'bg-electric-blue text-white' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+                      className={`rounded-lg px-3 py-2 text-sm transition-colors ${catalogSourceMode === 'server' ? 'bg-brand-solid text-white' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
                     >
                       {labels.serverSource}
                     </button>
                     <button
                       type="button"
                       onClick={() => setCatalogSourceMode('file')}
-                      className={`rounded-lg px-3 py-2 text-sm transition-colors ${catalogSourceMode === 'file' ? 'bg-electric-blue text-white' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
+                      className={`rounded-lg px-3 py-2 text-sm transition-colors ${catalogSourceMode === 'file' ? 'bg-brand-solid text-white' : 'text-muted-foreground hover:bg-accent hover:text-foreground'}`}
                     >
                       {labels.localFileSource}
                     </button>
@@ -504,7 +504,7 @@ export function MarketView({
                         {packageInstalled ? labels.packageInstalled : labels.packageNotInstalled}
                       </span>
                       {selectedProject ? (
-                        <span className={`rounded-full border px-2 py-1 text-xs ${addedToProject ? 'border-electric-blue/30 bg-electric-blue/12 text-electric-blue' : 'border-border bg-muted text-muted-foreground'}`}>
+                        <span className={`rounded-full border px-2 py-1 text-xs ${addedToProject ? 'border-electric-blue/30 bg-brand-solid/12 text-electric-blue' : 'border-border bg-muted text-muted-foreground'}`}>
                           {addedToProject ? labels.addedToProject : labels.notInProject}
                         </span>
                       ) : null}
@@ -546,14 +546,14 @@ export function MarketView({
                 </div>
 
                 {item.auth_type === 'mcp_discovery' ? (
-                  <div className="mt-4 rounded-2xl border border-electric-blue/20 bg-electric-blue/8 px-4 py-3 text-sm text-muted-foreground">
+                  <div className="mt-4 rounded-2xl border border-electric-blue/20 bg-brand-solid/8 px-4 py-3 text-sm text-muted-foreground">
                     {messages.upstreamAuthNotice}
                   </div>
                 ) : null}
 
                 {(item.system_dependencies?.length ?? 0) > 0 ? (
                   <div className="mt-4 rounded-2xl border border-amber-500/25 bg-amber-500/8 px-4 py-3">
-                    <div className="text-xs font-medium text-amber-700 dark:text-amber-300">{labels.systemDependencies}</div>
+                    <div className="text-xs font-medium text-amber-700 dark:text-warning">{labels.systemDependencies}</div>
                     <div className="mt-2 flex flex-wrap gap-2">
                       {item.system_dependencies?.map((dependency) => (
                         <span
@@ -574,7 +574,7 @@ export function MarketView({
                     {item.tags.map((tag) => (
                       <span
                         key={`${item.id}-${tag}`}
-                        className="rounded-full border border-electric-blue/30 bg-electric-blue/12 px-2 py-1 text-xs font-medium text-electric-blue"
+                        className="rounded-full border border-electric-blue/30 bg-brand-solid/12 px-2 py-1 text-xs font-medium text-electric-blue"
                       >
                         {tag}
                       </span>
@@ -601,7 +601,7 @@ export function MarketView({
                       <button
                         onClick={() => void onInstallCatalogPackage(item)}
                         disabled={packageInstalling || !item.enabled}
-                        className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-electric-blue bg-electric-blue/10 px-4 text-sm font-medium text-electric-blue transition-colors hover:bg-electric-blue/20 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-electric-blue bg-brand-solid/10 px-4 text-sm font-medium text-electric-blue transition-colors hover:bg-brand-solid/20 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {packageInstalling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                         {labels.installPackage}
@@ -611,7 +611,7 @@ export function MarketView({
                       <button
                         onClick={() => void installCatalogItem(item)}
                         disabled={projects.length === 0 || addingToProject || !item.enabled}
-                        className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-60"
+                        className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {addingToProject ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
                         {labels.addToProject}
@@ -803,7 +803,7 @@ export function MarketView({
                 <button
                   type="submit"
                   disabled={!installDialogItem || !installDialogProjectId || addingCatalogItemId === installDialogItem.id}
-                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-electric-blue px-4 text-sm font-medium text-white transition-colors hover:bg-electric-blue/90 disabled:cursor-not-allowed disabled:opacity-70"
+                  className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-brand-solid px-4 text-sm font-medium text-white transition-colors hover:bg-brand-solid/90 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {installDialogItem && addingCatalogItemId === installDialogItem.id ? (
                     <LoaderCircle className="h-4 w-4 animate-spin" />

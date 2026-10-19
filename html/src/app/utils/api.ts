@@ -49,3 +49,21 @@ export async function apiRequest<T>(
 
   return (await response.json()) as T;
 }
+
+export async function downloadAPIFile(input: string, filename: string) {
+  const headers = new Headers();
+  if (defaultAuthToken) headers.set('Authorization', `Bearer ${defaultAuthToken}`);
+  const response = await fetch(input, { headers });
+  if (!response.ok) {
+    const error = await response.json().catch(() => null);
+    throw new APIRequestError(error?.error || `HTTP ${response.status}`, response.status);
+  }
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

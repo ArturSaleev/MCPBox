@@ -14,7 +14,6 @@ import (
 	"github.com/ArturSaleev/MCPBox/app"
 	"github.com/ArturSaleev/MCPBox/internal/proauth"
 	"github.com/ArturSaleev/MCPBox/internal/prohttp"
-	"github.com/ArturSaleev/MCPBox/internal/propolicy"
 	"github.com/ArturSaleev/MCPBox/internal/proprojects"
 	"github.com/ArturSaleev/MCPBox/internal/proragbox"
 	"github.com/ArturSaleev/MCPBox/internal/prosso"
@@ -42,7 +41,6 @@ func main() {
 	}
 
 	authService := &proauth.Service{}
-	policyService := &propolicy.Service{}
 	ssoService := &prosso.Service{}
 	ragBoxService := &proragbox.Service{}
 	ragBoxBindingService := &proragbox.BindingService{}
@@ -114,14 +112,6 @@ func main() {
 				if _, err := projectShadowService.SyncAll(ctx); err != nil {
 					return err
 				}
-				policy, err := propolicy.NewService(storageManager.OperationalDB(), runtime.DB)
-				if err != nil {
-					return err
-				}
-				policyService = policy
-				if err := policyService.AutoMigrate(ctx); err != nil {
-					return err
-				}
 				sso, err := prosso.NewServiceFromRuntime(runtime, authService)
 				if err != nil {
 					return err
@@ -148,7 +138,7 @@ func main() {
 		},
 		HTTPRegistrars: []app.HTTPRegistrar{
 			func(runtime *app.RuntimeContext, mux *http.ServeMux) {
-				prohttp.RegisterRoutes(runtime, mux, authService, ssoService, ragBoxService, ragBoxBindingService, policyService, storageService, storageManager, projectShadowService)
+				prohttp.RegisterRoutes(runtime, mux, authService, ssoService, ragBoxService, ragBoxBindingService, storageService, storageManager, projectShadowService)
 			},
 		},
 		AdminAPIAuthorizer: func(requiredScope string, next http.Handler) http.Handler {
@@ -156,7 +146,6 @@ func main() {
 				next.ServeHTTP(w, r)
 			})
 		},
-		ConnectAuthorizer: prohttp.ProjectAuthorizer(policyService),
 	}
 
 	if err := app.Run(app.Options{
@@ -321,10 +310,8 @@ func runAdminCommand(args []string) error {
 	switch {
 	case len(args) > 0 && args[0] == "create":
 		return runAdminCreate(opened.Runtime, args[1:])
-	case len(args) > 0 && args[0] == "policybox":
-		return runAdminPolicyBox(opened.Runtime, args[1:])
 	default:
-		return fmt.Errorf("supported commands: admin create, admin policybox bind-project, admin policybox list-bindings")
+		return fmt.Errorf("supported commands: admin create")
 	}
 }
 
@@ -365,48 +352,4 @@ func runAdminCreate(runtime *app.RuntimeContext, args []string) error {
 	}
 	fmt.Printf("Local admin %s: %s (user #%d)\n", verb, record.Email, record.ID)
 	return nil
-}
-
-func runAdminPolicyBox(runtime *app.RuntimeContext, args []string) error {
-	service, err := propolicy.NewServiceFromRuntime(runtime)
-	if err != nil {
-		return err
-	}
-	if err := service.AutoMigrate(context.Background()); err != nil {
-		return err
-	}
-	if len(args) == 0 {
-		return fmt.Errorf("supported commands: admin policybox bind-project, admin policybox list-bindings")
-	}
-
-	switch args[0] {
-	case "bind-project":
-		fs := flag.NewFlagSet("admin policybox bind-project", flag.ContinueOnError)
-		mcpProjectID := fs.Uint("mcp-project-id", 0, "MCPBox project id")
-		policyProjectID := fs.String("policy-project-id", "", "PolicyBox project id")
-		policyProjectSlug := fs.String("policy-project-slug", "", "PolicyBox project slug")
-		if err := fs.Parse(args[1:]); err != nil {
-			return err
-		}
-		if err := service.UpsertProjectBinding(context.Background(), propolicy.RuntimeProjectBinding{
-			MCPBoxProjectID:   uint(*mcpProjectID),
-			PolicyProjectID:   *policyProjectID,
-			PolicyProjectSlug: *policyProjectSlug,
-		}); err != nil {
-			return err
-		}
-		fmt.Printf("PolicyBox binding saved: mcp_project_id=%d policy_project_id=%s policy_project_slug=%s\n", *mcpProjectID, *policyProjectID, *policyProjectSlug)
-		return nil
-	case "list-bindings":
-		items, err := service.ListProjectBindings(context.Background())
-		if err != nil {
-			return err
-		}
-		for _, item := range items {
-			fmt.Printf("mcp_project_id=%d policy_project_id=%s policy_project_slug=%s\n", item.MCPBoxProjectID, item.PolicyProjectID, item.PolicyProjectSlug)
-		}
-		return nil
-	default:
-		return fmt.Errorf("unsupported admin policybox command: %s", args[0])
-	}
 }
