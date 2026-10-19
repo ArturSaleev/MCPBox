@@ -4,7 +4,7 @@
 
 Управляйте инструментами AI из одной панели: объединяйте их по проектам, настраивайте доступ и проверяйте состояние серверов и историю вызовов. MCPBox — бесплатное приложение с открытым исходным кодом под Apache-2.0, со встроенным веб-интерфейсом и локальным хранением данных.
 
-[Скачать v1.4.0](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.4.0) · [Документация](docs/website/ru/README.md) · [Сайт](https://mcpbox.sh) · [English](README.md)
+[Скачать v1.4.0](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.4.0) · [Документация](docs/website/ru/README.md) · [Сайт](https://mcpbox.sh) · [Обсуждения](https://github.com/ArturSaleev/MCPBox/discussions) · [English](README.md)
 
 ## Зачем MCPBox
 
@@ -141,9 +141,16 @@ GOWORK=off go build -o MCPBox .
 
 Для релиза: установите frontend-зависимости и выполните `./build-release.sh host` или `./build-release.sh all`. Результат: плоские файлы `release/MCPBox-<os>-<arch>` (с `.exe` для Windows) и `release/SHA256SUMS`. Для macOS используется имя `macos`. Манифест охватывает только текущую сборку; полный релиз собирайте через `all`. Документация и LICENSE находятся в репозитории.
 
-## Участие в разработке и безопасность
+## Сообщество, участие в разработке и безопасность
 
-[Как отправить Issue или PR](CONTRIBUTING-ru.md) · [Сообщить об уязвимости приватно](SECURITY-ru.md). Принимаются русский и английский. Не публикуйте секреты и детали уязвимостей в обычных Issues.
+Присоединяйтесь к [GitHub Discussions](https://github.com/ArturSaleev/MCPBox/discussions): задавайте вопросы, предлагайте улучшения, делитесь MCP-интеграциями и Skills, показывайте свои проекты. Там же можно следить за объявлениями о развитии MCPBox.
+
+- **Вопросы и идеи:** [GitHub Discussions](https://github.com/ArturSaleev/MCPBox/discussions).
+- **Воспроизводимые ошибки:** [GitHub Issues](https://github.com/ArturSaleev/MCPBox/issues).
+- **Участие в разработке:** [Руководство для участников](CONTRIBUTING-ru.md).
+- **Уязвимости:** [Сообщить приватно](SECURITY-ru.md); не публикуйте секреты и детали уязвимостей в Issues или Discussions.
+
+Принимаются русский и английский языки.
 
 ## Лицензия
 

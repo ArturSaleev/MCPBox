@@ -4,7 +4,7 @@
 
 Manage your AI tools from one dashboard: group them into projects, control access, and inspect server health and request history. MCPBox is free, Apache-2.0 open-source software with an embedded web UI and local data storage.
 
-[Download v1.4.0](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.4.0) · [Documentation](docs/website/en/README.md) · [Website](https://mcpbox.sh) · [Русский](README-ru.md)
+[Download v1.4.0](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.4.0) · [Documentation](docs/website/en/README.md) · [Website](https://mcpbox.sh) · [Community discussions](https://github.com/ArturSaleev/MCPBox/discussions) · [Русский](README-ru.md)
 
 ## Why MCPBox
 
@@ -141,9 +141,16 @@ Full guides in [English](docs/website/en/README.md) and [Russian](docs/website/r
 
 For releases, install frontend dependencies then run `./build-release.sh host` or `./build-release.sh all`. Output: flat `release/MCPBox-<os>-<arch>` files (`.exe` for Windows) and `release/SHA256SUMS`. macOS uses `macos` in asset names. The manifest covers only the current run; use `all` for a complete release. Documentation and LICENSE remain in the repository.
 
-## Contributing and security
+## Community, contributing and security
 
-[Report a bug or submit a PR](CONTRIBUTING.md) · [Report a vulnerability privately](SECURITY.md). English and Russian are welcome. Do not post secrets or vulnerability details in ordinary Issues.
+Join [GitHub Discussions](https://github.com/ArturSaleev/MCPBox/discussions) to ask questions, suggest features, share MCP integrations and Skills, or show what you've built with MCPBox. You can also follow project announcements there.
+
+- **Questions and ideas:** [GitHub Discussions](https://github.com/ArturSaleev/MCPBox/discussions).
+- **Reproducible bugs:** [GitHub Issues](https://github.com/ArturSaleev/MCPBox/issues).
+- **Code contributions:** [Contributing guide](CONTRIBUTING.md).
+- **Security vulnerabilities:** [Report privately](SECURITY.md); do not publish secrets or vulnerability details in Issues or Discussions.
+
+English and Russian are welcome.
 
 ## License
 
