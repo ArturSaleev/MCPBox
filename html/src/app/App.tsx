@@ -66,6 +66,7 @@ import { getProCopy } from './pro/i18n';
 import { proAuthStorageKey } from './pro/constants';
 import { APIRequestError, apiRequest, setAPIAuthToken } from './utils/api';
 import { ProjectsSidebar } from './components/ProjectsSidebar';
+import { readProjectOrder, reconcileProjectOrder } from './utils/project-order';
 import type {
   CatalogItem,
   CatalogSettings,
@@ -363,6 +364,7 @@ export default function App() {
     return storedToken;
   });
   const [proPrincipal, setProPrincipal] = useState<ProPrincipal | null>(null);
+  const projectOrderStorageKey = `mcpbox-project-order:${proPrincipal?.user_id ?? 'local'}`;
   const [proTokens, setProTokens] = useState<ProTokenRecord[]>([]);
   const [proUsers, setProUsers] = useState<ProUserRecord[]>([]);
   const [proRoles, setProRoles] = useState<ProRoleRecord[]>([]);
@@ -1009,9 +1011,16 @@ export default function App() {
       !selectedProjectId ||
       !projects.some((project) => project.project_id === selectedProjectId)
     ) {
-      setSelectedProjectId(projects[0].project_id);
+      let savedOrder: number[] = [];
+      try {
+        savedOrder = readProjectOrder(window.localStorage.getItem(projectOrderStorageKey));
+      } catch {
+        // Use API order when browser storage is unavailable.
+      }
+      const orderedIds = reconcileProjectOrder(projects.map(project => project.project_id), savedOrder);
+      setSelectedProjectId(orderedIds[0]);
     }
-  }, [projects, selectedProjectId]);
+  }, [projects, selectedProjectId, projectOrderStorageKey]);
 
   async function loadProjects(initial = false) {
     if (initial) {
@@ -3695,7 +3704,7 @@ export default function App() {
         activeView === 'projects' && !proAuthLocked ? (
           <ProjectsSidebar
             key={`project-order:${proPrincipal?.user_id ?? 'local'}`}
-            orderStorageKey={`mcpbox-project-order:${proPrincipal?.user_id ?? 'local'}`}
+            orderStorageKey={projectOrderStorageKey}
             labels={labels}
             messages={messages}
             language={language}
