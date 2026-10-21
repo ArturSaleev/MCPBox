@@ -59,4 +59,18 @@ Explain the problem, resulting behavior, validation and any migration/security i
 
 Respect other contributors: discuss the code, avoid personal attacks, and do not publish another person's private information. Contributions are submitted under this repository's [Apache-2.0 license](LICENSE); retain relevant third-party notices.
 
+## Contributor sign-off (DCO)
+
+Every commit in a pull request must be signed off. Create it with `git commit -s` (long form `--signoff`); each sign-off appends a trailer line to the commit message:
+
+```text
+Signed-off-by: Full Name <name@example.com>
+```
+
+The name and email must identify the person who made the contribution. The trailer may appear anywhere in the trailer block, but it must be present in every commit of the pull request.
+
+A sign-off certifies that you have the right to submit the contribution under this repository's [Apache-2.0 license](LICENSE), as defined by the [Developer Certificate of Origin 1.1](https://developercertificate.org/). It is a confirmation, not a transfer of copyright: you keep the copyright in your contribution.
+
+Pull requests that contain unsigned commits, or whose sign-off identity does not match the commit author, are not accepted. To fix a missing sign-off, amend or rebase the affected commits and push again.
+
 [CI workflows, advisory reports and release preparation](docs/website/en/ci.md).

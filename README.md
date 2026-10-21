@@ -1,21 +1,44 @@
 # MCPBox
 
-**MCP servers, CLI commands, knowledge bases and Skills. One MCP URL per project.**
+**One program on your own machine that gives every project a single MCP address — and one place to decide what an AI agent may do there.**
 
-Manage your AI tools from one dashboard: group them into projects, control access, and inspect server health and request history. MCPBox is free, Apache-2.0 open-source software with an embedded web UI and local data storage.
+I had 20 projects and 20 databases, and every AI client wanted its own JSON config with the same secrets copied into it again. When an agent called something I did not expect, there was no log to check and no list of what it was allowed to touch. MCPBox is what I built for that setup: one developer or a small team with 10–20 projects, each with its own database and its own code, already using Codex, Claude or Cursor.
 
-[Download v1.4.0](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.4.0) · [Documentation](docs/website/en/README.md) · [Website](https://mcpbox.sh) · [Community discussions](https://github.com/ArturSaleev/MCPBox/discussions) · [Русский](README-ru.md)
+In practice:
 
-## Why MCPBox
+- One MCP URL per project, with its own access rules — a new client needs one connection instead of another folder of JSON.
+- You choose exactly what an agent may do: which commands and arguments are allowed, which documents it can search, which Skills it can read.
+- Knowledge search is plain full-text over your own files and runs locally, so it works offline and returns the matching documents.
+- Every MCP request is logged and server status is visible, so "what did the agent just do?" has an answer.
 
-- **Projects instead of scattered configs.** Group local `stdio` and remote `http_stream` MCP servers behind one project URL.
-- **Controlled access.** Users, roles, sessions, API tokens, MCP connection authentication and optional OIDC SSO.
-- **CLI tools for AI.** Expose only approved local operations and exact argument sets to each project.
-- **Skills for projects.** Search the catalog, import GitHub/ZIP packages and connect specific versions with instructions and resources available through MCP.
-- **Server-side scripts.** Upload job files and run approved Python, Node.js or Bash scripts in Docker environments prepared by an administrator.
-- **Knowledge alongside tools.** Index documents locally with Bleve or connect a separate RagBox service.
-- **Visible runtime state.** Health checks, tools/resources/prompts inspection, request logs and basic metrics.
-- **One installation.** A Go binary with an embedded React UI; release users do not need Go or Node.js. Connected tools may require their own runtimes.
+## Install
+
+Windows (PowerShell, amd64):
+
+```powershell
+curl.exe -fL -o MCPBox.exe https://github.com/ArturSaleev/MCPBox/releases/latest/download/MCPBox-windows-amd64.exe; .\MCPBox.exe
+```
+
+macOS and Linux (amd64 and arm64):
+
+```bash
+OS=$(uname -s | tr A-Z a-z | sed s/darwin/macos/); ARCH=$(uname -m | sed -e s/x86_64/amd64/ -e s/aarch64/arm64/); curl -fL -o MCPBox "https://github.com/ArturSaleev/MCPBox/releases/latest/download/MCPBox-$OS-$ARCH" && chmod +x MCPBox && ./MCPBox
+```
+
+On first launch, create the administrator in the terminal and open <http://127.0.0.1:38181/>. Then create a project, add a server or an approved command, and copy the project MCP URL into your client.
+
+Data lives next to the binary in `mcpbox.db` and is not sent anywhere; Docker is needed only to run scripts. Windows arm64 and all other builds: [Releases](https://github.com/ArturSaleev/MCPBox/releases); [verify the SHA-256](docs/website/en/release-verification.md) before running. For remote access, follow the [security guide](docs/website/en/production-security.md).
+
+<!-- demo.gif -->
+
+## What this is not
+
+- Not a cloud service — it runs on your machine and keeps its data there.
+- Not a replacement for an enterprise gateway.
+- Not RAG and not a vector database; search is full-text.
+- Not a code generator.
+
+Free and Apache-2.0 licensed. Docs: [docs](docs/) · [Website](https://mcpbox.sh) · [Discussions](https://github.com/ArturSaleev/MCPBox/discussions) · [Русский](README-ru.md)
 
 ## How it works
 
@@ -37,9 +60,9 @@ Docker is required on the server **only for script execution**; catalog browsing
 
 [Skills catalog, execution setup and MCP tools](docs/SKILLS.md).
 
-## v1.4.0 interface
+## Interface
 
-Fresh captures from a separate demo installation of the v1.4.0 interface code with test data. The first shows the Skills catalog and search; Docker is unavailable in this installation, so the screenshots do not demonstrate script execution.
+Fresh captures from a separate demo installation with test data. The first shows the Skills catalog and search; Docker is unavailable in this installation, so the screenshots do not demonstrate script execution.
 
 [![MCPBox Skills catalog filtered by author](images/v1.4.0-skills.png)](images/v1.4.0-skills.png)
 
@@ -50,45 +73,7 @@ Fresh captures from a separate demo installation of the v1.4.0 interface code wi
 
 </details>
 
-v1.4.0 also includes Light, Dark and System themes, a compact Knowledge Base with help and search dialogs, System and Security settings navigation, and project reordering in the sidebar. Theme and project order are remembered in the current browser; project ordering is stored per user.
-
-## Download a release
-
-Choose your computer's architecture: arm64 for Apple Silicon Macs, amd64 for most Intel/AMD computers.
-
-| OS | Intel / AMD (amd64) | ARM (arm64) |
-| --- | --- | --- |
-| macOS | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.4.0/MCPBox-macos-amd64) | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.4.0/MCPBox-macos-arm64) |
-| Windows | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.4.0/MCPBox-windows-amd64.exe) | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.4.0/MCPBox-windows-arm64.exe) |
-| Linux | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.4.0/MCPBox-linux-amd64) | [Download](https://github.com/ArturSaleev/MCPBox/releases/download/v1.4.0/MCPBox-linux-arm64) |
-
-[All releases](https://github.com/ArturSaleev/MCPBox/releases) · [v1.4.0 release notes](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.4.0)
-
-[Verify the file SHA-256 before running it](docs/website/en/release-verification.md).
-
-## Quick start with a binary
-
-1. Download a file above into a dedicated writable directory. Rename it to `MCPBox` on macOS/Linux or `MCPBox.exe` on Windows.
-2. Open a terminal in that directory and run:
-
-   **macOS / Linux**
-
-   ```bash
-   chmod +x MCPBox
-   ./MCPBox --mcp-host 127.0.0.1
-   ```
-
-   **Windows PowerShell**
-
-   ```powershell
-   .\MCPBox.exe --mcp-host 127.0.0.1
-   ```
-
-3. In an interactive terminal, follow the prompts to create the first administrator. Open [http://127.0.0.1:38181/](http://127.0.0.1:38181/) and sign in.
-4. Create a project, add an MCP server and check its health. For CLI, attach a registry entry to the project; for knowledge, attach a collection; for Skills, connect an installed version.
-5. Copy `http://127.0.0.1:38182/mcp/<project-token>` from the UI and configure an MCP HTTP connection in your client with the project's authentication settings.
-
-The example flag keeps MCP local, including on published v1.3.0 binaries whose earlier default is `0.0.0.0:38182`. Current source defaults MCP to `127.0.0.1:38182`; administration defaults to `127.0.0.1:38181`. For remote access, configure HTTPS and authentication following the [security guide](docs/website/en/production-security.md).
+The interface also includes Light, Dark and System themes, a compact Knowledge Base with help and search dialogs, System and Security settings navigation, and project reordering in the sidebar. Theme and project order are remembered in the current browser; project ordering is stored per user.
 
 ## Connect an AI client
 
@@ -104,7 +89,7 @@ Use a client that supports MCP HTTP and your chosen authentication method. Conne
 
 Former MCPBoxPro features are included in the unified open-source MCPBox; no license activation is required. Technical names `/api/pro/*`, `pro:*` and `MCPBOX_PRO_*` remain for compatibility. Before replacing the executable, read the [migration notes (RU)](docs/MERGE.md) and [backup procedure](docs/website/en/operations.md).
 
-**v1.4.0 removes the PolicyBox integration.** Legacy identity-verification projects need explicit administrator migration, which rotates the bearer credential and pauses the project for access review. PolicyBox data is preserved. See [migration from PolicyBox](docs/website/en/policybox-migration.md).
+**The PolicyBox integration has been removed.** Legacy identity-verification projects need explicit administrator migration, which rotates the bearer credential and pauses the project for access review. PolicyBox data is preserved. See [migration from PolicyBox](docs/website/en/policybox-migration.md).
 
 ## Build from source
 
