@@ -150,17 +150,26 @@ func Execute(ctx context.Context, store Store, projectID uint, req Request) (*Re
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(project.RootPath) == "" {
-		return nil, errors.New("project root_path is required for CLI execution")
+	root := project.RootPath
+	if strings.TrimSpace(root) == "" {
+		// A fresh private directory avoids inheriting the server's cwd or local
+		// project/config files. This is a cwd policy, not a filesystem sandbox.
+		root, err = os.MkdirTemp("", "mcpbox-cli-*")
+		if err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(root)
+	} else {
+		root, err = filepath.Abs(root)
+		if err != nil {
+			return nil, err
+		}
+		info, statErr := os.Stat(root)
+		if statErr != nil || !info.IsDir() {
+			return nil, errors.New("project root_path must be an existing directory")
+		}
 	}
-	root, err := filepath.Abs(project.RootPath)
-	if err != nil {
-		return nil, err
-	}
-	info, err := os.Stat(root)
-	if err != nil || !info.IsDir() {
-		return nil, errors.New("project root_path must be an existing directory")
-	}
+
 	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(item.TimeoutSeconds)*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(timeoutCtx, binary, argv...)
@@ -169,6 +178,16 @@ func Execute(ctx context.Context, store Store, projectID uint, req Request) (*Re
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "LANG=C.UTF-8", "TERM=dumb", "GIT_TERMINAL_PROMPT=0", "GIT_PAGER=cat", "PAGER=cat"}
 	if v := os.Getenv("SystemRoot"); v != "" {
 		cmd.Env = append(cmd.Env, "SystemRoot="+v)
+	}
+	// OpenSSH alone receives access to the operator's SSH configuration and
+	// agent. Never inherit the full server environment or caller-supplied env.
+	if strings.EqualFold(strings.TrimSuffix(strings.ToLower(filepath.Base(binary)), ".exe"), "ssh") {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			cmd.Env = append(cmd.Env, "HOME="+home)
+		}
+		if socket := os.Getenv("SSH_AUTH_SOCK"); socket != "" {
+			cmd.Env = append(cmd.Env, "SSH_AUTH_SOCK="+socket)
+		}
 	}
 	cmd.WaitDelay = time.Second
 	configureProcess(cmd)

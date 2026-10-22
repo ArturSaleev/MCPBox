@@ -2,9 +2,12 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +33,13 @@ func TestCLIHelper(t *testing.T) {
 			fmt.Fprint(os.Stderr, strings.Repeat("y", 8192))
 		case "sleep":
 			time.Sleep(10 * time.Second)
+		case "ssh":
+			input, err := io.ReadAll(os.Stdin)
+			if err != nil || len(input) != 0 {
+				os.Exit(9)
+			}
+			cwd, _ := os.Getwd()
+			_ = json.NewEncoder(os.Stdout).Encode(map[string]any{"cwd": cwd, "env": os.Environ(), "args": os.Args[i+2:]})
 		case "environment":
 			cwd, _ := os.Getwd()
 			fmt.Print(cwd + "|" + os.Getenv("CLI_TEST_SECRET"))
@@ -152,5 +162,105 @@ func TestValidateRegistry(t *testing.T) {
 		if err := Validate(&entry); err != nil {
 			t.Errorf("%q: %v", binary, err)
 		}
+	}
+}
+
+func TestWorkingDirectoryAndSSHEnvironment(t *testing.T) {
+	ctx := context.Background()
+	store, err := storage.NewStore(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	project := &models.Project{Name: "SSH"}
+	if err := store.CreateProject(ctx, project); err != nil {
+		t.Fatal(err)
+	}
+	binary, _ := os.Executable()
+	data, err := os.ReadFile(binary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock := filepath.Join(t.TempDir(), "ssh")
+	if err := os.WriteFile(mock, data, 0700); err != nil {
+		t.Fatal(err)
+	}
+	command := "-test.run=TestCLIHelper -- cli-test ssh"
+	entry := &models.CLI{Name: "SSH", Slug: "ssh-linux", Binary: mock, IsEnabled: true,
+		Operations: []models.CLIOperation{{Command: command, ArgumentSets: [][]string{{"mcpbox-linux", "hostname"}, {"mcpbox-linux", "docker ps"}}}}}
+	if err := Validate(entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveCLI(ctx, entry); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetProjectCLI(ctx, project.ID, entry.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("SSH_AUTH_SOCK", "/synthetic/agent.sock")
+	t.Setenv("CLI_TEST_SECRET", "must-not-leak")
+	t.Setenv("OPENAI_API_KEY", "synthetic-secret")
+	t.Setenv("SSH_ASKPASS", "/must-not-inherit")
+	run := func(args ...string) (*Result, error) {
+		return Execute(ctx, store, project.ID, Request{CLI: entry.Slug, Command: command, Args: args})
+	}
+	for _, remote := range []string{"hostname", "docker ps"} {
+		result, err := run("mcpbox-linux", remote)
+		if err != nil || result.ExitCode != 0 {
+			t.Fatalf("ssh mock: %+v %v", result, err)
+		}
+		var got struct {
+			Cwd  string
+			Env  []string
+			Args []string
+		}
+		if err := json.Unmarshal([]byte(result.Stdout), &got); err != nil {
+			t.Fatal(err)
+		}
+		if len(got.Args) != 2 || got.Args[1] != remote {
+			t.Fatalf("argv: %+v", got.Args)
+		}
+		if _, err := os.Stat(got.Cwd); !os.IsNotExist(err) {
+			t.Fatalf("temporary cwd not cleaned: %s: %v", got.Cwd, err)
+		}
+		env := strings.Join(got.Env, "\n")
+		if !strings.Contains(env, "HOME="+home) || !strings.Contains(env, "SSH_AUTH_SOCK=/synthetic/agent.sock") {
+			t.Fatalf("missing SSH environment: %s", env)
+		}
+		for _, forbidden := range []string{"CLI_TEST_SECRET=", "OPENAI_API_KEY=", "SSH_ASKPASS="} {
+			if strings.Contains(env, forbidden) {
+				t.Fatalf("inherited %s", forbidden)
+			}
+		}
+	}
+	if result, err := run("mcpbox-linux", "sudo reboot"); !errors.Is(err, ErrDenied) || result != nil {
+		t.Fatalf("denied args: %+v %v", result, err)
+	}
+	for _, root := range []string{filepath.Join(t.TempDir(), "missing"), mock} {
+		if err := store.DB().Model(project).Update("root_path", root).Error; err != nil {
+			t.Fatal(err)
+		}
+		if _, err := run("mcpbox-linux", "hostname"); err == nil || !strings.Contains(err.Error(), "existing directory") {
+			t.Fatalf("invalid root %s: %v", root, err)
+		}
+	}
+	// The SSH profile must not be inherited by other approved programs.
+	entry.Binary = binary
+	if err := store.SaveCLI(ctx, entry); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := store.DB().Model(project).Update("root_path", root).Error; err != nil {
+		t.Fatal(err)
+	}
+	result, err := run("mcpbox-linux", "hostname")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(result.Stdout, "HOME=") || strings.Contains(result.Stdout, "SSH_AUTH_SOCK=") {
+		t.Fatalf("SSH environment leaked: %s", result.Stdout)
 	}
 }

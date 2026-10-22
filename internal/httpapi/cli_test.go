@@ -38,7 +38,7 @@ func TestCLIRegistryAPIAndMCP(t *testing.T) {
 		api.Handler().ServeHTTP(w, httptest.NewRequest(method, path, bytes.NewBufferString(body)))
 		return w
 	}
-	body := `{"name":"Git","slug":"git","binary":"git","description":"Git operations","is_enabled":true,"operations":[{"command":"status"},{"command":"diff"}]}`
+	body := `{"name":"Git","slug":"git","binary":"git","description":"Git operations","is_enabled":true,"operations":[{"command":"status"},{"command":"diff"},{"command":"--version"}]}`
 	w := request("POST", "/api/cli", body)
 	if w.Code != 201 {
 		t.Fatalf("create: %d %s", w.Code, w.Body)
@@ -98,6 +98,15 @@ func TestCLIRegistryAPIAndMCP(t *testing.T) {
 		w = request("POST", fmt.Sprintf("/api/projects/%d/cli/execute", project.ID), `{"cli":"git","command":"status"}`)
 		if w.Code != 200 || !strings.Contains(w.Body.String(), `"exit_code":0`) {
 			t.Fatalf("API execution: %d %s", w.Code, w.Body)
+		}
+	}
+	if _, err := exec.LookPath("git"); err == nil {
+		if err := store.DB().Model(project).Update("root_path", "").Error; err != nil {
+			t.Fatal(err)
+		}
+		w = rpc(project, "cli_execute", `{"cli":"git","command":"--version"}`)
+		if w.Code != 200 || !strings.Contains(w.Body.String(), `"exit_code":0`) {
+			t.Fatalf("MCP execution without root: %d %s", w.Code, w.Body)
 		}
 	}
 	for _, args := range []string{`{"cli":"git","command":"reset"}`, `{"cli":"git","command":"status","args":["--bad"]}`, `{"cli":"git","command":"status","cwd":"/tmp"}`} {

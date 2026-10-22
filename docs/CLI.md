@@ -86,9 +86,33 @@ unknown operations and unapproved argument vectors before starting a process.
 It uses `exec.CommandContext(binary, argv...)`, never shell command strings.
 Common shell binaries are rejected. Executable resolution uses the server PATH;
 relative binary paths are rejected. The working directory is the project's
-existing `root_path`; requests cannot override cwd or environment. Child processes
-receive PATH and basic locale/terminal settings, not MCPBox's secret-bearing
-server environment. Stdin is closed; interactive operations are unsupported.
+existing `root_path` when set (a missing path or a file is rejected). When empty,
+each invocation gets a fresh private temporary directory, removed after execution.
+This avoids inheriting MCPBox's working directory or the operator's home; it does
+not restrict filesystem access. Set the project directory in the project editor
+for Git, Go, Composer and other workspace operations. MCP server `working_dir`
+and FilesSystemMCP paths are separate settings and do not populate `root_path`.
+Requests cannot override cwd or environment. Child processes receive PATH and
+basic locale/terminal settings, not MCPBox's secret-bearing server environment.
+Stdin is closed; interactive operations are unsupported.
+
+Only an executable named `ssh` (or `ssh.exe`, including an absolute path) also
+receives the service account's HOME and SSH_AUTH_SOCK, when available. Use a trusted
+absolute executable path if PATH can be modified. OpenSSH uses the service
+account's SSH config, keys and known_hosts; on Unix it can also resolve the home
+from the account database. MCPBox does not copy keys into its database or disable
+host key checking. Configure the host alias with `BatchMode yes` in that account's
+`~/.ssh/config`, provision known_hosts and keys/agent ahead of time, and ensure
+permissions allow the MCPBox account to read them. Windows OpenSSH may resolve
+its profile from the Windows account; verify configuration under the service
+identity on that platform. Other CLI programs do not receive this SSH profile.
+
+For example, register binary `ssh`, operation `mcpbox-linux`, and exact argument
+sets `[["hostname"], ["docker ps"]]`. Then call
+`{"cli":"ssh-linux","command":"mcpbox-linux","args":["docker ps"]}`.
+The remote command remains a single local argument, but SSH passes it to the
+remote shell: approve only exact trusted strings. `["sudo reboot"]` is denied
+unless explicitly registered. No wildcard or local shell is introduced.
 
 Defaults are 30 seconds and 1 MiB combined stdout/stderr. Configurable bounds are
 1–300 seconds and 1 KiB–4 MiB. Output continues draining after the storage cap.
