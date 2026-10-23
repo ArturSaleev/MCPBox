@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -514,6 +515,11 @@ func projectTokenFromOAuthResource(resource string) string {
 }
 
 func requestOrigin(r *http.Request) string {
+	if configured := strings.TrimRight(strings.TrimSpace(os.Getenv("MCPBOX_PUBLIC_MCP_URL")), "/"); configured != "" {
+		if parsed, err := url.Parse(configured); err == nil && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == "" && (parsed.Path == "" || parsed.Path == "/") {
+			return parsed.Scheme + "://" + parsed.Host
+		}
+	}
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"

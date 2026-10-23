@@ -560,9 +560,17 @@ export default function App() {
 
   const selectedProject =
     projects.find((project) => project.project_id === selectedProjectId) ?? null;
+  // When the UI is served over HTTPS, prefer its public origin for MCP URLs.
+  // A reverse proxy can expose /mcp/ on 443 even when the MCP listener uses another port.
+  const publicConnectURL =
+    selectedProject && typeof window !== 'undefined' && window.location.protocol === 'https:'
+      ? `${window.location.origin}/mcp/${encodeURIComponent(selectedProject.token)}`
+      : null;
+  const preferredConnectURL = publicConnectURL ?? selectedProject?.connect_url ?? '';
   const selectedProjectForProjectsView = selectedProject
     ? {
         ...selectedProject,
+        connect_url: preferredConnectURL,
         bearer_auth_enabled: Boolean((selectedProject as ProjectStatus & Record<string, unknown>).bearer_auth_enabled),
         bearer_token: String((selectedProject as ProjectStatus & Record<string, unknown>).bearer_token ?? ''),
         oauth_redirect_uri: String((selectedProject as ProjectStatus & Record<string, unknown>).oauth_redirect_uri ?? ''),
@@ -570,9 +578,10 @@ export default function App() {
         llama_cpp_model_name: String((selectedProject as ProjectStatus & Record<string, unknown>).llama_cpp_model_name ?? ''),
       }
     : null;
-  const alternativeConnectURLs = (selectedProject?.connect_urls ?? []).filter(
-    (url) => url !== selectedProject?.connect_url,
-  );
+  const alternativeConnectURLs = [...new Set([
+    ...(selectedProject?.connect_urls ?? []),
+    ...(selectedProject?.connect_url ? [selectedProject.connect_url] : []),
+  ])].filter((url) => url !== preferredConnectURL);
   const filteredLogsProject =
     selectedLogsProjectId !== null
       ? projects.find((project) => project.project_id === selectedLogsProjectId) ?? null
@@ -2727,7 +2736,7 @@ export default function App() {
   }
 
   async function copyConnectURL(url?: string) {
-    const value = url ?? selectedProject?.connect_url;
+    const value = url ?? preferredConnectURL;
     if (!value) {
       return;
     }

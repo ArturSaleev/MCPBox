@@ -476,8 +476,9 @@ func (s *Server) AdminHandler() http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		if isConnectPath(r.URL.Path) {
-			s.handler.ServeHTTP(w, r)
+		// MCP OAuth endpoints belong to the MCP listener, not the admin UI.
+		if isMCPAuthPath(r.URL.Path) {
+			http.NotFound(w, r)
 			return
 		}
 
@@ -2105,6 +2106,11 @@ func (s *Server) connectMessageURL(r *http.Request, token, sessionID string) str
 }
 
 func (s *Server) absoluteURL(r *http.Request, requestPath string) string {
+	if configured := strings.TrimRight(strings.TrimSpace(os.Getenv("MCPBOX_PUBLIC_MCP_URL")), "/"); configured != "" {
+		if parsed, err := url.Parse(configured); err == nil && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == "" && (parsed.Path == "" || parsed.Path == "/") {
+			return parsed.Scheme + "://" + parsed.Host + requestPath
+		}
+	}
 	scheme, host, port := requestAddressParts(r)
 	if host == "" {
 		return requestPath
@@ -2115,6 +2121,7 @@ func (s *Server) absoluteURL(r *http.Request, requestPath string) string {
 
 func (s *Server) absoluteConnectURL(r *http.Request, requestPath string) string {
 	scheme, host, port := requestAddressParts(r)
+
 	if strings.TrimSpace(s.connectHost) != "" && !isWildcardHost(s.connectHost) {
 		host = strings.TrimSpace(s.connectHost)
 	}
@@ -2133,7 +2140,11 @@ func isConnectPath(requestPath string) bool {
 }
 
 func isConnectProtocolPath(requestPath string) bool {
-	return strings.HasPrefix(requestPath, "/api/agentbox/") || strings.HasPrefix(requestPath, "/.well-known/") || strings.HasPrefix(requestPath, "/oauth/")
+	return strings.HasPrefix(requestPath, "/api/agentbox/") || isMCPAuthPath(requestPath)
+}
+
+func isMCPAuthPath(requestPath string) bool {
+	return strings.HasPrefix(requestPath, "/.well-known/") || strings.HasPrefix(requestPath, "/oauth/")
 }
 
 func isWildcardHost(host string) bool {
@@ -3780,7 +3791,7 @@ func (s *Server) authorizeProjectConnection(w http.ResponseWriter, r *http.Reque
 		s.logAudit(r.Context(), &project.ID, nil, "connect_blocked_bearer_auth", actor, "missing or invalid bearer token")
 		w.Header().Set(
 			"WWW-Authenticate",
-			fmt.Sprintf(`Bearer resource_metadata="%s"`, s.absoluteConnectURL(r, "/.well-known/oauth-protected-resource")),
+			fmt.Sprintf(`Bearer resource_metadata="%s"`, s.absoluteURL(r, "/.well-known/oauth-protected-resource"+r.URL.Path)),
 		)
 		writeError(w, http.StatusUnauthorized, errors.New("missing or invalid bearer token"))
 		return r, false
