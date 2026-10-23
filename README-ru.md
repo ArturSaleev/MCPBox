@@ -120,6 +120,8 @@ GOWORK=off go build -o MCPBox .
 | Admin UI / API | `http://127.0.0.1:38181/` |
 | MCP проекта | `http://<server>:38182/mcp/<project-token>` |
 
+Для публичных OAuth/MCP-подключений задайте `MCPBOX_PUBLIC_MCP_URL=https://mcp.example.com` и направляйте `/mcp/`, `/oauth/` и `/.well-known/` на MCP listener. Интерфейс использует этот origin для URL подключения проекта. См. [конфигурацию](docs/website/ru/configuration.md).
+
 Текущие исходники по умолчанию ограничивают MCP адресом `127.0.0.1`. Опубликованные бинарники v1.3.0 используют `0.0.0.0`; для них явно задайте `MCPBOX_MCP_HOST=127.0.0.1`. Порты и адреса меняются через `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, `MCPBOX_MCP_PORT`. Admin-токены и bearer проекта имеют разные назначения.
 
 ## Данные и обновление

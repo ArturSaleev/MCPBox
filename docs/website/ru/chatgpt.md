@@ -53,6 +53,14 @@ Funnel делает адрес доступным из интернета; ав�
 
 [Пример публикации локального сервера](https://tailscale.com/docs/reference/examples/funnel) · [Команды и фоновый режим](https://tailscale.com/docs/reference/tailscale-cli/funnel).
 
+## Настройте публичный origin
+
+Получив публичный HTTPS-адрес, задайте `MCPBOX_PUBLIC_MCP_URL=https://mcp.example.com` в окружении службы MCPBox, заменив пример своим origin, и перезапустите MCPBox. Для systemd добавьте `Environment="MCPBOX_PUBLIC_MCP_URL=https://mcp.example.com"` в override службы. Не включайте `/mcp/<project-token>` в эту переменную.
+
+Направляйте `/mcp/`, `/oauth/` и `/.well-known/` на MCP listener с сохранением путей. Если прокси или туннель использует отдельные правила для путей, проверьте, что префиксы не обрезаются. OAuth-маршруты относятся к порту `38182`, а не к административному `38181`.
+
+Проверьте, что `https://mcp.example.com/.well-known/oauth-authorization-server` возвращает метаданные с публичным HTTPS origin. Запрос к защищённому MCP без учётных данных должен содержать в `WWW-Authenticate` публичный URL `resource_metadata` конкретного проекта. URL проекта в интерфейсе и при копировании тоже должен использовать этот origin независимо от адреса админки. См. [конфигурацию](configuration.md).
+
 ## Шаг 1. Подготовьте проект MCPBox
 
 1. Откройте проект в MCPBox.

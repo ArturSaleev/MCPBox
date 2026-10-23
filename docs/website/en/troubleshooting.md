@@ -39,3 +39,9 @@ Confirm the base URL is reachable from the MCPBox server, not only from your lap
 ## What to send to support
 
 Send the product version, operating system, time of the error, relevant log entry, and a description of the action that failed. Remove passwords, bearer tokens, API keys, and personal data first.
+
+## OAuth discovery or the copied MCP URL uses the wrong address
+
+Set a valid `MCPBOX_PUBLIC_MCP_URL` in the running service environment and restart MCPBox. Use an HTTPS origin without a project path. The UI uses the backend-provided preferred URL; it does not infer the MCP address from the admin panel's HTTPS port.
+
+Check that your proxy preserves `/mcp/`, `/.well-known/`, and `/oauth/` and forwards all three to the MCP listener. With separate listeners, OAuth discovery on the admin port returns 404 by design. See [public URL configuration](configuration.md).

@@ -55,6 +55,14 @@ Funnel exposes the address to the internet; MCPBox supplies authentication. Ordi
 
 [Local-server publishing example](https://tailscale.com/docs/reference/examples/funnel) · [Commands and background mode](https://tailscale.com/docs/reference/tailscale-cli/funnel).
 
+## Configure the public origin
+
+After obtaining the public HTTPS address, set `MCPBOX_PUBLIC_MCP_URL=https://mcp.example.com` in the MCPBox service environment, replacing the example with your actual origin, and restart MCPBox. For systemd, add `Environment="MCPBOX_PUBLIC_MCP_URL=https://mcp.example.com"` in the service override. Do not include `/mcp/<project-token>` in this variable.
+
+Forward `/mcp/`, `/oauth/`, and `/.well-known/` to the MCP listener, preserving the paths. If your proxy or tunnel uses path-specific rules, check that it does not strip these prefixes. OAuth routes belong to port `38182`, not the admin port `38181`.
+
+Check that `https://mcp.example.com/.well-known/oauth-authorization-server` returns metadata with the public HTTPS origin. A protected MCP request without credentials should advertise a public, project-specific `resource_metadata` URL in `WWW-Authenticate`. The project URL displayed and copied in the UI should also use this origin, regardless of the admin panel address. See [configuration](configuration.md).
+
 ## Step 1: prepare the MCPBox project
 
 1. Open the project in MCPBox.

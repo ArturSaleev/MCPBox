@@ -19,3 +19,5 @@ Disabling an entry or unlinking it blocks subsequent calls but does not cancel a
 [Exact schema, API, execution limits and catalog](../../CLI.md).
 
 The MCP server working directory and FilesSystemMCP path are independent of the project CLI directory. Only `ssh`/`ssh.exe` additionally receives the service account HOME and SSH_AUTH_SOCK. Configure `BatchMode yes`, keys and known_hosts for that account before use; host key checking remains enabled. Register each complete remote command as an exact argument set, for example `["docker ps"]` for operation `mcpbox-linux`. SSH remote commands may be interpreted by the remote shell.
+
+The temporary CLI directory is removed after execution. Files needed by later invocations must be written to an explicitly configured persistent location. A configured project path that is missing or points to a file is rejected.

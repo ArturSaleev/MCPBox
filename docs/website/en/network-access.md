@@ -20,6 +20,8 @@ Current source defaults to private loopback listeners: admin `127.0.0.1:38181`, 
 
 Keep admin and MCP on separate addresses/ports. By default the MCP listener serves MCP/OAuth protocol routes and health, not `/api/projects`, `/api/pro/*` or the admin UI. Deliberately configuring identical admin/MCP listener addresses combines them and exposes the administrative surface on that listener too.
 
+OAuth discovery (`/.well-known/`) and `/oauth/` use the MCP listener; the separate admin listener returns 404 for these paths. Publish these routes together with `/mcp/`, preserving their paths. Set `MCPBOX_PUBLIC_MCP_URL` to the external HTTPS origin so metadata and the copied project URL use the public MCP address even when the admin panel uses another port. See [configuration](configuration.md).
+
 ## Credentials and isolation
 
 - The project URL token selects a project and contains 128 random bits. Without project bearer authentication, knowledge of that URL grants access to its enabled tools. Treat it as a capability secret, not a public identifier.

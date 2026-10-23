@@ -10,6 +10,7 @@
 | `MCPBOX_PORT` | `38181` | Admin UI/API TCP port |
 | `MCPBOX_MCP_HOST` | `127.0.0.1` | MCP bind address (local machine) |
 | `MCPBOX_MCP_PORT` | `38182` | MCP TCP port |
+| `MCPBOX_PUBLIC_MCP_URL` | unset | Public HTTPS origin for MCP/OAuth; no path |
 | `MCPBOX_PRO_BOOTSTRAP_TOKEN` | unset | Emergency admin bearer credential |
 | `MCPBOX_OLLAMA_MODEL` | unset | Preferred local Ollama model |
 | `MCPBOX_LLAMACPP_MODEL` | unset | Local GGUF model path |
@@ -26,6 +27,14 @@ MCPBOX_MCP_HOST=127.0.0.1 ./MCPBox
 ```
 
 Set variables in the service environment or shell. No `.env` loader is configured by the entry point. Child processes need their runtimes and binaries in the service account's PATH. Ollama and llama.cpp are optional external installations.
+
+## Public MCP URL and OAuth
+
+Set `MCPBOX_PUBLIC_MCP_URL=https://mcp.example.com` in the MCPBox process environment and restart the service. Use an HTTPS origin only: no credentials, path, query or fragment. An optional trailing slash is accepted. Invalid values are ignored; without a valid value, MCPBox uses request/proxy-based address detection.
+
+This origin is used for OAuth discovery, protected-resource metadata and the preferred project connection URL (`https://mcp.example.com/mcp/<project-token>`). The UI displays and copies the URL supplied by the backend, even when the admin panel uses another domain or port. This setting does not change listener bind addresses or configure a proxy.
+
+With separate listeners, `/.well-known/` and `/oauth/` are served on the MCP listener (`38182` by default); the admin listener returns 404 for these routes. Forward these paths and `/mcp/` to the MCP listener. OIDC sign-in to the administration panel still uses `/api/pro/sso/callback` on the admin listener. See [ChatGPT connection](chatgpt.md) and [network access](network-access.md).
 
 ## OIDC SSO
 

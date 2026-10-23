@@ -51,6 +51,8 @@ SQLite остаётся bootstrap-базой по умолчанию. База �
 
 Listeners по умолчанию: `127.0.0.1:38181` для админки и `127.0.0.1:38182` для MCP. Настройка через `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, `MCPBOX_MCP_PORT` или соответствующие CLI flags.
 
+При раздельных listener пути `/.well-known/` и `/oauth/` обслуживает `ConnectHandler`; `AdminHandler` возвращает для них 404. `MCPBOX_PUBLIC_MCP_URL` принимает публичный HTTPS origin без пути и задаёт origin для OAuth discovery, метаданных ресурса и основных URL подключения проектов. Некорректное значение означает возврат к определению адреса по запросу/прокси. UI использует URL от бэкенда, а не выводит его из origin админки.
+
 Независимая сборка: `GOWORK=off go build -o MCPBox .`; backend-проверки: `GOWORK=off go test ./...`. Релизы собираются через `./build-release.sh host` или `./build-release.sh all` в `release/MCPBox-<os>-<arch>`. После изменения frontend пересоберите Go-бинарник, чтобы встроить новый UI.
 
 См. [инструкцию переноса](docs/MERGE.md) и [описание релиза 1.3.0](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.3.0).

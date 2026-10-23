@@ -120,6 +120,8 @@ Passwords require at least 8 characters. This command updates an existing local 
 | Admin UI / API | `http://127.0.0.1:38181/` |
 | Project MCP | `http://<server>:38182/mcp/<project-token>` |
 
+For public OAuth/MCP connections, set `MCPBOX_PUBLIC_MCP_URL=https://mcp.example.com` and forward `/mcp/`, `/oauth/`, and `/.well-known/` to the MCP listener. The UI uses this origin for the project connection URL. See [configuration](docs/website/en/configuration.md).
+
 Current source defaults MCP to `127.0.0.1`. Published v1.3.0 binaries use `0.0.0.0`; explicitly set `MCPBOX_MCP_HOST=127.0.0.1` for those binaries. Override listeners with `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, `MCPBOX_MCP_PORT`. Admin tokens and project bearer credentials serve different purposes.
 
 ## Data and upgrades

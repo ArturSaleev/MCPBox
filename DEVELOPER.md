@@ -52,6 +52,8 @@ SQLite remains the default bootstrap database. Default database and relative run
 
 Default listeners are `127.0.0.1:38181` for administration and `127.0.0.1:38182` for MCP. Configure them with `MCPBOX_HOST`, `MCPBOX_PORT`, `MCPBOX_MCP_HOST`, `MCPBOX_MCP_PORT`, or the corresponding CLI flags.
 
+With separate listeners, `/.well-known/` and `/oauth/` are handled by `ConnectHandler`; `AdminHandler` returns 404 for these paths. `MCPBOX_PUBLIC_MCP_URL` accepts a public HTTPS origin without a path and overrides the origin for OAuth discovery, resource metadata and preferred project connection URLs. Invalid values fall back to request/proxy-derived addresses. The UI uses the backend-provided URL instead of inferring it from the admin origin.
+
 Build independently with `GOWORK=off`; verify backend changes with `GOWORK=off go test ./...`. Release builds use `./build-release.sh host` or `./build-release.sh all` and write to `release/MCPBox-<os>-<arch>`. Rebuild the Go binary after frontend changes to embed the new UI.
 
 See [migration notes](docs/MERGE.md) and [1.3.0 release notes](https://github.com/ArturSaleev/MCPBox/releases/tag/v1.3.0).
