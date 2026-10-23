@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -15,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ArturSaleev/MCPBox/connectruntime"
+	"github.com/ArturSaleev/MCPBox/internal/mcphttp"
 	"github.com/ArturSaleev/MCPBox/internal/models"
 	"github.com/ArturSaleev/MCPBox/internal/orchestrator"
 	"github.com/ArturSaleev/MCPBox/internal/rag"
@@ -690,6 +690,9 @@ func (s *Server) callHTTPServerMethod(ctx context.Context, server models.MCPServ
 	upstreamReq.Header.Set("Content-Type", "application/json")
 	applyConfiguredHeaders(upstreamReq.Header, server)
 	applyRuntimeHeaders(upstreamReq.Header, connectruntime.FromContext(ctx))
+	if upstreamReq.Header.Get("Accept") == "" {
+		upstreamReq.Header.Set("Accept", mcphttp.Accept)
+	}
 
 	response, err := http.DefaultClient.Do(upstreamReq)
 	if err != nil {
@@ -697,13 +700,11 @@ func (s *Server) callHTTPServerMethod(ctx context.Context, server models.MCPServ
 	}
 	defer response.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(response.Body, 1024*1024))
+	body, err := mcphttp.ReadResponse(response, payload)
 	if err != nil {
-		return nil, 0, err
+		return nil, int64(len(body)), err
 	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, int64(len(body)), fmt.Errorf("upstream returned status %d: %s", response.StatusCode, strings.TrimSpace(string(body)))
-	}
+
 	if len(body) == 0 {
 		return nil, 0, nil
 	}

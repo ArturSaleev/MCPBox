@@ -64,6 +64,7 @@ app/                     рантайм: listeners, пути данных, за�
 connectruntime/          общий слой доступа к проекту (MCP-соединение)
 internal/httpapi/        HTTP API, MCP-эндпоинт и агрегация, лаунчеры, встроенный UI
 internal/orchestrator/   жизненный цикл локальных MCP-процессов, inspection, health
+internal/mcphttp/        общий разбор JSON/SSE-ответов удалённых MCP (health и вызовы)
 internal/storage/        GORM-хранилище и запросы
 internal/models/         GORM-модели
 internal/installer/      установка пакетов Market

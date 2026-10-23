@@ -75,3 +75,9 @@ Reply in the user’s language with concise, actionable steps.
 ```
 
 Prompts guide model behavior; they are not an authorization mechanism. Do not put passwords, API keys, access tokens, or private data into prompts. Enforce access rules with MCP server permissions, project authentication, and the target system.
+
+## HTTP response formats
+
+For remote HTTP MCP servers, MCPBox sends `Accept: application/json, text/event-stream` unless a custom Accept header is configured. Successful JSON replies keep the existing JSON decoding path. Responses with `Content-Type: text/event-stream` are read as SSE: multiline `data:` fields are combined and the JSON-RPC response with the matching request ID is returned, skipping notifications and unrelated events. Reading stops when that response arrives, without waiting for the server to close the stream.
+
+Legacy JSON responses with missing or incorrect content types remain supported. Recognizable SSE prefixes also allow a mislabelled stream to be read without retrying the request. HTTP failures and JSON-RPC errors remain errors; a failed call is never automatically sent again to try another format. Response size limits and request cancellation still apply. The same reader is used for server health checks and working MCP calls.

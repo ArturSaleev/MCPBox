@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ArturSaleev/MCPBox/internal/mcphttp"
 	"github.com/ArturSaleev/MCPBox/internal/models"
 )
 
@@ -235,6 +235,9 @@ func postHTTPJSONRPC(ctx context.Context, server models.MCPServer, payload any, 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	applyHealthHeaders(req.Header, server)
+	if req.Header.Get("Accept") == "" {
+		req.Header.Set("Accept", mcphttp.Accept)
+	}
 	if trace != nil {
 		trace("http_request", fmt.Sprintf("POST %s headers=%s body=%s", sanitizeURLForTrace(server.URL), sanitizeHeadersForTrace(req.Header), sanitizeJSONForTrace(requestBody)))
 	}
@@ -248,18 +251,13 @@ func postHTTPJSONRPC(ctx context.Context, server models.MCPServer, payload any, 
 	}
 	defer resp.Body.Close()
 
-	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
-	if err != nil {
-		return nil, err
-	}
+	responseBody, err := mcphttp.ReadResponse(resp, requestBody)
 	if trace != nil {
 		trace("http_response", fmt.Sprintf("status=%d body=%s", resp.StatusCode, sanitizeJSONForTrace(responseBody)))
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if len(responseBody) == 0 {
-			return nil, fmt.Errorf("upstream returned status %d", resp.StatusCode)
-		}
-		return nil, fmt.Errorf("upstream returned status %d: %s", resp.StatusCode, strings.TrimSpace(string(responseBody)))
+
+	if err != nil {
+		return nil, err
 	}
 	return responseBody, nil
 }
