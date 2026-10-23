@@ -560,13 +560,9 @@ export default function App() {
 
   const selectedProject =
     projects.find((project) => project.project_id === selectedProjectId) ?? null;
-  // When the UI is served over HTTPS, prefer its public origin for MCP URLs.
-  // A reverse proxy can expose /mcp/ on 443 even when the MCP listener uses another port.
-  const publicConnectURL =
-    selectedProject && typeof window !== 'undefined' && window.location.protocol === 'https:'
-      ? `${window.location.origin}/mcp/${encodeURIComponent(selectedProject.token)}`
-      : null;
-  const preferredConnectURL = publicConnectURL ?? selectedProject?.connect_url ?? '';
+  // The backend orders connection URLs, preferring MCPBOX_PUBLIC_MCP_URL when set.
+  // Do not infer the MCP endpoint from the admin UI's HTTPS port.
+  const preferredConnectURL = selectedProject?.connect_url ?? '';
   const selectedProjectForProjectsView = selectedProject
     ? {
         ...selectedProject,

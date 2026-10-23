@@ -2047,6 +2047,16 @@ func (s *Server) connectURLs(r *http.Request, token string) []string {
 	urls := make([]string, 0, 16)
 	seen := make(map[string]struct{})
 
+	// Prefer an explicitly configured public MCP origin over the admin UI origin.
+	// This allows a private admin panel and public Funnel to use different ports.
+	if configured := strings.TrimRight(strings.TrimSpace(os.Getenv("MCPBOX_PUBLIC_MCP_URL")), "/"); configured != "" {
+		if parsed, err := url.Parse(configured); err == nil && parsed.Scheme == "https" && parsed.Host != "" && parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == "" && (parsed.Path == "" || parsed.Path == "/") {
+			publicURL := parsed.Scheme + "://" + parsed.Host + "/mcp/" + url.PathEscape(token)
+			seen[publicURL] = struct{}{}
+			urls = append(urls, publicURL)
+		}
+	}
+
 	appendCandidate := func(candidateHost, requestPath string) {
 		candidateHost = strings.TrimSpace(candidateHost)
 		if candidateHost == "" {

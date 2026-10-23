@@ -27,6 +27,28 @@ func TestConnectMessageURLUsesPublicRuntimePath(t *testing.T) {
 	}
 }
 
+func TestPublicMCPURLPreferredOverPrivateAdminAddress(t *testing.T) {
+	t.Setenv("MCPBOX_PUBLIC_MCP_URL", "https://mcp.example.com")
+	server := &Server{connectHost: "127.0.0.1", connectPort: 38182}
+	request := httptest.NewRequest("GET", "https://admin.example.com:10000/api/projects", nil)
+
+	urls := server.connectURLs(request, "project-token")
+	if len(urls) == 0 || urls[0] != "https://mcp.example.com/mcp/project-token" {
+		t.Fatalf("first connection URL = %v, want public MCP URL", urls)
+	}
+}
+
+func TestInvalidPublicMCPURLFallsBackToListener(t *testing.T) {
+	t.Setenv("MCPBOX_PUBLIC_MCP_URL", "http://localhost:38182")
+	server := &Server{connectHost: "127.0.0.1", connectPort: 38182}
+	request := httptest.NewRequest("GET", "http://localhost:38181/api/projects", nil)
+
+	urls := server.connectURLs(request, "project-token")
+	if len(urls) == 0 || urls[0] != "http://127.0.0.1:38182/mcp/project-token" {
+		t.Fatalf("first connection URL = %v, want MCP listener fallback", urls)
+	}
+}
+
 func TestOAuthRoutesAreOnlyOnMCPListener(t *testing.T) {
 	t.Parallel()
 
