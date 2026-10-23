@@ -85,6 +85,11 @@ export function CLIView({ language = 'en' }: { language?: 'ru' | 'en' }) {
 
 export function ProjectCLIPanel({ projectID, language = 'en', onChanged }: { projectID: number; language?: 'ru' | 'en'; onChanged?: () => void | Promise<void> }) {
   const t = copy[language];
+  const ru = language === 'ru';
+  const [directoryMode, setDirectoryMode] = useState('restricted');
+  const [directories, setDirectories] = useState<string[]>([]);
+  const [directoryDraft, setDirectoryDraft] = useState('');
+  const [directoriesDirty, setDirectoriesDirty] = useState(false);
   const [items, setItems] = useState<CLIEntry[]>([]);
   const [connected, setConnected] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -93,12 +98,24 @@ export function ProjectCLIPanel({ projectID, language = 'en', onChanged }: { pro
   async function load() {
     setLoading(true);
     try {
-      const [all, links] = await Promise.all([cliRequest<{ items: CLIEntry[] }>('/api/cli'), cliRequest<{ items: CLIEntry[] }>(`/api/projects/${projectID}/cli`)]);
+      const [all, links, policy] = await Promise.all([cliRequest<{ items: CLIEntry[] }>('/api/cli'), cliRequest<{ items: CLIEntry[] }>(`/api/projects/${projectID}/cli`), cliRequest<{ mode: string; allowed_directories: string[] }>(`/api/projects/${projectID}/cli/directories`)]);
+      setDirectoryMode(policy.mode); setDirectories(policy.allowed_directories); setDirectoriesDirty(false); setDirectoryDraft('');
       setItems(all.items.filter(item => item.is_enabled)); setConnected(links.items.map(item => item.id)); setError(null);
     } catch (e) { setError(e instanceof Error ? e.message : t.error); }
     finally { setLoading(false); }
   }
   useEffect(() => { void load(); }, [projectID]);
+  async function saveDirectories() {
+    setBusy(true); setError(null);
+    try {
+      const folder = directoryDraft.trim();
+      const next = folder && !directories.includes(folder) ? [...directories, folder] : directories;
+      const policy = await cliRequest<{ mode: string; allowed_directories: string[] }>(`/api/projects/${projectID}/cli/directories`, { method: 'PUT', body: JSON.stringify({ mode: directoryMode, allowed_directories: next }) });
+      setDirectoryMode(policy.mode); setDirectories(policy.allowed_directories); setDirectoryDraft(''); setDirectoriesDirty(false);
+      await onChanged?.();
+    } catch (e) { setError(e instanceof Error ? e.message : t.error); }
+    finally { setBusy(false); }
+  }
   async function toggle(item: CLIEntry, enabled: boolean) {
     setBusy(true); setError(null);
     try {
@@ -110,6 +127,21 @@ export function ProjectCLIPanel({ projectID, language = 'en', onChanged }: { pro
   }
   return <div className="space-y-4 rounded-2xl border border-border bg-card p-6"><div className="flex items-center justify-between"><div><h2 className="text-lg font-semibold">{t.project}</h2><p className="text-sm text-muted-foreground">{t.projectIntro}</p></div><Button variant="outline" disabled={busy || loading} onClick={() => void load()}>{t.refresh}</Button></div>
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+    {!loading && <fieldset disabled={busy} className="space-y-3 rounded-xl border border-border p-4">
+      <legend className="px-2 font-medium">{ru ? 'Рабочие папки CLI для этого проекта' : 'CLI working folders for this project'}</legend>
+      <p className="text-sm text-muted-foreground">{ru ? 'Общие для всех CLI проекта. Модель выбирает рабочую папку при вызове команды.' : 'Shared by all CLI integrations in this project. The model chooses a working folder when calling a command.'}</p>
+      <div className="flex flex-wrap gap-4">
+        <label className="flex items-center gap-2 text-sm"><input type="radio" name={`cli-directories-${projectID}`} checked={directoryMode === 'restricted'} onChange={() => { setDirectoryMode('restricted'); setDirectoriesDirty(true); }} />{ru ? 'Указанные папки и подкаталоги' : 'Listed folders and subfolders'}</label>
+        <label className="flex items-center gap-2 text-sm"><input type="radio" name={`cli-directories-${projectID}`} checked={directoryMode === 'all'} onChange={() => { setDirectoryMode('all'); setDirectoriesDirty(true); }} />{ru ? 'Все папки' : 'All folders'}</label>
+      </div>
+      {directoryMode === 'restricted' && <div className="space-y-2">
+        {directories.map((folder, index) => <div key={folder} className="flex items-center gap-2"><code className="min-w-0 flex-1 break-all text-sm">{folder}{index === 0 && <span className="ml-2 font-sans text-xs text-muted-foreground">{ru ? '(по умолчанию)' : '(default)'}</span>}</code><Button variant="outline" size="sm" aria-label={`${ru ? 'Удалить папку' : 'Remove folder'} ${folder}`} onClick={() => { setDirectories(current => current.filter(value => value !== folder)); setDirectoriesDirty(true); }}><Trash2 className="h-4 w-4" /></Button></div>)}
+        <div className="flex gap-2"><Input aria-label={ru ? 'Абсолютный путь к папке' : 'Absolute folder path'} placeholder={ru ? 'Абсолютный путь на хосте MCPBox' : 'Absolute path on the MCPBox host'} value={directoryDraft} onChange={event => setDirectoryDraft(event.target.value)} /><Button variant="outline" disabled={!directoryDraft.trim()} onClick={() => { const folder = directoryDraft.trim(); if (folder && !directories.includes(folder)) { setDirectories(current => [...current, folder]); setDirectoriesDirty(true); } setDirectoryDraft(''); }}>{ru ? 'Добавить папку' : 'Add folder'}</Button></div>
+        {!directories.length && <p className="text-xs text-muted-foreground">{ru ? 'Без папок используется временный каталог; выбрать другую папку нельзя.' : 'Without listed folders, commands use a temporary directory; other working folders cannot be selected.'}</p>}
+      </div>}
+      <p className="text-xs text-muted-foreground">{ru ? 'Это выбор рабочей папки, не файловая песочница. Команда работает с правами учётной записи MCPBox. Разрешённые операции и аргументы по-прежнему проверяются.' : 'This controls working folders, not filesystem isolation. Commands run with the MCPBox account permissions. Approved operations and arguments are still enforced.'}</p>
+      <Button disabled={busy || (!directoriesDirty && !directoryDraft.trim())} onClick={() => void saveDirectories()}>{ru ? 'Сохранить папки' : 'Save folders'}</Button>
+    </fieldset>}
     {loading ? <LoaderCircle className="animate-spin" /> : !items.length ? <p className="text-muted-foreground">{t.noActive}</p> : items.map(item => <label key={item.id} className="flex items-center gap-3 rounded-xl border border-border p-4"><Checkbox disabled={busy} checked={connected.includes(item.id)} onCheckedChange={value => void toggle(item, value === true)} /><span><span className="font-medium">{item.name}</span><span className="ml-2 text-xs text-muted-foreground">{item.slug}</span><span className="block text-sm text-muted-foreground">{item.description}</span></span></label>)}
   </div>;
 }

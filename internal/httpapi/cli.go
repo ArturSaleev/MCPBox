@@ -21,6 +21,8 @@ func (s *Server) registerCLIRoutes() {
 	s.mux.HandleFunc("PUT /api/cli/{cliID}", s.handleSaveCLI)
 	s.mux.HandleFunc("DELETE /api/cli/{cliID}", s.handleDeleteCLI)
 	s.mux.HandleFunc("GET /api/cli/{cliID}/commands", s.handleCLICommands)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/cli/directories", s.handleProjectCLIDirectories)
+	s.mux.HandleFunc("PUT /api/projects/{projectID}/cli/directories", s.handleProjectCLIDirectories)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/cli", s.handleProjectCLIList)
 	s.mux.HandleFunc("PUT /api/projects/{projectID}/cli/{cliID}", s.handleProjectCLILink)
 	s.mux.HandleFunc("DELETE /api/projects/{projectID}/cli/{cliID}", s.handleProjectCLILink)

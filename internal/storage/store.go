@@ -485,17 +485,19 @@ func (s *Store) DuplicateProject(ctx context.Context, source *models.Project, na
 	var duplicatedProjectID uint
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		duplicated := &models.Project{
-			Name:                 name,
-			Description:          source.Description,
-			RootPath:             source.RootPath,
-			Token:                token,
-			IsPaused:             source.IsPaused,
-			IdentityVerification: source.IdentityVerification,
-			BearerAuthEnabled:    source.BearerAuthEnabled,
-			BearerToken:          bearerToken,
-			Prompt:               source.Prompt,
-			LlamaCppModelPath:    source.LlamaCppModelPath,
-			LlamaCppModelName:    source.LlamaCppModelName,
+			Name:                  name,
+			Description:           source.Description,
+			RootPath:              source.RootPath,
+			CLIWorkdirMode:        source.CLIWorkdirMode,
+			CLIAllowedDirectories: append([]string{}, source.CLIAllowedDirectories...),
+			Token:                 token,
+			IsPaused:              source.IsPaused,
+			IdentityVerification:  source.IdentityVerification,
+			BearerAuthEnabled:     source.BearerAuthEnabled,
+			BearerToken:           bearerToken,
+			Prompt:                source.Prompt,
+			LlamaCppModelPath:     source.LlamaCppModelPath,
+			LlamaCppModelName:     source.LlamaCppModelName,
 		}
 		if err := tx.Create(duplicated).Error; err != nil {
 			return err

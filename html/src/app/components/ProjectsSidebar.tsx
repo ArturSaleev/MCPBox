@@ -245,8 +245,8 @@ export function ProjectsSidebar({
                         className="h-10 w-full rounded-md border border-border bg-input-background px-3 text-sm outline-none transition-colors focus:border-electric-blue"
                       />
                       <span className="block text-xs text-muted-foreground">{language === 'ru'
-                        ? 'Существующий каталог на хосте MCPBox. Если пусто, CLI запускается в отдельном временном каталоге. Рабочий каталог MCP-сервера и путь FilesSystemMCP задаются отдельно.'
-                        : 'An existing directory on the MCPBox host. If empty, CLI runs in a private temporary directory. MCP server working directories and FilesSystemMCP paths are configured separately.'}</span>
+                        ? 'Начальная папка на хосте MCPBox. Список разрешённых рабочих папок или режим «Все папки» настраивается на вкладке CLI проекта. Рабочие папки MCP-серверов задаются отдельно.'
+                        : 'Initial folder on the MCPBox host. Configure allowed working folders or All folders in the project CLI tab. MCP server working folders are configured separately.'}</span>
                     </label>
 
                     <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">

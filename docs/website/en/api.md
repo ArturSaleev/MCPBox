@@ -8,6 +8,7 @@ MCPBox has a web UI and HTTP API. Every administration endpoint, including the s
 
 | Area | Main endpoints |
 | --- | --- |
+| Project CLI working folders | `GET, PUT /api/projects/{id}/cli/directories`; reads require `pro:read`, changes require `pro:admin` |
 | Service status | `GET /healthz`, `GET /api/meta` |
 | Projects | `GET, POST /api/projects`; `GET, PUT, DELETE /api/projects/{id}` |
 | Project actions | `POST /api/projects/{id}/servers`; project token, bearer-token, pause/resume, and other project actions use `POST /api/projects/{id}/…` |

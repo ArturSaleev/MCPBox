@@ -82,9 +82,10 @@ type Store interface {
 	ListProjectCLIs(context.Context, uint, bool) ([]models.CLI, error)
 }
 type Request struct {
-	CLI     string   `json:"cli"`
-	Command string   `json:"command"`
-	Args    []string `json:"args"`
+	WorkingDirectory string   `json:"working_directory,omitempty"`
+	CLI              string   `json:"cli"`
+	Command          string   `json:"command"`
+	Args             []string `json:"args"`
 }
 type Result struct {
 	Stdout    string `json:"stdout"`
@@ -140,7 +141,7 @@ func Execute(ctx context.Context, store Store, projectID uint, req Request) (*Re
 	if !allowed {
 		return nil, fmt.Errorf("%w: operation or arguments are not allowed", ErrDenied)
 	}
-	// Never accept caller-supplied cwd or environment. PATH resolution happens on
+	// Validate requested cwd against project policy; never accept caller-supplied environment. PATH resolution happens on
 	// the server, before applying the project's working directory.
 	binary, err := exec.LookPath(item.Binary)
 	if err != nil {
@@ -150,25 +151,11 @@ func Execute(ctx context.Context, store Store, projectID uint, req Request) (*Re
 	if err != nil {
 		return nil, err
 	}
-	root := project.RootPath
-	if strings.TrimSpace(root) == "" {
-		// A fresh private directory avoids inheriting the server's cwd or local
-		// project/config files. This is a cwd policy, not a filesystem sandbox.
-		root, err = os.MkdirTemp("", "mcpbox-cli-*")
-		if err != nil {
-			return nil, err
-		}
-		defer os.RemoveAll(root)
-	} else {
-		root, err = filepath.Abs(root)
-		if err != nil {
-			return nil, err
-		}
-		info, statErr := os.Stat(root)
-		if statErr != nil || !info.IsDir() {
-			return nil, errors.New("project root_path must be an existing directory")
-		}
+	root, cleanup, err := workingDirectory(project, req.WorkingDirectory)
+	if err != nil {
+		return nil, err
 	}
+	defer cleanup()
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(item.TimeoutSeconds)*time.Second)
 	defer cancel()

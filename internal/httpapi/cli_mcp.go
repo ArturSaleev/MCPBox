@@ -26,6 +26,7 @@ func projectCLITools() []aggregateTool {
 			description = "Describe one connected CLI and its exact allowed operations and argument sets."
 		}
 		if name == "cli_execute" {
+			props["working_directory"] = map[string]any{"type": "string", "description": "Optional absolute working folder on the MCPBox host. Use cli_describe directory_policy; allowed folders include descendants. This does not change the operation/argument allowlist."}
 			props["command"] = map[string]any{"type": "string", "description": "Exact operation from cli_describe (including multiword operations)."}
 			props["args"] = map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Omit or use an exact approved argument set."}
 			required = append(required, "command")
@@ -68,7 +69,7 @@ func (s *Server) callCLITool(ctx context.Context, project models.Project, name s
 	err = json.Unmarshal(arguments, &fields)
 	if err == nil {
 		for key := range fields {
-			if (key == "cli" && name != "cli_list") || ((key == "command" || key == "args") && name == "cli_execute") {
+			if (key == "cli" && name != "cli_list") || ((key == "command" || key == "args" || key == "working_directory") && name == "cli_execute") {
 				continue
 			}
 			err = fmt.Errorf("unknown argument: %s", key)
@@ -92,7 +93,12 @@ func (s *Server) callCLITool(ctx context.Context, project models.Project, name s
 			var item *models.CLI
 			item, err = cli.Describe(ctx, s.store, project.ID, req.CLI)
 			if err == nil {
-				value = map[string]any{"cli": item.Slug, "description": item.Description, "operations": item.Operations, "timeout_seconds": item.TimeoutSeconds, "max_output_bytes": item.MaxOutputBytes}
+				current, loadErr := s.store.GetProject(ctx, project.ID)
+				if loadErr != nil {
+					err = loadErr
+					break
+				}
+				value = map[string]any{"directory_policy": cli.ProjectDirectoryPolicy(current), "cli": item.Slug, "description": item.Description, "operations": item.Operations, "timeout_seconds": item.TimeoutSeconds, "max_output_bytes": item.MaxOutputBytes}
 			}
 		case "cli_execute":
 			value, err = s.executeCLI(ctx, project.ID, req, actor)

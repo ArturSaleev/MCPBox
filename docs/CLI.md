@@ -85,14 +85,40 @@ The executor rejects paused projects, missing/disabled/unlinked CLI entries,
 unknown operations and unapproved argument vectors before starting a process.
 It uses `exec.CommandContext(binary, argv...)`, never shell command strings.
 Common shell binaries are rejected. Executable resolution uses the server PATH;
-relative binary paths are rejected. The working directory is the project's
-existing `root_path` when set (a missing path or a file is rejected). When empty,
-each invocation gets a fresh private temporary directory, removed after execution.
-This avoids inheriting MCPBox's working directory or the operator's home; it does
-not restrict filesystem access. Set the project directory in the project editor
-for Git, Go, Composer and other workspace operations. MCP server `working_dir`
-and FilesSystemMCP paths are separate settings and do not populate `root_path`.
-Requests cannot override cwd or environment. Child processes receive PATH and
+relative binary paths are rejected. Working folders are configured in the project's
+CLI tab, independently of global CLI definitions. The project can allow a list
+of absolute existing folders (including their subfolders), or explicitly allow
+all folders accessible to the MCPBox OS account. All CLI links in the project
+share this policy; linking the same CLI elsewhere does not share its folders.
+
+`cli_describe` returns `directory_policy`. `cli_execute` and the admin execute API
+accept optional `working_directory`, an absolute host path. Requested directories
+are checked against the current project policy, resolving symlinks before the
+containment check. Relative, missing, non-directory and out-of-policy paths are
+rejected. With an explicit restricted policy, omitting the folder uses the first
+listed folder, or a fresh private temporary folder when the list is empty. The
+temporary folder is removed after execution. In all-folders mode, omission keeps
+the existing project `root_path` default, or uses a temporary folder if empty.
+Existing projects without a saved policy retain their previous `root_path` or
+temporary-directory behavior. Saving an empty restricted list removes permission
+to choose any other working folder. Requests cannot override environment.
+
+GET/PUT `/api/projects/{projectID}/cli/directories` reads/saves
+`{"mode":"restricted","allowed_directories":["/srv/repos"]}` or
+`{"mode":"all","allowed_directories":[]}`. Reads require `pro:read`; writes
+require `pro:admin`. Changes apply to subsequent calls. New database columns are
+additive; older binaries ignore these columns and use legacy `root_path` behavior.
+Keep the columns and data when rolling back.
+MCP server working folders and FilesSystemMCP paths are separate settings.
+This policy controls cwd selection, not filesystem access: approved operations
+can still access paths according to their arguments and OS permissions.
+
+Example: `{"cli":"git","command":"fetch","working_directory":"/srv/repos/app"}`.
+Register `fetch` and `pull` as allowed operations before use; argument allowlists
+remain unchanged. Directory lists and request paths are not written to the CLI
+audit events.
+
+Child processes receive PATH and
 basic locale/terminal settings, not MCPBox's secret-bearing server environment.
 Stdin is closed; interactive operations are unsupported.
 

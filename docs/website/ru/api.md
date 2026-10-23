@@ -8,6 +8,7 @@
 
 | Раздел | Основные endpoints |
 | --- | --- |
+| Рабочие папки CLI проекта | `GET, PUT /api/projects/{id}/cli/directories`; чтение — `pro:read`, изменение — `pro:admin` |
 | Статус сервиса | `GET /healthz`, `GET /api/meta` |
 | Проекты | `GET, POST /api/projects`; `GET, PUT, DELETE /api/projects/{id}` |
 | Действия проекта | `POST /api/projects/{id}/servers`; токены, пауза/возобновление и прочие действия — `POST /api/projects/{id}/…` |
